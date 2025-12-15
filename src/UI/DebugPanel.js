@@ -71,7 +71,7 @@ export class DebugPanel {
     }
 
     setupTerrainControls() {
-        const folder = this.pane.addFolder({ title: 'Terrain' });
+        const folder = this.pane.addFolder({ title: 'Terrain', expanded: false });
         const params = this.game.planet.terrain.params;
         
         folder.addBinding({ version: '1.0.1' }, 'version', { label: 'Version', readonly: true });
@@ -97,6 +97,19 @@ export class DebugPanel {
              }
         });
         
+        // Shadow Distance (frustum size)
+        folder.addBinding(this.game, 'shadowDistance', { min: 50, max: 400, step: 10, label: 'Shadow Distance' }).on('change', () => {
+            const d = this.game.shadowDistance;
+            const sun = this.game.sunLight;
+            if (sun) {
+                sun.shadow.camera.left = -d;
+                sun.shadow.camera.right = d;
+                sun.shadow.camera.top = d;
+                sun.shadow.camera.bottom = -d;
+                sun.shadow.camera.updateProjectionMatrix();
+            }
+        });
+        
         folder.addButton({ title: 'Regenerate' }).on('click', () => {
             this.regeneratePlanet();
         });
@@ -114,7 +127,7 @@ export class DebugPanel {
         });
         
         // Camera Controls (System 4.0)
-        const cameraFolder = this.pane.addFolder({ title: 'Camera' });
+        const cameraFolder = this.pane.addFolder({ title: 'Camera', expanded: false });
         cameraFolder.addBinding(this.game.cameraControls.config, 'minDistance', {
             label: 'Min Distance',
             min: 0,
@@ -183,7 +196,7 @@ export class DebugPanel {
         // I'll include these in the replacement content.
         
         // Advanced Terrain
-        const advFolder = this.pane.addFolder({ title: 'Advanced Terrain' });
+        const advFolder = this.pane.addFolder({ title: 'Advanced Terrain', expanded: false });
         
         advFolder.addBinding(params, 'noiseType', {
             label: 'Noise Type',
@@ -244,7 +257,7 @@ export class DebugPanel {
     }
 
     setupUnitControls() {
-        const unitFolder = this.pane.addFolder({ title: 'Unit & Vision' });
+        const unitFolder = this.pane.addFolder({ title: 'Unit & Vision', expanded: false });
         unitFolder.addBinding(this.game.unitParams, 'speed', { min: 1, max: 20 });
         unitFolder.addBinding(this.game.unitParams, 'turnSpeed', { min: 0.1, max: 5.0 });
         unitFolder.addBinding(this.game.unitParams, 'groundOffset', { min: -5.0, max: 10.0, label: 'Hover Height' });

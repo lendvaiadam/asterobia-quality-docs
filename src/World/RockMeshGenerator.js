@@ -64,7 +64,11 @@ export class RockMeshGenerator {
         // 7. Recompute Normals for correct lighting
         geometry.computeVertexNormals();
         
-        // 8. Generate Vertex Colors (Procedural Palette)
+        // 8. Update bounding info for accurate raycasting
+        geometry.computeBoundingSphere();
+        geometry.computeBoundingBox();
+        
+        // 9. Generate Vertex Colors (Procedural Palette)
         this._applyVertexColors(geometry, params);
 
         return { geometry, gameplayData: { standableTopCenter: new THREE.Vector3(0, scale.y * radius, 0) } };

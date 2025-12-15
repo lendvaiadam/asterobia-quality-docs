@@ -21,34 +21,38 @@ export class Planet {
         const material = new THREE.MeshPhysicalMaterial({
             color: 0x4488aa,
             transparent: true,
-            opacity: 0.5,
+            opacity: 0.6,
             roughness: 0.1,
             metalness: 0.1,
             side: THREE.DoubleSide
         });
-
+        
+        // Water shader with FOW and simple waves
+        const self = this;
         material.onBeforeCompile = (shader) => {
+            // Wave uniforms
+            shader.uniforms.uTime = { value: 0 };
+            shader.uniforms.uWaveHeight = { value: 0.05 };
+            
+            // FOW uniforms
             shader.uniforms.uFogTexture = { value: null };
             shader.uniforms.uVisibleTexture = { value: null };
-            shader.uniforms.uUVScale = { value: new THREE.Vector2(1, 1) };
-            shader.uniforms.uUVOffset = { value: new THREE.Vector2(0, 0) };
-            shader.uniforms.uDebugMode = { value: 0 };
-            shader.uniforms.uFowColor = { value: new THREE.Color(0x000000) };
-            shader.uniforms.uStarDensity = { value: 0.85 }; // 0.5 = 50% dense, 0.95 = 5% sparse
-
-            shader.fragmentShader = `
-                uniform sampler2D uFogTexture;
-                uniform sampler2D uVisibleTexture;
-                uniform vec2 uUVScale;
-                uniform vec2 uUVOffset;
-                uniform int uDebugMode;
-                uniform vec3 uFowColor;
-                uniform float uStarDensity;
-            ` + shader.fragmentShader;
             
+            // Vertex shader - add time uniform and wave displacement
             shader.vertexShader = `
+                uniform float uTime;
+                uniform float uWaveHeight;
                 varying vec3 vWorldPosition;
             ` + shader.vertexShader;
+            
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `
+                #include <begin_vertex>
+                // No vertex displacement - water surface stays still
+                // Surface ripples will be done in fragment shader
+                `
+            );
             
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <worldpos_vertex>',
@@ -58,67 +62,77 @@ export class Planet {
                 `
             );
             
+            // Fragment shader - FOW integration
             shader.fragmentShader = `
+                uniform sampler2D uFogTexture;
+                uniform sampler2D uVisibleTexture;
                 varying vec3 vWorldPosition;
             ` + shader.fragmentShader;
             
             shader.fragmentShader = shader.fragmentShader.replace(
                 '#include <dithering_fragment>',
                 `
-                vec3 dir = normalize(vWorldPosition); 
+                // Calculate spherical UV for FOW lookup
+                vec3 dir = normalize(vWorldPosition);
                 float u = 0.5 + atan(dir.z, dir.x) / (2.0 * 3.14159265);
                 float v = 0.5 + asin(dir.y) / 3.14159265;
                 
-                u = u * uUVScale.x + uUVOffset.x;
-                v = v * uUVScale.y + uUVOffset.y;
-                
-                if (uDebugMode == 1) {
-                    gl_FragColor = vec4(u, v, 0.0, 1.0);
-                    return;
-                }
-
+                // Sample FOW textures
                 vec4 explored = texture2D(uFogTexture, vec2(u, v));
                 vec4 visible = texture2D(uVisibleTexture, vec2(u, v));
                 
-                float isVisible = visible.r; 
+                float isVisible = visible.r;
                 float isExplored = explored.r;
-                
-                if (uDebugMode == 2) {
-                    gl_FragColor = vec4(isVisible, isExplored, 0.0, 1.0); 
-                    return;
-                }
                 
                 vec3 finalColor = gl_FragColor.rgb;
                 
                 if (isVisible > 0.1) {
-                    // Visible - brighter, more vibrant water
+                    // Visible - bright water
                     finalColor = finalColor * 1.2;
                 } else if (isExplored > 0.1) {
-                    // Explored but not visible - darker "memory" with blue tint
+                    // Explored - dark memory water
                     float gray = dot(finalColor, vec3(0.299, 0.587, 0.114));
-                    gray = pow(gray, 1.8); // Stronger contrast curve
                     vec3 desaturated = vec3(gray);
-                    vec3 nightColor = vec3(0.01, 0.02, 0.05); // Darker blue night tint
-                    // Even darker: 0.15 multiplier (was 0.2)
-                    finalColor = mix(finalColor, desaturated, 0.9) * 0.15 + nightColor * 0.15;
+                    finalColor = mix(finalColor, desaturated, 0.8) * 0.3;
                 } else {
-                    // UNEXPLORED WATER - COMPLETELY INVISIBLE
-                    // Water in unexplored areas should not be visible at all
+                    // Unexplored - invisible
                     discard;
                 }
                 
-                // Preserve alpha for water transparency
-                float finalAlpha = gl_FragColor.a;
-                
-                gl_FragColor = vec4(finalColor, finalAlpha);
+                gl_FragColor = vec4(finalColor, gl_FragColor.a);
                 #include <dithering_fragment>
                 `
             );
             
+            // Store shader reference
+            material.waveShader = shader;
             material.materialShader = shader;
         };
         
+        // Store material for animation
+        this.waterMaterial = material;
+        this.waterTime = 0;
+        
         return new THREE.Mesh(geometry, material);
+    }
+    
+    // Call this each frame to animate water
+    updateWater(dt, units = [], fogOfWar = null) {
+        if (!this.waterTime) this.waterTime = 0;
+        this.waterTime += dt;
+        
+        if (this.waterMaterial && this.waterMaterial.waveShader) {
+            const shader = this.waterMaterial.waveShader;
+            
+            // Update time for wave animation
+            shader.uniforms.uTime.value = this.waterTime;
+            
+            // Update FOW textures if available
+            if (fogOfWar) {
+                shader.uniforms.uFogTexture.value = fogOfWar.exploredTarget?.texture || null;
+                shader.uniforms.uVisibleTexture.value = fogOfWar.visibleTarget?.texture || null;
+            }
+        }
     }
 
     createMesh() {
@@ -149,12 +163,38 @@ export class Planet {
         }
 
         geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        
+        // Generate spherical UVs for terrain texture
+        const uvs = [];
+        for (let i = 0; i < positions.count; i++) {
+            v3.set(positions.getX(i), positions.getY(i), positions.getZ(i)).normalize();
+            // Spherical UV mapping (longitude/latitude)
+            const u = 0.5 + Math.atan2(v3.z, v3.x) / (2 * Math.PI);
+            const vCoord = 0.5 + Math.asin(v3.y) / Math.PI;
+            // Tile the texture for detail (adjustable via textureRepeat)
+            const textureRepeat = 20; // Higher = more tiling
+            uvs.push(u * textureRepeat, vCoord * textureRepeat);
+        }
+        geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        
         geometry.computeVertexNormals();
+        
+        // Load sand texture
+        const textureLoader = new THREE.TextureLoader();
+        const sandDiffuse = textureLoader.load('assets/textures/sand_1.png');
+        const sandNormal = textureLoader.load('assets/textures/sand_1_normal.png');
+        
+        // Texture tiling settings
+        sandDiffuse.wrapS = sandDiffuse.wrapT = THREE.RepeatWrapping;
+        sandNormal.wrapS = sandNormal.wrapT = THREE.RepeatWrapping;
 
         const material = new THREE.MeshStandardMaterial({
+            map: sandDiffuse,
+            normalMap: sandNormal,
+            normalScale: new THREE.Vector2(0.5, 0.5),
             vertexColors: true,
-            roughness: 0.8,
-            metalness: 0.1,
+            roughness: 0.9,
+            metalness: 0.05,
             flatShading: false
         });
 
@@ -165,6 +205,11 @@ export class Planet {
             shader.uniforms.uUVOffset = { value: new THREE.Vector2(0, 0) };
             shader.uniforms.uDebugMode = { value: 0 };
             shader.uniforms.uFowColor = { value: new THREE.Color(0x000000) };
+            
+            // Tri-planar texturing uniforms
+            shader.uniforms.uTextureScale = { value: 0.5 }; // World-space texture repeat
+            shader.uniforms.uUseTriPlanar = { value: 1 }; // 1 = tri-planar, 0 = UV-based
+            shader.uniforms.uBlendSharpness = { value: 2.0 }; // Higher = sharper blend between projections
 
             shader.fragmentShader = `
                 uniform sampler2D uFogTexture;
@@ -173,6 +218,24 @@ export class Planet {
                 uniform vec2 uUVOffset;
                 uniform int uDebugMode;
                 uniform vec3 uFowColor;
+                uniform float uTextureScale;
+                uniform int uUseTriPlanar;
+                uniform float uBlendSharpness;
+                
+                // Tri-planar sampling function
+                vec4 triPlanarSample(sampler2D tex, vec3 worldPos, vec3 normal, float scale) {
+                    // Blending weights based on normal direction
+                    vec3 blending = pow(abs(normal), vec3(uBlendSharpness));
+                    blending /= (blending.x + blending.y + blending.z);
+                    
+                    // Sample along each axis
+                    vec4 xAxis = texture2D(tex, worldPos.yz * scale);
+                    vec4 yAxis = texture2D(tex, worldPos.xz * scale);
+                    vec4 zAxis = texture2D(tex, worldPos.xy * scale);
+                    
+                    // Blend samples
+                    return xAxis * blending.x + yAxis * blending.y + zAxis * blending.z;
+                }
             ` + shader.fragmentShader;
             
             shader.vertexShader = `
@@ -222,14 +285,11 @@ export class Planet {
                 if (isVisible > 0.1) {
                     // Visible - keep original water color
                 } else if (isExplored > 0.1) {
-                    // Explored but not visible - darker, higher contrast "memory"
+                    // Explored but not visible - 50% darker, 50% desaturated
                     float gray = dot(finalColor, vec3(0.299, 0.587, 0.114));
-                    // Boost contrast by applying a power curve
-                    gray = pow(gray, 1.5);
                     vec3 desaturated = vec3(gray);
-                    vec3 nightColor = vec3(0.02, 0.04, 0.08); 
-                    // Much darker: 0.2 multiplier (was 0.4), more desaturated (0.95 vs 0.8)
-                    finalColor = mix(finalColor, desaturated, 0.95) * 0.2 + nightColor * 0.1;
+                    // 50% desaturation, 50% darkening
+                    finalColor = mix(finalColor, desaturated, 0.5) * 0.5;
                 } else {
                     // Unexplored terrain - SOLID BLACK (stars render on top)
                     finalColor = vec3(0.0, 0.0, 0.0);

@@ -37,11 +37,20 @@ export class SphericalCameraController4 {
             // Chase Config
             chaseDistance: 8.0,
             chaseHeight: 4.0,
-            chaseResponsiveness: 0.08, // Smoother (Inertia)
+            chaseResponsiveness: 0.015, // Ultra smooth, heavy balloon-like inertia
             // Collision Config
             minRockDistance: 2.0,      // Min distance from rock surface
             minUnitDistance: 1.5,      // Min distance from unit surface
         };
+        
+        // Log camera config to console for tuning
+        console.log('[Camera Config]', {
+            damping: this.config.dampingFactor,
+            chaseResponsiveness: this.config.chaseResponsiveness,
+            zoomDamping: this.config.zoomDamping,
+            zoomInImpulse: this.config.zoomInImpulse,
+            zoomOutImpulse: this.config.zoomOutImpulse
+        });
 
         // State Flags
         this.isDragging = false;
@@ -93,6 +102,10 @@ export class SphericalCameraController4 {
         this.targetObstructionHeight = 0;
         this.currentObstructionHeight = 0;
         
+        // Camera Mode: 'drone' (top-down civ-style) or 'thirdPerson' (behind unit)
+        this.chaseMode = 'drone';
+        this.isTransitioningMode = false;
+        
         // Relative Orbit Offsets (Radians)
         this.chaseAzimuthOffset = 0;
         this.chaseElevationOffset = 0;
@@ -115,9 +128,151 @@ export class SphericalCameraController4 {
         this.isFlying = false;
         this.flyFn = null;
         
+        // Smooth Transition State (for zoomCameraToPath)
+        this.transitionFn = null;
+        
         // View Offset State (Vertical Shift)
         this.currentViewOffsetY = 0;
         this.targetViewOffsetY = 0;
+    }
+    
+    /**
+     * Smooth transition to a target position and look-at point.
+     * Uses quintic ease-in-out for premium feel.
+     */
+    smoothTransitionToTarget(targetPos, lookAtPoint, duration = 1.5) {
+        this.isFlying = true;
+        this.chaseTarget = null;
+        
+        const startPos = this.camera.position.clone();
+        const startForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        const startLookAt = startPos.clone().addScaledVector(startForward, 50);
+        const startUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+        
+        // End up vector: surface normal at target position
+        const endUp = targetPos.clone().normalize();
+        
+        let elapsed = 0;
+        
+        this.flyFn = (dt) => {
+            elapsed += dt;
+            const t = Math.min(1.0, elapsed / duration);
+            
+            // Quintic ease-in-out
+            const ease = t < 0.5 
+                ? 16 * t * t * t * t * t 
+                : 1 - Math.pow(-2 * t + 2, 5) / 2;
+            
+            // Interpolate position
+            const currentPos = new THREE.Vector3().lerpVectors(startPos, targetPos, ease);
+            
+            // Interpolate look-at point
+            const currentLookAt = new THREE.Vector3().lerpVectors(startLookAt, lookAtPoint, ease);
+            
+            // Interpolate up vector
+            const currentUp = new THREE.Vector3().lerpVectors(startUp, endUp, ease).normalize();
+            
+            // Apply
+            this.camera.position.copy(currentPos);
+            this.targetPosition.copy(currentPos);
+            
+            // Look at target
+            const lookM = new THREE.Matrix4();
+            lookM.lookAt(currentPos, currentLookAt, currentUp);
+            const targetQuat = new THREE.Quaternion().setFromRotationMatrix(lookM);
+            
+            this.camera.quaternion.copy(targetQuat);
+            this.targetQuaternion.copy(targetQuat);
+            
+            if (t >= 1.0) {
+                this.isFlying = false;
+                return true;
+            }
+            return false;
+        };
+    }
+    
+    /**
+     * Smoothly transition from drone view to third-person behind the unit.
+     * Called when user starts keyboard control.
+     * Uses slow, balloon-like movement for a premium feel.
+     */
+    transitionToThirdPerson(unit) {
+        if (!unit || this.chaseMode === 'thirdPerson') return;
+        
+        this.chaseMode = 'thirdPerson';
+        this.isTransitioningMode = true;
+        this.chaseTarget = unit;
+        
+        const startPos = this.camera.position.clone();
+        const startQuat = this.camera.quaternion.clone();
+        
+        // Calculate third-person target position (behind and slightly above unit)
+        const strictUp = unit.position.clone().normalize();
+        const rawForward = new THREE.Vector3(0, 0, 1);
+        if (unit.headingQuaternion) rawForward.applyQuaternion(unit.headingQuaternion);
+        
+        const strictRight = new THREE.Vector3().crossVectors(strictUp, rawForward).normalize();
+        const strictForward = new THREE.Vector3().crossVectors(strictRight, strictUp).normalize();
+        
+        // Target: behind and above
+        const targetPos = unit.position.clone()
+            .addScaledVector(strictForward, -this.config.chaseDistance)
+            .addScaledVector(strictUp, this.config.chaseHeight);
+        
+        // Look at unit
+        const lookAt = unit.position.clone();
+        const endUp = strictUp.clone();
+        
+        // SLOW transition for balloon-like feel
+        const duration = 2.5;
+        let elapsed = 0;
+        
+        this.flyFn = (dt) => {
+            elapsed += dt;
+            const t = Math.min(1.0, elapsed / duration);
+            
+            // Smooth cubic ease-in-out (softer than quintic for balloon feel)
+            // Position ease - starts immediately
+            const ease = t < 0.5 
+                ? 4 * t * t * t 
+                : 1 - Math.pow(-2 * t + 2, 3) / 2;
+            
+            // POI/Look-at ease - starts 0.15s LATER for cinematic camera-leads-focus effect
+            const poiDelay = 0.15 / duration; // Delay as fraction of duration
+            const poiT = Math.max(0, Math.min(1.0, (elapsed - 0.15) / (duration - 0.15)));
+            const poiEase = poiT < 0.5 
+                ? 4 * poiT * poiT * poiT 
+                : 1 - Math.pow(-2 * poiT + 2, 3) / 2;
+            
+            // Interpolate position (starts first)
+            const currentPos = new THREE.Vector3().lerpVectors(startPos, targetPos, ease);
+            this.camera.position.copy(currentPos);
+            this.targetPosition.copy(currentPos);
+            
+            // Track unit position for look-at (unit may have moved)
+            // Use delayed poiEase for orientation
+            const currentLookAt = unit.position.clone();
+            const currentUp = unit.position.clone().normalize();
+            
+            // Build look-at matrix
+            const lookM = new THREE.Matrix4();
+            lookM.lookAt(currentPos, currentLookAt, currentUp);
+            const targetQuat = new THREE.Quaternion().setFromRotationMatrix(lookM);
+            
+            // Slerp quaternion with DELAYED ease (camera look trails position)
+            this.camera.quaternion.slerpQuaternions(startQuat, targetQuat, poiEase);
+            this.targetQuaternion.copy(this.camera.quaternion);
+            
+            if (t >= 1.0) {
+                this.isFlying = false;
+                this.isTransitioningMode = false;
+                return true;
+            }
+            return false;
+        };
+        
+        this.isFlying = true;
     }
 
     /**
@@ -181,8 +336,18 @@ export class SphericalCameraController4 {
         }
         
         // === CHASE MODE UPDATE ===
-        if (this.chaseTarget) {
+        // DEBUG: Log chase mode conditions
+        console.log("[CHASE DEBUG]", { 
+            hasChaseTarget: !!this.chaseTarget, 
+            isFlying: this.isFlying,
+            chaseTargetName: this.chaseTarget?.name || "null"
+        });
+        
+        // Only run chase update if NOT currently in flying animation (prevents interference)
+        if (this.chaseTarget && !this.isFlying) {
+            console.log("[CALLING updateChaseMode NOW]");
             this.updateChaseMode();
+            console.log("[AFTER updateChaseMode]");
             
             // === UNIT OCCLUSION CHECK ===
             // If unit is blocked by terrain, raise camera
@@ -216,6 +381,25 @@ export class SphericalCameraController4 {
         
         // Quaternion Slerp
         this.camera.quaternion.slerp(this.targetQuaternion, damping);
+        
+        // === CAMERA SHAKE (from rock collision) ===
+        // Read cameraShakeIntensity from chaseTarget and apply shake
+        if (this.chaseTarget && this.chaseTarget.cameraShakeIntensity > 0) {
+            const intensity = this.chaseTarget.cameraShakeIntensity;
+            const time = performance.now() * 0.001;
+            const shakeFreq = 15; // 15 Hz shake
+            
+            // Shake amplitude: intensity * base (max ~10 degrees for intensity 3)
+            const maxAngle = intensity * 3.5 * (Math.PI / 180); // ~10 degrees at intensity 3
+            const shakeAngle = maxAngle * Math.sin(time * shakeFreq * 2 * Math.PI);
+            
+            // Apply shake around camera's local Y axis
+            const shakeQuat = new THREE.Quaternion().setFromAxisAngle(
+                new THREE.Vector3(0, 1, 0), 
+                shakeAngle
+            );
+            this.camera.quaternion.multiply(shakeQuat);
+        }
         
         // Ensure matrix update
         this.camera.updateMatrixWorld();
@@ -777,6 +961,7 @@ export class SphericalCameraController4 {
         
         const duration = 5.0; // Slower, cinematic feel (was 3.5)
         let elapsed = 0;
+        console.log(`[Camera] flyTo started - duration: ${duration}s, distance: ${startPos.distanceTo(landPos).toFixed(1)}`);
         
         this.flyFn = (dt) => {
             elapsed += dt;
@@ -1166,7 +1351,7 @@ export class SphericalCameraController4 {
     }
 
     checkObstruction(unitPos, cameraPos) {
-        // Simple check: Raycast from Unit to Camera. If we hit terrain, we are blocked.
+        // Check if line of sight from unit to camera is blocked by terrain OR rocks
         const dir = cameraPos.clone().sub(unitPos);
         const dist = dir.length();
         dir.normalize();
@@ -1175,15 +1360,24 @@ export class SphericalCameraController4 {
         const start = unitPos.clone().add(dir.clone().multiplyScalar(1.0));
         
         this.raycaster.set(start, dir);
-        const hits = this.raycaster.intersectObject(this.planet.mesh, false);
         
-        if (hits.length > 0) {
-            if (hits[0].distance < dist - 1.0) {
-                 // Blocked
-                 return true;
+        // 1. Check terrain
+        const terrainHits = this.raycaster.intersectObject(this.planet.mesh, false);
+        if (terrainHits.length > 0 && terrainHits[0].distance < dist - 1.0) {
+            return true; // Blocked by terrain
+        }
+        
+        // 2. Check rocks (if available)
+        if (this.planet.rockSystem && this.planet.rockSystem.rocks) {
+            for (const rock of this.planet.rockSystem.rocks) {
+                const rockHits = this.raycaster.intersectObject(rock, false);
+                if (rockHits.length > 0 && rockHits[0].distance < dist - 0.5) {
+                    return true; // Blocked by rock
+                }
             }
         }
-        return false;
+        
+        return false; // Clear line of sight
     }
     /**
      * Set a target unit to chase.
@@ -1197,6 +1391,12 @@ export class SphericalCameraController4 {
             this.lastUnitPosition = unit.position.clone();
             this.unitWasStationary = true;
             this.balloonDriftTimer = 0;
+            
+            // Initialize obstruction check state
+            this.lastObstructionCheck = 0; // Force immediate check
+            this.lastObstructionCheckPos = unit.position.clone();
+            this.targetObstructionHeight = 0;
+            this.currentObstructionHeight = 0;
         }
     }
 
@@ -1204,23 +1404,38 @@ export class SphericalCameraController4 {
      * Updates camera target position/rotation to follow the chase target.
      */
     updateChaseMode() {
+        // DEBUG: Confirm this function is called
+        console.log("[UCM START]", { hasChaseTarget: !!this.chaseTarget });
+        
         if (!this.chaseTarget) return;
 
         const unit = this.chaseTarget;
+        // DEBUG: Check for early return
+        console.log("[UCM UNIT]", { hasHeadingQuat: !!unit.headingQuaternion, unitName: unit.name });
+        
         // Ensure unit has headingQuaternion
         if (!unit.headingQuaternion) return;
 
         // Logic 1s check (User Request)
         // Logic 1s check OR Distance check
         const now = performance.now();
-        const distSinceLast = unit.position.distanceTo(this.lastObstructionCheckPos);
+        
+        // DEBUG: Check throttle conditions
+        const timeSinceLastCheck = now - (this.lastObstructionCheck || 0);
+        console.log("[OBSTRUCTION THROTTLE]", {
+            cooldown: this.postFlyToCooldown,
+            timeSinceLastCheck: timeSinceLastCheck,
+            willRun: timeSinceLastCheck > 500 && !(this.postFlyToCooldown > 0)
+        });
         
         // Skip occlusion check during post-flyTo cooldown
         if (this.postFlyToCooldown && this.postFlyToCooldown > 0) {
             this.postFlyToCooldown -= 0.016;
             // During cooldown, keep obstruction at 0
             this.targetObstructionHeight = 0;
-        } else if (now - this.lastObstructionCheck > 1000 || distSinceLast > 2.0) {
+        } else if (now - (this.lastObstructionCheck || 0) > 500) {
+            // Check every 500ms REGARDLESS of unit movement
+            // This ensures camera rises even when unit is stationary but occluded
             this.lastObstructionCheck = now;
             this.lastObstructionCheckPos.copy(unit.position);
             
@@ -1249,14 +1464,32 @@ export class SphericalCameraController4 {
             }
             
             this.targetObstructionHeight = foundClear ? clearOffset : 20.0;
+            
+            // DEBUG: Log obstruction detection
+            console.log("[OBSTRUCTION]", { 
+                foundClear, 
+                clearOffset, 
+                target: this.targetObstructionHeight,
+                current: this.currentObstructionHeight 
+            });
         }
         
-        // Smooth obstruction height lerp
-        // Rising: smooth but decisive
-        // Descending: very slow and smooth to settle back
+        // Smooth obstruction height with ease-out/ease-in curves
+        // Rising: ease-out (fast start, slow approach) for responsive obstacle avoidance
+        // Descending: ease-in (slow start, fast at end) for smooth settling
+        const heightDiff = Math.abs(this.targetObstructionHeight - this.currentObstructionHeight);
         const isRising = this.targetObstructionHeight > this.currentObstructionHeight;
-        const obstructionLerpFactor = isRising ? 0.04 : 0.01;
-        this.currentObstructionHeight = THREE.MathUtils.lerp(this.currentObstructionHeight, this.targetObstructionHeight, obstructionLerpFactor);
+        
+        // Larger difference = faster movement (exponential approach)
+        const baseLerpFactor = isRising ? 0.06 : 0.02;
+        const speedBoost = Math.min(heightDiff / 10.0, 1.0) * 0.04; // Extra speed for large differences
+        const obstructionLerpFactor = baseLerpFactor + speedBoost;
+        
+        this.currentObstructionHeight = THREE.MathUtils.lerp(
+            this.currentObstructionHeight, 
+            this.targetObstructionHeight, 
+            obstructionLerpFactor
+        );
 
         // Recalculate basis (clean) for final positioning
         const rawForward = new THREE.Vector3(0, 0, 1).applyQuaternion(unit.headingQuaternion);

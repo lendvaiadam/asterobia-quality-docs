@@ -239,6 +239,10 @@ export class InteractionManager {
                 const cpIndex = this.mouseDownMarker.userData.controlPointIndex;
                 const newPos = this.mouseDownMarker.position.clone();
                 
+                // Store unit's current position for smooth rejoin
+                const unitCurrentPos = unit.position.clone();
+                const wasFollowingPath = unit.isFollowingPath;
+                
                 // Update control point
                 if (cpIndex >= 0 && cpIndex < unit.waypointControlPoints.length) {
                     unit.waypointControlPoints[cpIndex] = newPos;
@@ -247,6 +251,30 @@ export class InteractionManager {
                     unit.lastCommittedControlPointCount = 0;
                     unit.path = [];
                     this.game.updateWaypointCurve();
+                    
+                    // === SMOOTH REJOIN LOGIC ===
+                    // If unit was following path, smoothly transition to new path
+                    if (wasFollowingPath && unit.path && unit.path.length > 0) {
+                        // Find nearest point on new path
+                        let nearestIdx = 0;
+                        let nearestDist = Infinity;
+                        for (let i = 0; i < unit.path.length; i++) {
+                            const d = unitCurrentPos.distanceTo(unit.path[i]);
+                            if (d < nearestDist) {
+                                nearestDist = d;
+                                nearestIdx = i;
+                            }
+                        }
+                        
+                        // Insert unit's current position at the start of path
+                        // Then set pathIndex to skip to AFTER nearest point (no backtracking)
+                        unit.path.unshift(unitCurrentPos.clone());
+                        // +1 because we inserted current pos at start, +1 more to skip past nearest
+                        unit.pathIndex = Math.min(nearestIdx + 2, unit.path.length - 1);
+                        unit.isFollowingPath = true;
+                        
+                        console.log("Marker dragged: smooth rejoin from current pos, skipping to index", unit.pathIndex);
+                    }
                     
                     // Update panel if open
                     if (this.game.isFocusMode && this.game.focusedUnit) {

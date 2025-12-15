@@ -14,6 +14,7 @@ import { RockSystem } from '../World/RockSystem.js';
 import { RockDebug } from '../UI/RockDebug.js';
 import { SphericalNavMesh } from '../Navigation/SphericalNavMesh.js';
 import { NavMeshDebug } from '../UI/NavMeshDebug.js';
+import { RockCollisionSystem } from '../Physics/RockCollisionSystem.js';
 
 export class Game {
     constructor() {
@@ -76,18 +77,18 @@ export class Game {
         
         // SUNLIGHT: Main directional light for day/night
         const sunLight = new THREE.DirectionalLight(0xfffaf0, 2.0); // Warm white
-        sunLight.position.set(300, 150, 200); // Far away for parallel rays
+        sunLight.position.set(400, 0, 0); // Pure side = exact 50/50 light/shadow
         sunLight.castShadow = true;
         sunLight.shadow.mapSize.width = 4096;
         sunLight.shadow.mapSize.height = 4096;
         sunLight.shadow.camera.near = 50;
         sunLight.shadow.camera.far = 600;
-        // Large frustum to cover entire planet from distance
-        const d = 150;
-        sunLight.shadow.camera.left = -d;
-        sunLight.shadow.camera.right = d;
-        sunLight.shadow.camera.top = d;
-        sunLight.shadow.camera.bottom = -d;
+        // Shadow frustum size - adjustable via debug panel
+        this.shadowDistance = 150;
+        sunLight.shadow.camera.left = -this.shadowDistance;
+        sunLight.shadow.camera.right = this.shadowDistance;
+        sunLight.shadow.camera.top = this.shadowDistance;
+        sunLight.shadow.camera.bottom = -this.shadowDistance;
         sunLight.shadow.bias = -0.0001;
         this.sunLight = sunLight;
         this.scene.add(sunLight);
@@ -113,7 +114,7 @@ export class Game {
         this.unitParams = {
             speed: 5.0,
             turnSpeed: 2.0,
-            groundOffset: 0.27,
+            groundOffset: 0.22,
             smoothingRadius: 0.5 // Radius for terrain normal averaging
         };
         this.loadUnits();
@@ -124,6 +125,11 @@ export class Game {
         // Rocks on terrain (System V2)
         this.rockSystem = new RockSystem(this, this.planet);
         this.rockSystem.generateRocks(); // Initial generation 
+        this.planet.rockSystem = this.rockSystem; // Make accessible to Units
+        
+        // Rock Collision System (Broadphase + Slide)
+        this.rockCollision = new RockCollisionSystem(this.planet, this.rockSystem);
+        this.planet.rockCollision = this.rockCollision; // Make accessible to Units
 
         // Navigation Mesh (Spherical PathFinding)
         this.navMesh = new SphericalNavMesh(this.planet.terrain, this.rockSystem);
@@ -175,6 +181,7 @@ export class Game {
 
     loadUnits() {
         const loader = new GLTFLoader();
+        // All 5 units - Unit 1 spawns in front of camera
         const models = ['1.glb', '2.glb', '3.glb', '4.glb', '5.glb'];
         let loadedCount = 0;
         
@@ -201,16 +208,25 @@ export class Game {
                 // Scale model if needed
                 unit.mesh.scale.set(0.5, 0.5, 0.5); 
                 
-                // Random position
-                const theta = Math.random() * Math.PI * 2;
-                const phi = Math.acos(2 * Math.random() - 1);
-                const radius = this.planet.terrain.params.radius + 10;
-                
-                unit.position.set(
-                    radius * Math.sin(phi) * Math.cos(theta),
-                    radius * Math.sin(phi) * Math.sin(theta),
-                    radius * Math.cos(phi)
-                );
+                // Unit position: Unit 1 at camera-facing position (preloader center), others random
+                if (index === 0) {
+                    // UNIT 1: Fixed position - directly in front of initial camera
+                    // Camera starts looking at planet center, so place unit at "front" of planet
+                    const radius = this.planet.terrain.params.radius + 0.5;
+                    // Position at Z+ direction (initial camera typically looks toward this)
+                    unit.position.set(0, 0, radius);
+                } else {
+                    // Other units: Random position on sphere
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos(2 * Math.random() - 1);
+                    const radius = this.planet.terrain.params.radius + 10;
+                    
+                    unit.position.set(
+                        radius * Math.sin(phi) * Math.cos(theta),
+                        radius * Math.sin(phi) * Math.sin(theta),
+                        radius * Math.cos(phi)
+                    );
+                }
                 unit.snapToSurface();
                 
                 this.units.push(unit);
@@ -236,7 +252,7 @@ export class Game {
 
     // === Interaction Delegates (V3) ===
 
-    selectUnit(unit) {
+    selectUnit(unit, skipCamera = false) {
         if (this.selectedUnit === unit) return;
         
         this.deselectUnit();
@@ -244,9 +260,13 @@ export class Game {
         this.selectedUnit = unit;
         unit.setSelection(true);
         
-        // SINGLE CLICK = Show path only, NO camera follow
-        // Camera follow happens on DOUBLE CLICK via enterFocusMode
+        // Show path markers
         this.showUnitMarkers(unit);
+        
+        // ZOOM CAMERA TO SHOW FULL PATH (unless skipCamera = true)
+        if (!skipCamera) {
+            this.zoomCameraToPath(unit);
+        }
         
         console.log("Unit Selected:", unit);
         
@@ -258,6 +278,91 @@ export class Game {
             this.focusedUnit = unit;
             this.updatePanelContent(unit);
         }
+    }
+    
+    // Zoom camera to show unit's entire path with smooth transition
+    zoomCameraToPath(unit) {
+        if (!unit || !this.cameraControls) return;
+        
+        // Get all path CONTROL POINTS (waypoints) including unit position
+        const points = [unit.position.clone()];
+        
+        // Use waypointControlPoints - these are the actual user-defined waypoints
+        if (unit.waypointControlPoints && unit.waypointControlPoints.length > 0) {
+            for (const wp of unit.waypointControlPoints) {
+                points.push(wp.clone());
+            }
+        }
+        
+        if (points.length === 1) {
+            // No path - just fly to unit with standard flyTo
+            this.cameraControls.flyTo(unit);
+            return;
+        }
+        
+        // === CALCULATE BOUNDING SPHERE ===
+        const center = new THREE.Vector3();
+        for (const p of points) {
+            center.add(p);
+        }
+        center.divideScalar(points.length);
+        
+        // Find max distance from center (bounding radius)
+        let maxDist = 0;
+        for (const p of points) {
+            const d = center.distanceTo(p);
+            if (d > maxDist) maxDist = d;
+        }
+        
+        // === CALCULATE CAMERA DISTANCE ===
+        // Add 50% padding as specified for path visibility with environment context
+        const fov = this.camera.fov * Math.PI / 180;
+        const aspect = this.camera.aspect;
+        const effectiveFov = Math.min(fov, fov * aspect);
+        const cameraDistance = (maxDist * 1.8) / Math.tan(effectiveFov / 2);
+        
+        // Clamp distance to reasonable range
+        const finalDistance = Math.max(20, Math.min(200, cameraDistance + 8));
+        
+        // === CALCULATE CAMERA POSITION ===
+        // AXONOMETRIC VIEW: 45° from above, 45° from side, 45° from front
+        // Like Civilization/SimCity drone perspective
+        const centerDir = center.clone().normalize(); // "Up" direction at center
+        
+        // Get unit's forward direction
+        const unitForward = new THREE.Vector3(0, 0, 1);
+        if (unit.headingQuaternion) {
+            unitForward.applyQuaternion(unit.headingQuaternion);
+        }
+        
+        // Project forward onto tangent plane (remove radial component)
+        const tangentForward = unitForward.clone()
+            .sub(centerDir.clone().multiplyScalar(unitForward.dot(centerDir)))
+            .normalize();
+        
+        // Create orthonormal basis on tangent plane
+        const tangentRight = new THREE.Vector3().crossVectors(centerDir, tangentForward).normalize();
+        
+        // 45° angles: sin(45°) = cos(45°) = 0.707
+        const angle45 = Math.PI / 4; // 45 degrees
+        
+        // Camera offset: 
+        // - Height: finalDistance * sin(45°) above center 
+        // - Forward: finalDistance * cos(45°) * cos(45°) back
+        // - Side: finalDistance * cos(45°) * sin(45°) to the right
+        const heightOffset = finalDistance * Math.sin(angle45);
+        const horizontalDist = finalDistance * Math.cos(angle45);
+        const forwardOffset = -horizontalDist * Math.cos(angle45); // Behind
+        const sideOffset = horizontalDist * Math.sin(angle45);     // To the side
+        
+        const cameraPos = center.clone()
+            .addScaledVector(centerDir, heightOffset)          // Up
+            .addScaledVector(tangentForward, forwardOffset)    // Back
+            .addScaledVector(tangentRight, sideOffset);        // Side
+        
+        // === SMOOTH TRANSITION ===
+        // Look at center of bounding sphere
+        this.cameraControls.smoothTransitionToTarget(cameraPos, center, 1.5);
     }
     
     deselectUnit() {
@@ -298,6 +403,14 @@ export class Game {
             tabContainer.appendChild(tab);
         });
         
+        // ADD TOGGLE BUTTON (expand/collapse) to top-right of tab bar
+        const toggleBtn = document.createElement('button');
+        toggleBtn.id = 'panel-toggle-btn';
+        toggleBtn.className = 'panel-toggle-btn';
+        toggleBtn.innerHTML = '<span class="toggle-icon">▲</span>';
+        toggleBtn.title = 'Expand/Collapse Panel';
+        tabContainer.appendChild(toggleBtn);
+        
         // Update active state if a unit is already selected
         this.updateTabActiveState();
         
@@ -310,7 +423,7 @@ export class Game {
             }
         });
         
-        console.log(`Generated ${this.units.length} unit tabs`);
+        console.log(`Generated ${this.units.length} unit tabs with toggle button`);
     }
     
     setupPanelControls() {
@@ -464,23 +577,28 @@ export class Game {
     }
     
     /**
-     * Select a unit and fly to it WITHOUT opening the bottom panel.
+     * Select a unit and zoom camera to show its ENTIRE PATH.
+     * Does NOT open the bottom panel.
      */
     selectAndFlyToUnit(unit) {
         if (!unit) return;
         
         const isNewUnit = (this.selectedUnit !== unit);
         
-        // Select the unit
-        this.selectUnit(unit);
+        // Select the unit (skip camera zoom - we call it manually below)
+        this.selectUnit(unit, true);
         
-        // Camera: Fly to unit but don't open panel
-        if (this.cameraControls && isNewUnit) {
-            this.cameraControls.flyTo(unit, () => {
-                this.cameraControls.setChaseTarget(unit);
-            });
-        } else if (this.cameraControls) {
-            this.cameraControls.setChaseTarget(unit);
+        // Reset camera mode to drone (top-down view)
+        // Third-person only activates when keyboard is pressed
+        if (this.cameraControls) {
+            this.cameraControls.chaseMode = 'drone';
+            this.cameraControls.chaseTarget = null;
+        }
+        
+        // Camera: Zoom to show ENTIRE PATH (not just unit)
+        if (isNewUnit) {
+            // Call zoomCameraToPath which calculates bounding sphere of all waypoints
+            this.zoomCameraToPath(unit);
         }
         
         // Keep panel closed (don't add split-screen class)
@@ -596,6 +714,11 @@ export class Game {
         
         // Use per-unit waypoint storage
         const unit = this.selectedUnit;
+        
+        // Switch camera to CONTROL MODE (close third-person) when user starts controlling
+        if (this.cameraControls && this.cameraControls.chaseTarget === unit) {
+            this.cameraControls.setChaseTarget(unit, true); // Control mode - close third-person
+        }
         
         // If first waypoint, start from unit's CURRENT position (not where it started)
         if (unit.waypointControlPoints.length === 0) {
@@ -762,34 +885,183 @@ export class Game {
         unit.waypointCurveLine = new THREE.Mesh(tubeGeo, tubeMat);
         this.scene.add(unit.waypointCurveLine);
         
-        // === PATH SYNC ===
+        // === PATH SYNC - SMOOTH REJOIN (NO TELEPORT) ===
         const newCPCount = controlPoints.length;
         
         if (newCPCount >= 2) {
+            const oldPath = unit.path ? unit.path.slice() : null;
+            const oldPathIndex = unit.pathIndex || 0;
+            
+            // Store new permanent path
             unit.path = projectedPoints.map(p => p.clone());
             
-            // Find closest point on new path
-            let closestIdx = 0;
-            let bestDist = Infinity;
-            
-            for (let i = 0; i < unit.path.length; i++) {
-                const dist = unit.position.distanceTo(unit.path[i]);
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    closestIdx = i;
+            // === SMOOTH REJOIN LOGIC ===
+            // If unit was already moving, create transition curve instead of teleporting
+            if (oldPath && oldPath.length > 0 && unit.isFollowingPath) {
+                const unitPos = unit.position.clone();
+                const unitVelocity = unit.velocityDirection ? unit.velocityDirection.clone() : null;
+                
+                // Find the best rejoin point on NEW path:
+                // - Must be AHEAD of current position (towards next waypoint)
+                // - Should minimize transition distance while maintaining smooth curve
+                let bestRejoinIdx = 0;
+                let bestScore = Infinity;
+                
+                for (let i = 0; i < unit.path.length; i++) {
+                    const pathPoint = unit.path[i];
+                    const dist = unitPos.distanceTo(pathPoint);
+                    
+                    // Check if this point is "forward" relative to unit direction
+                    let isForward = true;
+                    if (unitVelocity && unitVelocity.lengthSq() > 0.001) {
+                        const toPoint = pathPoint.clone().sub(unitPos).normalize();
+                        const dot = toPoint.dot(unitVelocity);
+                        isForward = dot > -0.3; // Allow some side movement, reject pure backwards
+                    }
+                    
+                    if (isForward) {
+                        // Score: prefer closer points that are forward
+                        const score = dist;
+                        if (score < bestScore) {
+                            bestScore = score;
+                            bestRejoinIdx = i;
+                        }
+                    }
                 }
+                
+                // If unit is already close to path, just continue normally
+                const rejoinDist = unitPos.distanceTo(unit.path[bestRejoinIdx]);
+                
+                if (rejoinDist < 0.3) {
+                    // Already on path, no transition needed
+                    unit.pathIndex = bestRejoinIdx;
+                    unit.transitionPath = null;
+                } else {
+                    // === BEZIER-LIKE TRANSITION CURVE ===
+                    // Goal: Continue current direction, then smooth arc to rejoin path
+                    // Target the ORIGINAL waypoint, not just the closest point
+                    
+                    const groundOffset = unit.groundOffset || 0.5;
+                    
+                    // The unit should aim towards its ORIGINAL target (next waypoint)
+                    // Find a rejoin point that's BETWEEN current position and target
+                    const originalTargetIdx = oldPathIndex < oldPath.length ? oldPathIndex : 0;
+                    
+                    // Calculate a blend point between closest path point and forward
+                    let blendedRejoinIdx = bestRejoinIdx;
+                    const lookAhead = Math.min(20, Math.floor(unit.path.length * 0.1)); // Look up to 10% forward
+                    if (bestRejoinIdx + lookAhead < unit.path.length) {
+                        // Pick a point slightly ahead for smoother entry
+                        blendedRejoinIdx = bestRejoinIdx + Math.floor(lookAhead / 2);
+                    }
+                    
+                    const rejoinPoint = unit.path[blendedRejoinIdx];
+                    
+                    // === CUBIC BEZIER CONTROL POINTS ===
+                    // P0: Current position
+                    // P1: Continue in current direction (creates smooth exit tangent)
+                    // P2: Approach point (creates smooth entry tangent)  
+                    // P3: Rejoin point
+                    
+                    let forwardProjection = 2.0; // How far to project current direction
+                    let approachDistance = rejoinDist * 0.3; // Approach control point distance
+                    
+                    let continuationPoint;
+                    if (unitVelocity && unitVelocity.lengthSq() > 0.001) {
+                        // Project forward based on velocity (continue current direction)
+                        continuationPoint = unitPos.clone().add(unitVelocity.clone().multiplyScalar(forwardProjection));
+                    } else {
+                        // Fallback: use tangent
+                        const radialDir = unitPos.clone().normalize();
+                        const tangent = new THREE.Vector3(-radialDir.y, radialDir.x, 0).normalize();
+                        continuationPoint = unitPos.clone().add(tangent.multiplyScalar(forwardProjection));
+                    }
+                    
+                    // Approach point: positioned to create smooth entry angle
+                    // Vector from rejoin back towards continuation point
+                    let afterRejoinIdx = blendedRejoinIdx + 1;
+                    if (afterRejoinIdx >= unit.path.length) {
+                        afterRejoinIdx = unit.isPathClosed ? 0 : unit.path.length - 1;
+                    }
+                    const afterRejoin = unit.path[afterRejoinIdx];
+                    const rejoinDirection = afterRejoin.clone().sub(rejoinPoint).normalize();
+                    const approachPoint = rejoinPoint.clone().sub(rejoinDirection.multiplyScalar(approachDistance));
+                    
+                    // Build cubic Bezier via CatmullRom (using extension points for tangent matching)
+                    const transitionControlPoints = [
+                        unitPos.clone().sub(unitVelocity ? unitVelocity.clone().multiplyScalar(1) : new THREE.Vector3(0,0,0)), // Extension for entry tangent
+                        unitPos.clone(),
+                        continuationPoint,
+                        approachPoint,
+                        rejoinPoint.clone(),
+                        afterRejoin.clone() // Extension for exit tangent
+                    ];
+                    
+                    // Create smooth transition curve
+                    const transitionCurve = new THREE.CatmullRomCurve3(
+                        transitionControlPoints, false, 'chordal', 0.0
+                    );
+                    
+                    // Sample transition - more samples for smoother curve
+                    const numTransitionSamples = 40;
+                    const transitionSamples = transitionCurve.getPoints(numTransitionSamples);
+                    
+                    // Project ALL transition points onto terrain (terrain-following)
+                    // AND check for obstacles (water, etc.) - same as normal path
+                    const waterLevel = this.planet.terrain.params.waterLevel || 0;
+                    const baseRadius = this.planet.terrain.params.radius || 10;
+                    const waterRadius = baseRadius + waterLevel;
+                    const canEnterWater = unit.canWalkUnderwater || unit.canSwim;
+                    
+                    let transitionValid = true;
+                    const transitionProjected = transitionSamples.slice(1, -1).map(p => {
+                        const dir = p.clone().normalize();
+                        const terrainRadius = this.planet.terrain.getRadiusAt(dir);
+                        
+                        // Check if point is underwater
+                        if (!canEnterWater && terrainRadius < waterRadius) {
+                            transitionValid = false; // Mark transition as invalid
+                        }
+                        
+                        return dir.multiplyScalar(terrainRadius + groundOffset);
+                    });
+                    
+                    // If transition goes through water, skip transition and stay on current path
+                    if (!transitionValid) {
+                        unit.transitionPath = null;
+                        unit.isOnTransition = false;
+                        // Keep current position, let unit find closest valid path point naturally
+                    } else {
+                    
+                    // Store as TEMPORARY transition path
+                    unit.transitionPath = transitionProjected;
+                    unit.transitionIndex = 0;
+                    unit.transitionRejoinIdx = blendedRejoinIdx;
+                    unit.isOnTransition = true;
+                    
+                    // pathIndex points to where we'll rejoin after transition
+                    unit.pathIndex = blendedRejoinIdx;
+                    } // End of transitionValid else block
+                }
+            } else {
+                // First path setup - find closest point
+                let closestIdx = 0;
+                let bestDist = Infinity;
+                
+                for (let i = 0; i < unit.path.length; i++) {
+                    const dist = unit.position.distanceTo(unit.path[i]);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        closestIdx = i;
+                    }
+                }
+                
+                unit.pathIndex = closestIdx;
+                unit.transitionPath = null;
+                unit.isOnTransition = false;
             }
             
-            if (bestDist > 0.5) {
-                unit.position.copy(unit.path[closestIdx]);
-            }
-            
-            let targetIdx = closestIdx + 1;
-            if (targetIdx >= unit.path.length) {
-                targetIdx = (unit.loopingEnabled || unit.isPathClosed) ? 0 : unit.path.length - 1;
-            }
-            
-            unit.pathIndex = targetIdx;
+            // Clamp pathIndex
             if (unit.pathIndex >= unit.path.length) {
                 unit.pathIndex = (unit.loopingEnabled || unit.isPathClosed) ? 0 : unit.path.length - 1;
             }
@@ -797,7 +1069,6 @@ export class Game {
             
             unit.isFollowingPath = true;
             unit.lastCommittedControlPointCount = newCPCount;
-            // console.log(`[A* Path] Generated ${unit.path.length} points, pathIndex=${unit.pathIndex}`);
         }
     }
     
@@ -1296,17 +1567,7 @@ export class Game {
 
     start() {
         this.animate();
-        
-        // Hide preloader
-        const loader = document.getElementById('loader');
-        if (loader) {
-            setTimeout(() => {
-                loader.style.opacity = '0';
-                setTimeout(() => {
-                    loader.style.display = 'none';
-                }, 500);
-            }, 800); // Small delay to let initial frame render
-        }
+        // Preloader fade is handled by Main.js onFirstRender callback
     }
 
     onWindowResize() {
@@ -1327,11 +1588,19 @@ export class Game {
 
         // Auto-Chase: ONLY when Manual Driving
         if (this.selectedUnit && (keys.forward || keys.backward || keys.left || keys.right)) {
-            this.cameraControls.setChaseTarget(this.selectedUnit);
-        } else if (this.selectedUnit && this.selectedUnit.isFollowingPath) {
-            // DETACH Camera when following path (User requirement)
-            if (this.cameraControls.chaseTarget) {
-                this.cameraControls.setChaseTarget(null);
+            // First keyboard press: transition to third-person view
+            if (this.cameraControls.chaseMode === 'drone') {
+                this.cameraControls.transitionToThirdPerson(this.selectedUnit);
+                // Note: transitionToThirdPerson sets chaseTarget internally
+            } else if (!this.cameraControls.isFlying) {
+                // Only set chase target if NOT currently transitioning (no duplicate movement)
+                this.cameraControls.setChaseTarget(this.selectedUnit);
+            }
+        } else if (this.selectedUnit) {
+            // Keep chase target for obstruction detection even when not keyboard driving
+            // But only if NOT flying (transition animation takes priority)
+            if (!this.cameraControls.isFlying) {
+                this.cameraControls.setChaseTarget(this.selectedUnit);
             }
         }
 
@@ -1374,6 +1643,12 @@ export class Game {
             this.fogOfWar.update(this.units);
         }
         
+        // Update water animation (waves + FOW)
+        if (this.planet && this.planet.updateWater) {
+            const dt = this.clock ? this.clock.getDelta() : 1/60;
+            this.planet.updateWater(dt, this.units, this.fogOfWar);
+        }
+        
         // Update Planet Uniforms
         if (this.planet.mesh.material.materialShader) {
             this.planet.mesh.material.materialShader.uniforms.uFogTexture.value = this.fogOfWar.exploredTarget.texture;
@@ -1401,8 +1676,12 @@ export class Game {
         this.update();
         this.renderer.render(this.scene, this.camera);
         
-        // Trigger onFirstRender callback once after first successful render
-        if (this.onFirstRender && !this._firstRenderDone) {
+        // Trigger onFirstRender callback after enough frames to ensure content visible
+        // Wait for 30 frames (about 0.5s at 60fps) to ensure textures loaded
+        if (!this._frameCount) this._frameCount = 0;
+        this._frameCount++;
+        
+        if (this.onFirstRender && !this._firstRenderDone && this._frameCount > 30) {
             this._firstRenderDone = true;
             this.onFirstRender();
         }

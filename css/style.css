@@ -615,22 +615,114 @@ body.split-screen #bottom-panel .toggle-icon {
     justify-content: center;
     align-items: center;
     z-index: 1000;
+    transition: background 0.8s ease-out;
+}
+
+/* Staged fadeout: background goes transparent first */
+#loader.fade-stage-1 {
+    background: transparent;
+}
+
+/* Asteroid fades early */
+#loader.fade-stage-1 .spinner-asteroid {
+    opacity: 0;
+    transition: opacity 0.8s ease-out;
+}
+
+/* Light and text stay, then fade */
+#loader.fade-stage-2 .spinner-orbit,
+#loader.fade-stage-2 .loader-title,
+#loader.fade-stage-2 .loader-subtitle {
+    opacity: 0;
+    transition: opacity 0.8s ease-out;
+}
+
+/* Final hide */
+#loader.fade-complete {
+    display: none;
 }
 
 .loader-content {
     text-align: center;
 }
 
-.spinner {
+/* === Spinner Container === */
+.spinner-container {
     width: 60px;
     height: 60px;
-    border: 2px solid rgba(80, 80, 90, 0.3);
-    border-top: 2px solid var(--accent-primary);
-    border-right: 2px solid rgba(0, 212, 255, 0.6);
-    border-radius: 50%;
-    animation: spin 1.2s linear infinite;
     margin: 0 auto 25px;
-    box-shadow: 0 0 30px var(--accent-glow-soft);
+    position: relative;
+}
+
+/* Static asteroid body - does NOT rotate */
+.spinner-asteroid {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* Very dark asteroid - black center, dark gray edges */
+    background: radial-gradient(circle at 40% 35%, #0a0a0a 0%, #050505 50%, #000 100%);
+    box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.8);
+}
+
+/* Crater circles on asteroid - static */
+.spinner-asteroid::before,
+.spinner-asteroid::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    background: #000;
+    box-shadow: inset 0 1px 2px rgba(30, 30, 30, 0.3);
+}
+
+.spinner-asteroid::before {
+    width: 10px;
+    height: 10px;
+    top: 12px;
+    left: 10px;
+    box-shadow:
+        20px 6px 0 4px #000,
+        8px 22px 0 3px #000,
+        26px 24px 0 2px #000,
+        4px 38px 0 3px #000;
+}
+
+.spinner-asteroid::after {
+    width: 7px;
+    height: 7px;
+    top: 30px;
+    left: 34px;
+    box-shadow:
+        -10px -16px 0 2px #000,
+        10px -8px 0 2px #000;
+}
+
+/* Rotating light beam around asteroid perimeter - SEMICIRCLE */
+.spinner-orbit {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    animation: spin 3s linear infinite;
+    /* Slower rotation */
+    /* Conic gradient - SEMICIRCLE (180 degrees of light) */
+    background: conic-gradient(from 0deg,
+            transparent 0deg,
+            transparent 90deg,
+            #00d4ff 100deg,
+            #4ade80 180deg,
+            #00d4ff 260deg,
+            transparent 270deg,
+            transparent 360deg);
+    /* Mask to create ring effect */
+    -webkit-mask: radial-gradient(transparent 26px, #000 27px, #000 30px, transparent 31px);
+    mask: radial-gradient(transparent 26px, #000 27px, #000 30px, transparent 31px);
+    /* Glow effect */
+    filter: blur(1px);
 }
 
 .loader-title {
@@ -639,7 +731,20 @@ body.split-screen #bottom-panel .toggle-icon {
     color: rgba(200, 200, 210, 0.9);
     letter-spacing: 6px;
     text-transform: uppercase;
-    margin-bottom: 12px;
+    margin-bottom: 16px;
+}
+
+.loader-subtitle {
+    font-size: 10px;
+    font-weight: 500;
+    color: rgba(120, 120, 130, 0.7);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    line-height: 1.8;
+}
+
+.loader-subtitle div {
+    text-align: center;
 }
 
 .loader-text {

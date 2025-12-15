@@ -60,13 +60,14 @@ export class RockDebug {
             this.generate();
         });
         
-        // Auto-regenerate on change
-        folder.on('change', () => {
-             this.generate();
-        });
+        // Auto-regenerate on change (disabled by default)
+        // folder.on('change', () => {
+        //      this.generate();
+        // });
 
-        // Initial generation
-        this.generate();
+        // NO INITIAL GENERATION - only generate when user clicks
+        // this.generate();
+        console.log('[RockDebug] Panel ready - click "Generate Rock" to create test rock');
     }
 
     generate() {

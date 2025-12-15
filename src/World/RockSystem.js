@@ -14,95 +14,126 @@ export class RockSystem {
         
         // Default params
         this.params = {
-            count: 40,
+            count: 60,        // Increased from 40 (+20 smaller)
             seed: 12345,
-            minScale: 1.0,
+            minScale: 0.5,    // Smaller rocks now allowed
             maxScale: 3.0,
             radius: 1.2,
             detail: 2
         };
         
-        // Material (Placeholder until user uploads textures)
-        this.material = new THREE.MeshStandardMaterial({
-            color: 0x888888,
-            roughness: 0.9,
-            metalness: 0.1,
-            flatShading: false // Procedural rocks are smooth-ish
-        });
+        // Load 4 rock texture variants
+        const textureLoader = new THREE.TextureLoader();
+        this.materials = [];
         
-        // FOW Integration (Shader Injection)
-        this.material.onBeforeCompile = (shader) => {
-            shader.uniforms.uFogTexture = { value: this.game.fogOfWar.exploredTarget.texture };
-            shader.uniforms.uVisibleTexture = { value: this.game.fogOfWar.visibleTarget.texture };
-            shader.uniforms.uUVScale = { value: new THREE.Vector2(1, 1) };
-            shader.uniforms.uUVOffset = { value: new THREE.Vector2(0, 0) };
-            shader.uniforms.uDebugMode = { value: 0 };
-            shader.uniforms.uFowColor = { value: new THREE.Color(0x000000) };
-
-            shader.fragmentShader = `
-                uniform sampler2D uFogTexture;
-                uniform sampler2D uVisibleTexture;
-                uniform vec2 uUVScale;
-                uniform vec2 uUVOffset;
-                uniform int uDebugMode;
-                uniform vec3 uFowColor;
-            ` + shader.fragmentShader;
-            
-            shader.vertexShader = `
-                varying vec3 vWorldPosition;
-            ` + shader.vertexShader;
-            
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <worldpos_vertex>',
-                `
-                #include <worldpos_vertex>
-                vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
-                `
-            );
-            
-            shader.fragmentShader = `
-                varying vec3 vWorldPosition;
-            ` + shader.fragmentShader;
-            
-            shader.fragmentShader = shader.fragmentShader.replace(
-                '#include <dithering_fragment>',
-                `
-                vec3 dir = normalize(vWorldPosition); 
-                float u = 0.5 + atan(dir.z, dir.x) / (2.0 * 3.14159265);
-                float v = 0.5 + asin(dir.y) / 3.14159265;
-                
-                u = u * uUVScale.x + uUVOffset.x;
-                v = v * uUVScale.y + uUVOffset.y;
-                
-                vec4 explored = texture2D(uFogTexture, vec2(u, v));
-                vec4 visible = texture2D(uVisibleTexture, vec2(u, v));
-                
-                float isVisible = visible.r; 
-                float isExplored = explored.r;
-                
-                vec3 finalColor = gl_FragColor.rgb;
-                
-                if (isVisible > 0.1) {
-                    // Visible - keep original color
-                } else if (isExplored > 0.1) {
-                    // Explored - desaturate/darken
-                    float gray = dot(finalColor, vec3(0.299, 0.587, 0.114));
-                    gray = pow(gray, 1.5);
-                    vec3 desaturated = vec3(gray);
-                    vec3 nightColor = vec3(0.02, 0.04, 0.08); 
-                    finalColor = mix(finalColor, desaturated, 0.95) * 0.2 + nightColor * 0.1;
-                } else {
-                    // Unexplored - SOLID BLACK
-                    finalColor = vec3(0.0, 0.0, 0.0);
-                }
-                
-                gl_FragColor = vec4(finalColor, gl_FragColor.a);
-                #include <dithering_fragment>
-                `
-            );
-            
-            this.material.materialShader = shader;
+        // Texture tuning values - logged to console for adjustment
+        this.textureConfig = {
+            normalScale: 1.0,
+            roughness: 0.85,
+            metalness: 0.05
         };
+        console.log('[RockSystem] Texture config:', this.textureConfig);
+        console.log('[RockSystem] To change: game.rockSystem.textureConfig.normalScale = X');
+        
+        for (let i = 1; i <= 4; i++) {
+            const diffusePath = `assets/textures/rock_${i}.png`;
+            const normalPath = `assets/textures/rock_${i}_normal.png`;
+            
+            const diffuse = textureLoader.load(diffusePath, () => {
+                console.log(`[RockSystem] Loaded: ${diffusePath}`);
+            });
+            const normal = textureLoader.load(normalPath);
+            
+            diffuse.wrapS = diffuse.wrapT = THREE.RepeatWrapping;
+            normal.wrapS = normal.wrapT = THREE.RepeatWrapping;
+            
+            const mat = new THREE.MeshStandardMaterial({
+                map: diffuse,
+                normalMap: normal,
+                normalScale: new THREE.Vector2(this.textureConfig.normalScale, this.textureConfig.normalScale),
+                roughness: this.textureConfig.roughness,
+                metalness: this.textureConfig.metalness,
+                flatShading: false
+            });
+            
+            // Apply FOW shader to EACH material
+            const self = this;
+            mat.onBeforeCompile = (shader) => {
+                shader.uniforms.uFogTexture = { value: self.game.fogOfWar?.exploredTarget?.texture || null };
+                shader.uniforms.uVisibleTexture = { value: self.game.fogOfWar?.visibleTarget?.texture || null };
+                shader.uniforms.uUVScale = { value: new THREE.Vector2(1, 1) };
+                shader.uniforms.uUVOffset = { value: new THREE.Vector2(0, 0) };
+
+                shader.fragmentShader = `
+                    uniform sampler2D uFogTexture;
+                    uniform sampler2D uVisibleTexture;
+                    uniform vec2 uUVScale;
+                    uniform vec2 uUVOffset;
+                ` + shader.fragmentShader;
+                
+                shader.vertexShader = `
+                    varying vec3 vWorldPosition;
+                ` + shader.vertexShader;
+                
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <worldpos_vertex>',
+                    `
+                    #include <worldpos_vertex>
+                    vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+                    `
+                );
+                
+                shader.fragmentShader = `
+                    varying vec3 vWorldPosition;
+                ` + shader.fragmentShader;
+                
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <dithering_fragment>',
+                    `
+                    vec3 dir = normalize(vWorldPosition); 
+                    float u = 0.5 + atan(dir.z, dir.x) / (2.0 * 3.14159265);
+                    float v = 0.5 + asin(dir.y) / 3.14159265;
+                    
+                    u = u * uUVScale.x + uUVOffset.x;
+                    v = v * uUVScale.y + uUVOffset.y;
+                    
+                    vec4 explored = texture2D(uFogTexture, vec2(u, v));
+                    vec4 visible = texture2D(uVisibleTexture, vec2(u, v));
+                    
+                    float isVisible = visible.r; 
+                    float isExplored = explored.r;
+                    
+                    vec3 finalColor = gl_FragColor.rgb;
+                    
+                    if (isVisible > 0.1) {
+                        // Visible - keep original color
+                    } else if (isExplored > 0.1) {
+                        // Explored - desaturate/darken
+                        float gray = dot(finalColor, vec3(0.299, 0.587, 0.114));
+                        gray = pow(gray, 1.5);
+                        vec3 desaturated = vec3(gray);
+                        vec3 nightColor = vec3(0.02, 0.04, 0.08); 
+                        finalColor = mix(finalColor, desaturated, 0.95) * 0.2 + nightColor * 0.1;
+                    } else {
+                        // Unexplored - SOLID BLACK
+                        finalColor = vec3(0.0, 0.0, 0.0);
+                    }
+                    
+                    gl_FragColor = vec4(finalColor, gl_FragColor.a);
+                    #include <dithering_fragment>
+                    `
+                );
+                
+                mat.materialShader = shader;
+            };
+            
+            this.materials.push(mat);
+        }
+        
+        // Default material (first one)
+        this.material = this.materials[0];
+        
+        // FOW is now applied to each material in the loop above
     }
 
     generateRocks() {
@@ -178,10 +209,11 @@ export class RockSystem {
             const sinkDepth = scaleVal * 0.15; // 15% of rock size sinks below surface
             const pos = dir.clone().multiplyScalar(terrainRadius - sinkDepth);
             
-            // Align to normal? Or just Up?
-            // Rocks usually sit on surface.
+            // Random material from 4 variants
+            const matIndex = Math.floor(rng() * this.materials.length);
+            const selectedMaterial = this.materials[matIndex];
             
-            const mesh = new THREE.Mesh(geometry, this.material);
+            const mesh = new THREE.Mesh(geometry, selectedMaterial);
             mesh.position.copy(pos);
             mesh.lookAt(new THREE.Vector3(0,0,0)); // Point down?
             // Align Up to Normal
@@ -192,6 +224,9 @@ export class RockSystem {
             // Random rotation around Up
             const randRot = rng() * Math.PI * 2;
             mesh.rotateY(randRot);
+            
+            // Store collision radius (based on deformed scale)
+            mesh.userData.collisionRadius = scaleVal * this.params.radius;
             
             // Cast Shadow
             mesh.castShadow = true;
