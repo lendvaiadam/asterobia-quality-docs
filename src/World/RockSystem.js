@@ -53,7 +53,9 @@ export class RockSystem {
                 normalScale: new THREE.Vector2(this.textureConfig.normalScale, this.textureConfig.normalScale),
                 roughness: this.textureConfig.roughness,
                 metalness: this.textureConfig.metalness,
-                flatShading: false
+                flatShading: false,
+                transparent: true,
+                alphaTest: 0.1 // Ensure invisible rocks don't write depth
             });
             
             // Apply FOW shader to EACH material
@@ -115,17 +117,41 @@ export class RockSystem {
                         vec3 nightColor = vec3(0.02, 0.04, 0.08); 
                         finalColor = mix(finalColor, desaturated, 0.95) * 0.2 + nightColor * 0.1;
                     } else {
-                        // Unexplored - SOLID BLACK
+                        // Unexplored - TRANSPARENT (Invisible)
                         finalColor = vec3(0.0, 0.0, 0.0);
+                        gl_FragColor = vec4(finalColor, 0.0); // Alpha 0
+                        return;
                     }
                     
-                    gl_FragColor = vec4(finalColor, gl_FragColor.a);
+                     // Apply to final
+                    gl_FragColor = vec4(finalColor, 1.0); // Visible = Opaque
+                    
                     #include <dithering_fragment>
                     `
                 );
                 
                 mat.materialShader = shader;
             };
+            
+            // Critical for transparency
+            mat.transparent = true;
+            mat.depthWrite = true; // Still write depth for correct sorting when visible? 
+            // Actually if it's invisible (alpha 0), we might not want depth write if using discard.
+            // But we are using blending. keeping depthWrite=true can cause occlusion issues for things behind invisible rocks.
+            // Better to use alphaTest if we want them to disappear?
+            // User asked for "Transparent". Let's try standard transparency.
+            // If we use alpha=0, we should probably set depthWrite = false for those pixels, but we can't switch depthWrite per pixel.
+            // We can use alphaTest.
+            mat.alphaTest = 0.5; // If alpha < 0.5, discard -> No depth write => Invisible rocks don't occlude.
+            // But we want smooth fade maybe?
+            // "Sziklák ne feketék legyenek, hanem átlátszóak"
+            // If alphaTest is used, it's boolean.
+            // Let's stick to transparency without alphaTest first, but if they are invisible, they shouldn't block selection? Raycast collision handles selection.
+            // Visuals: If depthWrite is on, invisible rock writes depth, so ground behind it is not drawn?
+            // Correct. If alpha=0 and depthWrite=true, you get "x-ray" hole to background.
+            // SO: We MUST use alphaTest or Custom Depth Material.
+            // Simplest: alphaTest = 0.1.
+            mat.alphaTest = 0.1;
             
             this.materials.push(mat);
         }

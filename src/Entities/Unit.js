@@ -5,7 +5,7 @@ export class Unit {
     constructor(planet) {
         this.planet = planet;
         this.speed = 5.0;
-        this.speed = 5.0;
+        this.currentSpeed = 0.0; // Actual speed for audio/visuals
         this.turnSpeed = 2.0;
         this.groundOffset = 0.22; // Hover height
         this.smoothingRadius = 0.0; // Default 0, adjustable via slider
@@ -22,6 +22,7 @@ export class Unit {
         // States: 'normal', 'wading', 'escaping', 'shaking', 'backing', 'stopped'
         this.waterState = 'normal';
         this.waterSlowdownFactor = 1.0;
+        this.isWaterPushing = false; // True during automated pushback (blocks user input)
         this.waterShakeTimer = 0;
         this.waterBackupTimer = 0;
         this.waterWadeTimer = 0; // Time spent wading in water
@@ -178,24 +179,24 @@ export class Unit {
         group.add(this.spotLight);
         group.add(this.spotLight.target);
         
-        // 4. Glow Ring (Pulsating on ground - visible "spotlight" effect)
-        // Large enough to create a noticeable ring around the unit
-        const glowGeo = new THREE.RingGeometry(1.5, 3.5, 64);
-        glowGeo.rotateX(-Math.PI / 2);
+        // 4. SELECTION RING (Ground Projected)
+        // Simple Ring Geometry as fallback/requested style
+        const glowRingGeo = new THREE.RingGeometry(1.6, 2.0, 32); // Slightly wider ring
+        glowRingGeo.rotateX(-Math.PI / 2);
         this.glowMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0x00ff88,
+            color: 0x00d4ff, // Preloader Blue
             transparent: true, 
             opacity: 0.0,
             side: THREE.DoubleSide,
-            blending: THREE.AdditiveBlending, // Glow effect
-            depthWrite: false // Avoid z-fighting with terrain
+            depthWrite: false // Avoid z-fighting
         });
-        this.glowRing = new THREE.Mesh(glowGeo, this.glowMaterial);
-        this.glowRing.position.y = 0.1; // Slightly higher to avoid z-fighting
+        this.glowRing = new THREE.Mesh(glowRingGeo, this.glowMaterial);
+        this.glowRing.position.y = 0.15; // Clearly above ground
         group.add(this.glowRing);
         
         // 5. HEADLIGHTS (Front spotlights that cast shadows)
-        this.headlightLeft = new THREE.SpotLight(0xffffee, 3.0); // Warm white
+        // Start OFF - only enabled when player controls this unit
+        this.headlightLeft = new THREE.SpotLight(0xffffee, 0); // Start OFF
         this.headlightLeft.angle = Math.PI / 8; // Narrow beam
         this.headlightLeft.penumbra = 0.5;
         this.headlightLeft.distance = 15; // Effective range
@@ -210,7 +211,7 @@ export class Unit {
         group.add(this.headlightLeft);
         group.add(this.headlightLeft.target);
         
-        this.headlightRight = new THREE.SpotLight(0xffffee, 3.0);
+        this.headlightRight = new THREE.SpotLight(0xffffee, 0); // Start OFF
         this.headlightRight.angle = Math.PI / 8;
         this.headlightRight.penumbra = 0.5;
         this.headlightRight.distance = 15;
@@ -235,41 +236,33 @@ export class Unit {
         
         // === DUST PARTICLE SYSTEM ===
         this.dustParticles = [];
-        this.dustMaxParticles = 250; // More particles for denser tracks
-        this.dustSpawnRate = 0.01; // Spawn 5x faster for denser tracks (20% compression)
+        this.dustMaxParticles = 100; // Refined count
+        this.dustSpawnRate = 0.03; 
         this.dustSpawnTimer = 0;
         
-        // Create track mark pool (ellipse planes for tire tracks)
-        // X = compressed 20% in PERPENDICULAR direction, Y = full width in movement direction
-        // This makes tracks narrow perpendicular to wheels, dense along path
-        const dustGeo = new THREE.PlaneGeometry(0.02, 0.1); // X=20% narrow, Y=wide (perpendicular compression)
+        // Use PlaneGeometry for textured dust puffs
+        const dustGeo = new THREE.PlaneGeometry(1.0, 1.0);
         
-        // Load terrain texture for tracks (same as planet)
-        const textureLoader = new THREE.TextureLoader();
-        const dustTexture = textureLoader.load('assets/textures/sand_1.png');
-        dustTexture.wrapS = dustTexture.wrapT = THREE.RepeatWrapping;
-        
-        // Use light base color - tracks ONLY fade transparency, never darken
-        const dustMat = new THREE.MeshStandardMaterial({
+        // Create soft dust texture
+        const dustTexture = this.createDustTexture();
+        this.dustMaterial = new THREE.MeshBasicMaterial({
             map: dustTexture,
-            color: 0x8a7a6a, // Lighter base - only fades, doesn't darken
             transparent: true,
-            opacity: 0.5,
-            roughness: 1.0,
-            metalness: 0.0,
-            side: THREE.DoubleSide,
-            depthWrite: false,
+            opacity: 0.0,
+            depthWrite: false, // Don't write depth to allow seamless blending overlay
+            depthTest: true,
+            side: THREE.DoubleSide
         });
         
         for (let i = 0; i < this.dustMaxParticles; i++) {
-            const particle = new THREE.Mesh(dustGeo, dustMat.clone());
-            particle.visible = false;
-            particle.userData.life = 0;
-            particle.userData.maxLife = 3600; // 1 hour life
-            particle.userData.heading = new THREE.Vector3(); // Store movement dir
-            particle.castShadow = false;
-            particle.receiveShadow = true;
-            this.dustParticles.push(particle);
+            const p = new THREE.Mesh(dustGeo, this.dustMaterial.clone());
+            p.visible = false;
+            p.userData.life = 0;
+            p.userData.maxLife = 3600; // 1 hour life
+            p.userData.heading = new THREE.Vector3(); // Store movement dir
+            p.castShadow = false;
+            p.receiveShadow = true;
+            this.dustParticles.push(p);
         }
         
         this.dustInitialized = false; // Will add to scene on first update
@@ -336,7 +329,10 @@ export class Unit {
         const lerpSpeed = this.isSelected ? 5.0 : 3.0;
         this.selectionIntensity = THREE.MathUtils.lerp(this.selectionIntensity, targetIntensity, dt * lerpSpeed);
         
-        if (this.selectionIntensity < 0.01) {
+        // === KEYBOARD ACTIVE GLOW (orange, more intense) ===
+        const isActive = this.isKeyboardOverriding;
+        
+        if (this.selectionIntensity < 0.01 && !isActive) {
             this.spotLight.intensity = 0;
             this.glowMaterial.opacity = 0;
             this.bodyMaterial.emissiveIntensity = 0;
@@ -349,22 +345,27 @@ export class Unit {
         this.glowRing.visible = true;
         this.timeAccumulator += dt;
         
-        // Pulse Logic (Sine wave)
-        // Frequency: 2.0 Hz
-        const pulse = (Math.sin(this.timeAccumulator * 4.0) * 0.5 + 0.5); // 0 to 1
+        // Pulse Logic (Sine wave) - FASTER when keyboard active
+        const pulseFreq = isActive ? 6.0 : 4.0; // Faster pulse when active
+        const pulse = (Math.sin(this.timeAccumulator * pulseFreq) * 0.5 + 0.5); // 0 to 1
+        
+        // Determine which intensity to use (active overrides selection)
+        const visualIntensity = isActive ? 1.0 : this.selectionIntensity;
         
         // 1. Spotlight Intensity - Projects visible ring on terrain
-        const spotMax = 60.0; // Increased for visible terrain fénykarika
-        this.spotLight.intensity = this.selectionIntensity * (spotMax * 0.7 + spotMax * 0.3 * pulse);
+        const spotMax = isActive ? 80.0 : 60.0; // Brighter when active
+        this.spotLight.intensity = visualIntensity * (spotMax * 0.7 + spotMax * 0.3 * pulse);
         
-        // 2. Glow Ring Opacity - VISIBLE selection ring
-        const ringOpacity = 0.5 + 0.3 * pulse; // Increased for visible selection ring
-        this.glowMaterial.opacity = this.selectionIntensity * ringOpacity;
+        // 2. Glow Ring - ORANGE when active, BLUE when just selected
+        const ringOpacity = isActive ? (0.7 + 0.3 * pulse) : (0.5 + 0.3 * pulse);
+        this.glowMaterial.opacity = visualIntensity * ringOpacity;
+        this.glowMaterial.color.set(isActive ? 0xff8800 : 0x00d4ff); // Orange vs Blue
         
-        // 3. Unit Emissive Glow - SUBTLE with tab accent color (green)
+        // 3. Unit Emissive Glow - ORANGE when active, BLUE when selected
         if (this.bodyMaterial) {
-             this.bodyMaterial.emissive = new THREE.Color(0x00ff9d); // Tab accent green
-             this.bodyMaterial.emissiveIntensity = this.selectionIntensity * (0.5 + 0.3 * pulse); // Reduced
+             this.bodyMaterial.emissive = new THREE.Color(isActive ? 0xff6600 : 0x00d4ff);
+             const emissiveMax = isActive ? 0.8 : 0.5;
+             this.bodyMaterial.emissiveIntensity = visualIntensity * (emissiveMax + 0.3 * pulse);
         }
         
         // 4. PULSING GLOW (simpler effect, spotlight casts light on terrain)
@@ -407,6 +408,17 @@ export class Unit {
             this.terrainRing = null;
             this.terrainRingMaterial = null;
         }
+    }
+    
+    /**
+     * Turn headlights on/off. Only the player-controlled unit should have lights ON.
+     * Intensity is high (25) to be visible even in bright daylight.
+     */
+    setHeadlightsOn(enabled) {
+        const intensity = enabled ? 25.0 : 0; // Very bright for daylight visibility
+        if (this.headlightLeft) this.headlightLeft.intensity = intensity;
+        if (this.headlightRight) this.headlightRight.intensity = intensity;
+        console.log(`[Unit ${this.id}] Headlights: ${enabled ? 'ON' : 'OFF'} (intensity: ${intensity})`);
     }
 
     setPath(points) {
@@ -455,14 +467,16 @@ export class Unit {
     }
 
     update(input, dt) {
+        const startPos = this.position.clone();
+
         // === ROCK SPAWN-OUT CHECK ===
         // If unit somehow ends up inside a rock, push it out immediately
         // Rock collision is handled by RockCollisionSystem.checkAndSlide() 
         // which uses raycast against actual mesh and bounces on arrival direction.
         // No sphere-based overlap push needed (it was causing sideways push).
         
-        // Selection Visuals
-        if (this.isSelected || this.selectionIntensity > 0.01) {
+        // Selection Visuals (also run for keyboard-controlled units for active glow)
+        if (this.isSelected || this.selectionIntensity > 0.01 || this.isKeyboardOverriding) {
             this.updateSelectionVisuals(dt);
         }
 
@@ -511,7 +525,7 @@ export class Unit {
             // CAMERA SHAKE during rock bounce (3x stronger than normal)
             // Camera controller reads this and applies shake to camera
             const normalizedBounceVel = Math.min(1.0, this.bounceVelocity / 5.0);
-            this.cameraShakeIntensity = normalizedBounceVel * 3.0; // 3x amplitude for rock collision
+            this.cameraShakeIntensity = normalizedBounceVel * 1.5; // 1.5x amplitude (reduced from 3x)
             
             // Stop completely when very slow
             if (this.bounceVelocity < 0.05) {
@@ -564,207 +578,147 @@ export class Unit {
                 }
             }
         } else {
-            // Not following path - reset stuck state
+        // Not following path - reset stuck state
             this.stuckTimer = 0;
             this.isStuck = false;
         }
 
 
-        // Path Following Logic - SIMPLE SEQUENTIAL
-        // Skip path following if bouncing (unit is uncontrollable)
+        // ========================================================
+        // PATH FOLLOWING LOGIC - SIMPLIFIED & TERRAIN-SAFE
+        // ========================================================
+        // Rules:
+        // 1. NEVER teleport - only incremental movement
+        // 2. NEVER reverse - always forward toward goal
+        // 3. ALWAYS project to terrain after any movement
+        // 4. Follow path[] array sequentially via pathIndex
+        // ========================================================
+        
         if (this.path && this.path.length > 0 && this.isFollowingPath && !this.pausedByCommand && !this.isBouncing) {
             // One-time log
             if (!this._pathFollowingLogged) {
                 this._pathFollowingLogged = true;
-                console.log(`[Unit] Path following ACTIVE! Path length: ${this.path.length}, rockCollision: ${!!this.planet?.rockCollision}`);
+                console.log(`[Unit] Path following ACTIVE! Path length: ${this.path.length}`);
             }
             
-            // === TRANSITION PATH HANDLING ===
-            // If on a temporary transition, follow that first
-            if (this.isOnTransition && this.transitionPath && this.transitionPath.length > 0) {
-                if (this.transitionIndex === undefined) this.transitionIndex = 0;
-                
-                let transitionMove = moveSpeed;
-                
-                while (transitionMove > 0 && this.transitionIndex < this.transitionPath.length) {
-                    const target = this.transitionPath[this.transitionIndex];
-                    const toTarget = target.clone().sub(this.position);
-                    const distToTarget = toTarget.length();
-                    
-                    if (distToTarget < 0.1) {
-                        // Reached this transition point, move to next
-                        this.transitionIndex++;
-                    } else if (distToTarget <= transitionMove) {
-                        // Can reach this point this frame
-                        this.position.copy(target);
-                        transitionMove -= distToTarget;
-                        this.transitionIndex++;
-                    } else {
-                        // Move towards target
-                        const dir = toTarget.normalize();
-                        this.position.add(dir.multiplyScalar(transitionMove));
-                        
-                        // Store velocity direction for future transitions
-                        this.velocityDirection = dir.clone();
-                        transitionMove = 0;
-                    }
-                }
-                
-                // Check if transition complete
-                if (this.transitionIndex >= this.transitionPath.length) {
-                    // Transition finished! Switch to regular path at rejoin point
-                    this.isOnTransition = false;
-                    this.transitionPath = null;
-                    this.transitionIndex = 0;
-                    // pathIndex already points to rejoin point
-                }
-                
-                // Skip regular path following if still on transition
-                if (this.isOnTransition) {
-                    // Apply terrain projection for position
-                    const dir = this.position.clone().normalize();
-                    const terrainRadius = this.planet.terrain.getRadiusAt(dir);
-                    const groundOffset = this.groundOffset || 0.5;
-                    this.position.copy(dir.multiplyScalar(terrainRadius + groundOffset));
-                    return; // Exit early, don't do regular path following
-                }
-            }
-            
-            // === REGULAR PATH FOLLOWING ===
             // Initialize path index if needed
             if (this.pathIndex === undefined || this.pathIndex < 0) this.pathIndex = 0;
+            
+            // Handle path completion / looping
             if (this.pathIndex >= this.path.length) {
-                this.pathIndex = (this.loopingEnabled || this.isPathClosed) ? 0 : this.path.length - 1;
-            }
-            
-            // Calculate remaining distance we can travel this frame
-            let remainingMove = moveSpeed;
-            
-            // END-OF-PATH SLOWDOWN (Only for non-looping paths)
-            if (!this.loopingEnabled && !this.isPathClosed) {
-                const remainingPoints = this.path.length - this.pathIndex;
-                const slowdownZone = Math.min(30, this.path.length * 0.2);
-                if (remainingPoints < slowdownZone) {
-                    const slowdownFactor = Math.max(0.1, remainingPoints / slowdownZone);
-                    remainingMove *= slowdownFactor;
+                if (this.loopingEnabled || this.isPathClosed) {
+                    this.pathIndex = 0;
+                } else {
+                    // Path completed
+                    this.isFollowingPath = false;
+                    console.log("Path completed.");
                 }
             }
             
-            // Get water level for path checking
-            const waterLevel = this.planet.terrain.params.waterLevel || 0;
-            const baseRadius = this.planet.terrain.params.radius || 10;
-            const pathWaterRadius = baseRadius + waterLevel;
-            const canEnterWater = this.canWalkUnderwater || this.canSwim;
-            
-            // SIMPLE FORWARD MOVEMENT along the path
-            let iterations = 0;
-            const maxIterations = 100; // Safety limit
-            
-            while (remainingMove > 0 && this.waterState === 'normal' && iterations < maxIterations) {
-                iterations++;
+            // Get current target point on path
+            const currentTarget = this.path[this.pathIndex];
+            if (!currentTarget) {
+                // Invalid target, stop
+                this.isFollowingPath = false;
+            } else {
+                // Calculate remaining distance we can travel this frame
+                let remainingMove = moveSpeed;
                 
-                // Bounds check
-                if (this.pathIndex >= this.path.length) {
-                    if (this.loopingEnabled || this.isPathClosed) {
-                        this.pathIndex = 0;
-                        // console.log("Path looping - starting new cycle");
-                    } else {
-                        // Path completed - SNAP to exact end point and RESET all path state
-                        this.isFollowingPath = false;
-                        this.pathIndex = this.path.length - 1;
-                        
-                        // Position exactly at last path point (no overshoot)
-                        const lastPoint = this.path[this.path.length - 1];
-                        if (lastPoint) {
-                            this.position.copy(lastPoint);
+                // END-OF-PATH SLOWDOWN (Only for non-looping paths)
+                if (!this.loopingEnabled && !this.isPathClosed) {
+                    const remainingPoints = this.path.length - this.pathIndex;
+                    const slowdownZone = Math.min(30, this.path.length * 0.2);
+                    if (remainingPoints < slowdownZone) {
+                        const slowdownFactor = Math.max(0.1, remainingPoints / slowdownZone);
+                        remainingMove *= slowdownFactor;
+                    }
+                }
+                
+                // Get water level for path checking
+                const waterLevel = this.planet.terrain.params.waterLevel || 0;
+                const baseRadius = this.planet.terrain.params.radius || 10;
+                const pathWaterRadius = baseRadius + waterLevel;
+                const canEnterWater = this.canWalkUnderwater || this.canSwim;
+                
+                // SIMPLE FORWARD MOVEMENT along the path
+                let iterations = 0;
+                const maxIterations = 100;
+                
+                while (remainingMove > 0 && this.waterState === 'normal' && iterations < maxIterations) {
+                    iterations++;
+                    
+                    // Bounds check
+                    if (this.pathIndex >= this.path.length) {
+                        if (this.loopingEnabled || this.isPathClosed) {
+                            this.pathIndex = 0;
+                        } else {
+                            this.isFollowingPath = false;
+                            break;
                         }
-                        
-                        // === COMPREHENSIVE PATH STATE RESET ===
-                        // Stop any residual auto-movement
-                        this.savedPath = null;
-                        this.savedPathIndex = 0;
-                        this.isKeyboardOverriding = false;
-                        this.pausedByCommand = false;
-                        this.keyboardOverrideTimer = 0;
-                        
-                        console.log("Path completed - stopped at end point, state reset");
+                    }
+                    
+                    const target = this.path[this.pathIndex];
+                    if (!target) break;
+                    
+                    // CHECK IF TARGET IS UNDERWATER
+                    const targetDir = target.clone().normalize();
+                    const targetTerrainRadius = this.planet.terrain.getRadiusAt(targetDir);
+                    const targetIsUnderwater = targetTerrainRadius < pathWaterRadius;
+                    
+                    if (targetIsUnderwater && !canEnterWater) {
+                        console.log("Path leads to water! Starting water pushback.");
+                        this.waterState = 'slowing';  // FIXED: was 'backing' which is not handled!
+                        this.isFollowingPath = false;
                         break;
                     }
-                }
-                
-                const currentTarget = this.path[this.pathIndex];
-                if (!currentTarget) break;
-                
-                // CHECK IF TARGET IS UNDERWATER
-                const targetDir = currentTarget.clone().normalize();
-                const targetTerrainRadius = this.planet.terrain.getRadiusAt(targetDir);
-                const targetIsUnderwater = targetTerrainRadius < pathWaterRadius;
-                
-                if (targetIsUnderwater && !canEnterWater) {
-                    console.log("Path leads to water! Stopping and backing up!");
-                    this.waterState = 'backing';
-                    this.waterBackupTimer = 0;
-                    this.waterShakeTimer = 1.2;
-                    this.waterShakeCount = 4 + Math.floor(Math.random() * 7);
-                    this.isFollowingPath = false;
-                    break;
-                }
-                
-                const distToTarget = this.position.distanceTo(currentTarget);
-                
-                if (distToTarget <= remainingMove) {
-                    // Reached this point, move to next
-                    this.position.copy(currentTarget);
-                    remainingMove -= distToTarget;
-                    this.pathIndex++;
                     
-                    // Update anchor: passed a path point
-                    if (this.pathIndex > 0) {
-                        this.lastPassedControlPointIndex = Math.floor(this.pathIndex / 10); // Approx control point
-                    }
-                } else {
-                    // Move towards target
-                    const dir = currentTarget.clone().sub(this.position).normalize();
-                    let moveAmount = remainingMove;
+                    const distToTarget = this.position.distanceTo(target);
                     
-                    // Calculate desired position
-                    const desiredPos = this.position.clone().addScaledVector(dir, moveAmount);
-                    
-                    // === ROCK COLLISION CHECK (New System) ===
-                    if (this.planet && this.planet.rockCollision) {
-                        const result = this.planet.rockCollision.checkAndSlide(this.position, desiredPos);
-                        
-                        if (result.collided && this.bounceCooldown <= 0) {
-                            // COLLISION: Don't move to collision point, stay where we are
-                            // Trigger bounce from current position
-                            if (result.bounceDir) {
-                                this.bounceDirection = result.bounceDir;
-                                // Bounce velocity = same speed we were going
-                                this.bounceVelocity = (moveAmount / (1/60)) * 0.5;
-                                this.bounceCooldown = 0.5;
-                            }
-                            if (!this._lastCollisionLogged) {
-                                this._lastCollisionLogged = true;
-                                console.log('[Unit] Rock collision! Bouncing on arrival path...');
-                            }
-                            // Position stays at current - don't move into rock
-                        } else if (!result.collided) {
-                            // No collision - move normally
-                            this.position.copy(result.position);
-                            this._lastCollisionLogged = false;
-                        }
+                    if (distToTarget <= remainingMove) {
+                        // Reached this point, move to next
+                        // But DON'T teleport - just advance pathIndex
+                        this.position.copy(target);
+                        remainingMove -= distToTarget;
+                        this.pathIndex++;
                     } else {
-                        // No collision system, move normally
-                        this.position.copy(desiredPos);
+                        // Move towards target incrementally
+                        const dir = target.clone().sub(this.position).normalize();
+                        
+                        // Calculate desired position
+                        const desiredPos = this.position.clone().addScaledVector(dir, remainingMove);
+                        
+                        // === ROCK COLLISION CHECK ===
+                        if (this.planet && this.planet.rockCollision) {
+                            const result = this.planet.rockCollision.checkAndSlide(this.position, desiredPos);
+                            
+                            if (result.collided && this.bounceCooldown <= 0) {
+                                if (result.bounceDir) {
+                                    this.bounceDirection = result.bounceDir;
+                                    this.bounceVelocity = (remainingMove / (1/60)) * 0.2;
+                                    this.bounceCooldown = 0.5;
+                                }
+                            } else if (!result.collided) {
+                                this.position.copy(result.position);
+                            }
+                        } else {
+                            this.position.copy(desiredPos);
+                        }
+                        
+                        // Store velocity direction
+                        this.velocityDirection = dir.clone();
+                        remainingMove = 0;
                     }
                     
-                    // Store velocity direction for smooth transitions
-                    this.velocityDirection = dir.clone();
-                    remainingMove = 0;
+                    // === CRITICAL: PROJECT TO TERRAIN AFTER EVERY MOVEMENT ===
+                    // This ensures we NEVER go through the ground
+                    const posDir = this.position.clone().normalize();
+                    const terrainRadius = this.planet.terrain.getRadiusAt(posDir);
+                    const groundOffset = this.groundOffset || 0.5;
+                    this.position.copy(posDir.multiplyScalar(terrainRadius + groundOffset));
                 }
             }
             
-            // ORIENTATION: Use CURVE TANGENT from current and next path point
+            // ORIENTATION: Look toward path direction
             // Look ahead to next point(s) for smooth tangent
             let lookAhead = this.pathIndex + 3;
             if (lookAhead >= this.path.length && (this.loopingEnabled || this.isPathClosed)) {
@@ -783,15 +737,15 @@ export class Unit {
                 tangent = this.path[this.pathIndex].clone().sub(this.position).normalize();
             }
             
-            // Project tangent onto SPHERE surface plane (for pure Heading)
-            // Visual tilt is handled at the end of update()
-            const sphereNormal = this.position.clone().normalize();
+            // Project tangent onto SMOOTHED terrain plane (for tilt + smoothness)
+            // Visual tilt is handled here directly
+            const sphereNormal = this.getSmoothedNormal(); // Use smoothed normal instead of rigid sphere normal
             const projectedTangent = tangent.clone().sub(
                 sphereNormal.clone().multiplyScalar(tangent.dot(sphereNormal))
             ).normalize();
             
             if (projectedTangent.lengthSq() > 0.01) {
-                // Build orientation from Sphere Normal (up) and curve tangent (forward)
+                // Build orientation from Smoothed Normal (up) and curve tangent (forward)
                 const up = sphereNormal;
                 const forward = projectedTangent;
                 const right = new THREE.Vector3().crossVectors(up, forward).normalize();
@@ -879,6 +833,7 @@ export class Unit {
                 this.isKeyboardOverriding = true;
                 this.isFollowingPath = false;
                 this.pausedByCommand = true;
+                this.setHeadlightsOn(true); // Turn on headlights when player takes control
             } else if (!this.isKeyboardOverriding && !this.savedPath) {
                 // Keyboard control without any path - just mark as overriding
                 this.isKeyboardOverriding = true;
@@ -886,6 +841,7 @@ export class Unit {
                     this.isFollowingPath = false;
                     this.pausedByCommand = true;
                 }
+                this.setHeadlightsOn(true); // Turn on headlights when player takes control
             }
         } else {
             // No keyboard input
@@ -903,9 +859,11 @@ export class Unit {
                     this.isKeyboardOverriding = false;
                     this.pausedByCommand = false;
                     this.isFollowingPath = true;
+                    this.setHeadlightsOn(false); // Turn off headlights when player releases control
                 } else if (this.keyboardOverrideTimer >= 4.0 && !this.savedPath) {
                     // No saved path, just reset override state
                     this.isKeyboardOverriding = false;
+                    this.setHeadlightsOn(false); // Turn off headlights
                 }
             }
         }
@@ -954,157 +912,8 @@ export class Unit {
         const forwardWorld = forwardLocal.applyQuaternion(this.headingQuaternion).normalize();
 
 
-        // === WATER BEHAVIOR STATE MACHINE (Reactive) ===
-        // Check current depth
-        const baseRadius = this.planet.terrain.params.radius || 10;
-        const waterLevel = this.planet.terrain.params.waterLevel || 0;
-        const waterRadius = baseRadius + waterLevel;
-        
-        const currentDir = this.position.clone().normalize();
-        const currentTerrainRadius = this.planet.terrain.getRadiusAt(currentDir);
-        const waterDepth = Math.max(0, waterRadius - currentTerrainRadius);
-        const isUnderwater = waterDepth > 0;
-        const canEnterWater = this.canWalkUnderwater || this.canSwim;
-        
-        const unitHeight = 1.0; 
-        const stopDepth = unitHeight * 0.3; // Earlier trigger (30% of body)
-
-        // State Transitions
-        if (this.waterState === 'normal') {
-            this.waterSlowdownFactor = 1.0;
-            this.waterPushTimer = 0; // Reset push timer when normal
-            
-            // ANY water contact starts push countdown
-            if (isUnderwater && !canEnterWater) {
-                this.waterState = 'wading';
-                this.waterPushTimer = 0;
-                console.log("Water: Entered water, push timer started...");
-            }
-        }
-        else if (this.waterState === 'wading') {
-            // Gradual Slowdown based on depth
-            const depthFraction = Math.min(1.0, waterDepth / stopDepth);
-            const targetSlowdown = 1.0 - (depthFraction * 0.9); 
-            this.waterSlowdownFactor = THREE.MathUtils.lerp(this.waterSlowdownFactor, targetSlowdown, dt * 5.0);
-            
-            // Depth-based push timer: shallow = 1s wait, deep = 0s wait (EARLIER TRIGGER)
-            // Formula: wait time = 1.0 * (1 - depthFraction)
-            const maxWaitTime = 1.0; // 1 second max wait in shallow water
-            const waitTime = maxWaitTime * (1.0 - depthFraction);
-            
-            this.waterPushTimer += dt;
-            
-            // After wait time OR if deep enough, start pushing out
-            if (this.waterPushTimer >= waitTime || waterDepth > stopDepth) {
-                 // Sample water depth in forward and backward directions
-                 const sampleDist = 2.0;
-                 const forwardSample = this.position.clone().addScaledVector(forwardWorld, sampleDist);
-                 const backwardSample = this.position.clone().addScaledVector(forwardWorld, -sampleDist);
-                 
-                 const fwdDir = forwardSample.clone().normalize();
-                 const bwdDir = backwardSample.clone().normalize();
-                 
-                 const fwdTerrainR = this.planet.terrain.getRadiusAt(fwdDir);
-                 const bwdTerrainR = this.planet.terrain.getRadiusAt(bwdDir);
-                 
-                 const fwdWaterDepth = Math.max(0, waterRadius - fwdTerrainR);
-                 const bwdWaterDepth = Math.max(0, waterRadius - bwdTerrainR);
-                 
-                 // Choose direction with LESS water (shallower = closer to shore)
-                 this.waterExitDirection = (bwdWaterDepth <= fwdWaterDepth) ? -1 : 1;
-                 
-                 this.waterState = 'backing';
-                 this.waterBackupTimer = 0;
-                 this.waterShakeActive = true; // Shake continues until fully stopped
-                 this.waterSlowdownFactor = 0.0;
-                 this.waterExitSpeed = 0; // Start with 0 speed, accelerate
-                 this.waterPushDistance = 0; // Track total push distance
-                 this.waterMaxPushDistance = 3.0; // Half the previous distance
-                 this.isWaterPushing = true; // Lock controls
-                 console.log(`Water: Pushing out ${this.waterExitDirection > 0 ? 'FORWARD' : 'BACKWARD'}`);
-            }
-            
-            // If backing out manually, let them escape
-            if (moveInput < 0 && !this.isWaterPushing) {
-                 this.waterState = 'escaping';
-            }
-        }
-        else if (this.waterState === 'backing') {
-            // CONTROL LOCKED during water push
-            this.isWaterPushing = true;
-            
-            // Accelerate exit speed (starts slow, speeds up)
-            if (this.waterExitSpeed === undefined) this.waterExitSpeed = 0;
-            this.waterExitSpeed = Math.min(0.6, this.waterExitSpeed + dt * 0.5); // Slower, max 60%
-            
-            // Track push distance and limit it
-            const framePush = this.waterExitSpeed * dt * (this.speed || 10);
-            this.waterPushDistance = (this.waterPushDistance || 0) + framePush;
-            
-            // Force movement in calculated SHORTEST EXIT direction
-            moveInput = (this.waterExitDirection || -1) * this.waterExitSpeed;
-            this.waterSlowdownFactor = 1.0; 
-            
-            // REACHED SHORE: Stop immediately at water edge (no overpush)
-            if (!isUnderwater) {
-                this.waterState = 'normal';
-                this.waterSlowdownFactor = 1.0;
-                this.isWaterPushing = false;
-                this.waterShakeActive = false;
-                this.applyVelocityShake(dt, 0); // Cleanup shake
-                moveInput = 0; // Stop movement this frame
-                console.log("Water: Reached shore - stopped at water edge");
-            }
-            // Only continue if still in water (shouldn't reach max distance anymore)
-            else if (this.waterPushDistance >= (this.waterMaxPushDistance || 3.0)) {
-                // Failsafe: if somehow still in water after max push, stop
-                this.waterState = 'normal';
-                this.isWaterPushing = false;
-                console.log("Water: Max push distance reached while still in water");
-            }
-            
-            // VELOCITY-BASED SHAKE: amplitude tied to current speed
-            this.applyVelocityShake(dt, this.waterExitSpeed);
-        }
-        else if (this.waterState === 'escaping') {
-             this.waterSlowdownFactor = THREE.MathUtils.lerp(this.waterSlowdownFactor, 1.0, dt * 2.0);
-             if (!isUnderwater) {
-                 this.waterState = 'normal';
-                 this.waterSlowdownFactor = 1.0;
-                 this.isWaterPushing = false;
-             }
-        }
-        // NEW: Easy-in stopping state after water exit
-        else if (this.waterState === 'stopping') {
-            this.isWaterPushing = true; // STILL locked
-            
-            // Easy-in deceleration (quadratic)
-            if (this.waterStopSpeed === undefined) this.waterStopSpeed = 0.5;
-            this.waterStopSpeed = Math.max(0, this.waterStopSpeed - dt * 0.4); // Slower decelerate
-            
-            // Apply reduced movement in same direction
-            moveInput = (this.waterExitDirection || -1) * this.waterStopSpeed;
-            this.waterSlowdownFactor = 1.0;
-            
-            // VELOCITY-BASED SHAKE: amplitude dampens with speed
-            this.applyVelocityShake(dt, this.waterStopSpeed);
-            
-            // Fully stopped: return control
-            if (this.waterStopSpeed <= 0.01) {
-                this.waterState = 'normal';
-                this.waterSlowdownFactor = 1.0;
-                this.isWaterPushing = false;
-                this.waterShakeActive = false;
-                
-                // Cleanup Shake
-                if (this.shakeBaseHeading) {
-                    this.headingQuaternion.copy(this.shakeBaseHeading);
-                    this.shakeBaseHeading = null;
-                }
-                this.shakeSeed = undefined;
-                console.log("Water: Fully stopped, control returned.");
-            }
-        }
+        // === WATER BEHAVIOR (Delegated) ===
+        moveInput = this.updateWaterBehavior(dt, moveInput);
 
         if (moveInput !== 0) {
 
@@ -1112,7 +921,14 @@ export class Unit {
             const oldSphereNormal = oldPos.clone().normalize();
             
             const baseRadius = this.planet.terrain.params.radius || 10;
-            const dist = moveInput * moveSpeed;
+            
+            // CRITICAL: During pushback, moveSpeed is 0 because waterSlowdownFactor is 0.
+            // Use raw speed calculation during pushback so the unit actually moves!
+            const isPushbackState = (this.waterState === 'pushing_out' || this.waterState === 'recovering');
+            const effectiveMoveSpeed = isPushbackState 
+                ? (this.speed || 10) * dt * this.speedFactor  // Raw speed without waterSlowdownFactor
+                : moveSpeed;
+            const dist = moveInput * effectiveMoveSpeed;
             
             // Calculate potential new position
             const newPosRaw = SphericalMath.moveAlongGreatCircle(
@@ -1124,7 +940,10 @@ export class Unit {
 
             // Apply movement (including backing/wading slowdown)
             {
-                const adjustedDist = dist * this.waterSlowdownFactor;
+                // IMPORTANT: Don't apply slowdown during pushback - use raw moveInput
+                const isPushbackState = (this.waterState === 'pushing_out' || this.waterState === 'recovering');
+                const adjustedDist = isPushbackState ? dist : (dist * this.waterSlowdownFactor);
+                
                 let finalPos = SphericalMath.moveAlongGreatCircle(
                     oldPos, 
                     forwardWorld, 
@@ -1139,7 +958,7 @@ export class Unit {
                     if (result.collided && result.bounceDir && this.bounceCooldown <= 0) {
                         // COLLISION: Stay at current position (oldPos), trigger bounce back
                         this.bounceDirection = result.bounceDir; // Opposite of movement
-                        this.bounceVelocity = Math.abs(adjustedDist) / (1/60) * 0.5;
+                        this.bounceVelocity = Math.abs(adjustedDist) / (1/60) * 0.2; // Reduced from 0.5 for gentler shake
                         this.bounceCooldown = 0.5;
                         finalPos = oldPos; // DON'T move toward rock
                         console.log('[Unit] Rock collision (keyboard)! Bouncing back on path...');
@@ -1224,6 +1043,10 @@ export class Unit {
         
         // Update Selection Effects
         this.updateSelectionVisuals(dt);
+        
+        // Calculate Actual Speed (for Audio)
+        const moveDist = this.position.distanceTo(startPos);
+        this.currentSpeed = moveDist / Math.max(dt, 0.001);
     }
     
     // === DUST PARTICLE SYSTEM ===
@@ -1255,28 +1078,37 @@ export class Unit {
             this.dustSpawnTimer -= dt;
             
             if (this.dustSpawnTimer <= 0) {
-                this.dustSpawnTimer = 0.03; // Frequent spawning for trail effect
+                this.dustSpawnTimer = 0.03; 
                 
-                // Spawn at BOTH wheel positions
-                const wheelOffsets = [
-                    new THREE.Vector3(-0.25, 0, -0.25), // Left wheel (back)
-                    new THREE.Vector3(0.25, 0, -0.25)   // Right wheel (back)
-                ];
+                // Spawn at BACK wheel positions matches tracks
+                // We calculate them just like tracks: pBL and pBR
+                const wheelOffsetSide = 0.15; 
+                const wheelOffsetFront = 0.2; // Back is -1 * this
+                const basis = SphericalMath.getBasis(this.headingQuaternion);
                 
-                for (const wheelOffset of wheelOffsets) {
+                const getWheelPos = (sideMul, frontMul) => {
+                    const pos = this.position.clone()
+                        .add(basis.right.clone().multiplyScalar(sideMul * wheelOffsetSide))
+                        .add(basis.forward.clone().multiplyScalar(frontMul * wheelOffsetFront));
+                    const dir = pos.normalize();
+                    const radius = this.planet.terrain.getRadiusAt(dir);
+                    return dir.multiplyScalar(radius + 0.05); // Just above ground
+                };
+
+                const pBL = getWheelPos(-1, -1);
+                const pBR = getWheelPos(1, -1);
+                
+                const spawnPoints = [pBL, pBR];
+                
+                for (const pos of spawnPoints) {
                     // Find an inactive particle
                     for (const p of this.dustParticles) {
                         if (!p.visible) {
-                            // Spawn at wheel position
-                            const offset = wheelOffset.clone().applyQuaternion(this.mesh.quaternion);
-                            p.position.copy(this.position).add(offset);
+                            p.position.copy(pos);
                             
-                            // Get movement direction (heading forward)
-                            const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.headingQuaternion).normalize();
-                            p.userData.heading.copy(forward);
-                            
-                            // Align ellipse: flat on ground, X-axis PERPENDICULAR to heading
-                            const sphereUp = p.position.clone().normalize();
+                            // Align flat on ground
+                            const sphereUp = pos.clone().normalize();
+                            const forward = basis.forward.clone(); 
                             const right = new THREE.Vector3().crossVectors(sphereUp, forward).normalize();
                             const adjustedForward = new THREE.Vector3().crossVectors(right, sphereUp).normalize();
                             
@@ -1284,14 +1116,15 @@ export class Unit {
                             m.makeBasis(right, adjustedForward, sphereUp);
                             p.quaternion.setFromRotationMatrix(m);
                             
-                            // Slightly raise above ground
-                            p.position.addScaledVector(sphereUp, 0.005);
+                            // Random rotation around Up axis for variety
+                            p.rotateZ(Math.random() * Math.PI * 2);
                             
-                            p.userData.life = 3600; // 1 hour
-                            p.userData.maxLife = 3600;
+                            p.userData.life = 240;  // 4 seconds at 60 FPS
+                            p.userData.maxLife = 240;
                             p.visible = true;
-                            p.scale.setScalar(1.0);
-                            p.material.opacity = 0.5; // Start at 50%, only fades down
+                            p.scale.setScalar(1.5); // Start size
+                            p.material.opacity = 0.25; // More visible
+                            p.material.color.setHex(0xA67B5B); 
                             break;
                         }
                     }
@@ -1299,24 +1132,60 @@ export class Unit {
             }
         }
         
-        // Update all active particles - ONLY FADE transparency, no color changes
+        // Update all active particles
         for (const p of this.dustParticles) {
             if (p.visible) {
                 p.userData.life -= dt;
                 
-                // Fade from 50% to 10% over 1 hour (lifeFrac: 1 -> 0)
-                // ONLY transparency changes - color stays constant (no darkening)
-                // Use 1% increments for smoother fade (floor to 1% steps)
                 const lifeFrac = Math.max(0, p.userData.life / p.userData.maxLife);
-                // Start at 50% (0.10 + 0.40), end at 10% (0.10)
-                const rawOpacity = 0.10 + lifeFrac * 0.40;
-                // Round to 1% increments for imperceptible fade
-                p.material.opacity = Math.floor(rawOpacity * 100) / 100;
                 
-                // Never hide - tracks stay forever (just very faint at 10%)
-                // Color remains constant - only transparency decreases
+                // Opacity: 0.25 -> 0.0 (fade out)
+                p.material.opacity = lifeFrac * 0.25;
+                
+                // Scale: 20x growth from 1.5 to 30 in 4 seconds
+                const growthCrv = 1.0 - Math.pow(lifeFrac, 0.3); // Very fast initial expansion
+                const newScale = 1.5 + growthCrv * 28.5; // 1.5 * 20 = 30
+                p.scale.setScalar(newScale);
+                
+                // Color remains constant
             }
         }
+    }
+
+    createDustTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        
+        // Dust texture: fluffy cloud-like edges, 50% overall transparency
+        // Create irregular/fluffy edge by using multiple overlapping gradients
+        const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+        grad.addColorStop(0.0, 'rgba(255, 255, 255, 0.5)');  // Center: 50% opacity
+        grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.45)'); // Mid: slightly less
+        grad.addColorStop(0.75, 'rgba(255, 255, 255, 0.25)'); // Outer: fading
+        grad.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');   // Edge: transparent
+        
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 64, 64);
+        
+        // Add noise/irregularity for cloud-like fluffy edges
+        const imageData = ctx.getImageData(0, 0, 64, 64);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            const x = (i / 4) % 64;
+            const y = Math.floor((i / 4) / 64);
+            const dist = Math.sqrt((x - 32) ** 2 + (y - 32) ** 2);
+            
+            // Add noise to outer regions for fluffy edge
+            if (dist > 16) {
+                const noise = (Math.random() - 0.5) * 0.3;
+                data[i + 3] = Math.max(0, Math.min(255, data[i + 3] * (1 + noise)));
+            }
+        }
+        ctx.putImageData(imageData, 0, 0);
+        
+        return new THREE.CanvasTexture(canvas);
     }
     
     /**
@@ -1386,7 +1255,9 @@ export class Unit {
             if (!rock.position) continue;
             
             const dist = position.distanceTo(rock.position);
-            const rockRadius = rock.scale ? rock.scale.x * 1.5 : 1.5; // Approximate rock radius
+            // Extended rock radius: base size + vertical buffer to catch units trying to go under
+            // This prevents units from sliding under rocks when terrain dips below rock base
+            const rockRadius = rock.scale ? rock.scale.x * 1.5 + 1.5 : 3.0;
             
             if (dist < unitRadius + rockRadius) {
                 // Collision detected - calculate normal (away from rock center)
@@ -1444,33 +1315,188 @@ export class Unit {
         this.trackSpacing = 0.075; // 4x denser (was 0.3)
         this.trackWidth = 0.15;
         
-        // Adaptive lifetime based on performance
-        this.trackMinLifetime = 300.0; // Minimum 300 seconds (10x increased)
-        this.trackMaxLifetime = 3000.0; // Maximum 50 minutes
-        this.trackCurrentLifetime = 600.0; // Start at 600 seconds
+        // INSTANCED TRACK SYSTEM (Ring Buffer)
+        this.maxTrackSegments = 40000; // Increased to 40k for ~750m history
+        this.trackCursor = 0; // Current index in ring buffer
+        this.trackInstancedMesh = null;
+        this.trackBirthTimes = new Float32Array(this.maxTrackSegments);
+        this.trackLifetime = 600.0; // Seconds before fade
         
-        this.trackFadeStep = 0.02; // 2% opacity loss per fadeInterval
-        this.trackFadeInterval = 1.0; // Fade once per second
+        this.trackFadeStep = 0.02; 
+        this.trackFadeInterval = 1.0; 
         this.trackFadeTimer = 0;
-        this.maxTrackSegments = 2000; // Higher limit since we have adaptive cleanup
         
         // Performance monitoring
         this.frameTimeHistory = [];
-        this.frameTimeHistoryMax = 30; // Track last 30 frames
-        this.performanceCheckInterval = 2.0; // Check every 2 seconds
+        this.frameTimeHistoryMax = 30; 
+        this.performanceCheckInterval = 2.0; 
         this.performanceCheckTimer = 0;
         this.lastFrameTime = performance.now();
         
         // Shared geometry for all tracks (optimization) - CROSSWISE
-        // Width x Length - length must exceed spacing (0.075) for no gaps
-        this.sharedTrackGeo = new THREE.PlaneGeometry(0.15, 0.10); // Crosswise, overlapping
-        this.trackInitialOpacity = 0.28; // Transparent
+        this.sharedTrackGeo = new THREE.PlaneGeometry(0.15, 0.10); 
+        this.trackInitialOpacity = 0.6; 
     }
     
+    createSoftTrackTexture() {
+        if (this._softTrackTex) return this._softTrackTex;
+        
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        
+        // Background: White (Invisible in Multiply)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 64, 64);
+        
+        // Gradient: Lighter Grey-Brown (More transparent/subtle in Multiply)
+        // Was: '#4a3c30' -> '#5c4b3d'
+        const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 28);
+        grad.addColorStop(0.0, '#7d6c5b'); // Core: Lighter Grey-Brown
+        grad.addColorStop(0.6, '#a89f91'); // Mid: Fades to light grey
+        grad.addColorStop(1.0, '#ffffff'); // Edge: White (Invisible)
+        
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(32, 32, 28, 0, Math.PI * 2);
+        ctx.fill();
+        
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        this._softTrackTex = tex;
+        return tex;
+    }
+    
+    // === REBUILT WATER LOGIC ===
+    updateWaterBehavior(dt, moveInput) {
+        // 1. Check current depth and state
+        const waterLevel = this.planet.terrain.params.waterLevel || 0;
+        const currentRadius = this.planet.terrain.getRadiusAt(this.position.clone().normalize());
+        const baseRadius = this.planet.terrain.params.radius;
+        const waterDepth = Math.max(0, (baseRadius + waterLevel) - currentRadius);
+        const isUnderwater = waterDepth > 0.05; // Tolerance
+        
+        // Debug helper
+        // if (this.game.debug && isUnderwater) console.log(`Water State: ${this.waterState}, Depth: ${waterDepth.toFixed(2)}`);
+
+        // INITIAL STATE: Normal
+        if (this.waterState === 'normal') {
+            this.waterSlowdownFactor = 1.0;
+            this.isWaterPushing = false; // Not pushing
+            
+            if (isUnderwater) {
+                // Enter water -> Switch to Slowing
+                this.waterState = 'slowing';
+                this.waterEntryVector = this.headingQuaternion.clone(); // Remember entry direction? Or just velocity?
+                console.log("Water: Entering -> Slowing down...");
+            }
+            return moveInput; // Allow control
+        }
+
+        // STATE: Slowing (Decelerate to stop)
+        if (this.waterState === 'slowing') {
+            // Force deceleration override
+            this.waterSlowdownFactor = Math.max(0.0, this.waterSlowdownFactor - dt * 2.5); // Rapid stop
+            
+            // Still allow input effect? No, damp it heavily or ignore.
+            // User said: "elkezd lelassulni és amikor megáll... nem rögzítjük a user irányítását"
+            
+            // Effective Input is dampened
+            let effectiveInput = moveInput * this.waterSlowdownFactor;
+            
+            if (this.waterSlowdownFactor <= 0.05) {
+                // Stopped. Lock controls and switch to Pushing Out.
+                this.waterState = 'pushing_out';
+                this.waterSlowdownFactor = 0; // Frozen
+                this.waterExitTime = 0;
+                this.isWaterPushing = true; // LOCK INPUT during pushback
+                console.log("Water: Stopped. Locking controls -> Pushing out.");
+                return 0; // Force stop input
+            }
+            return effectiveInput;
+        }
+
+        // STATE: Pushing Out (Automated Exit)
+        if (this.waterState === 'pushing_out') {
+            // Ignore user input.
+            // Push BACKWARDS (assuming entered forwards)
+            // Or push towards higher ground?
+            // Simple approach: Reverse
+            
+            this.waterExitTime += dt;
+            
+            // "Shiver" Effect: Rotate around local Y (Up)
+            // oscillate
+            const shiverFreq = 25.0;
+            const shiverAmp = 0.02; // Radian wobble
+            const shiver = Math.sin(this.waterExitTime * shiverFreq) * shiverAmp;
+            // Apply shiver to mesh (visual only) without affecting physics heading? 
+            // Better to apply as a temporary rotation in render, but here we can just jitter the heading slightly?
+            // Or better: Apply to a visual offset if possible. 
+            // For now, jittering heading slightly is acceptable for "struggling" effect.
+            this.mesh.rotation.y += shiver * 0.5; // Visual jitter hack
+            
+            // Acceleration for push out
+            const pushSpeed = Math.min(0.5, this.waterExitTime * 0.5); // Ramp up speed
+            
+            let autoInput = -pushSpeed; // Reverse!
+            
+            // Check if out of water
+            if (!isUnderwater) {
+                this.waterState = 'recovering';
+                this.waterRecoverTime = 0;
+                console.log("Water: Exited -> Recovering (Ease-out stop).");
+            }
+            return autoInput;
+        }
+
+        // STATE: Recovering (Ease-out on land before returning control)
+        if (this.waterState === 'recovering') {
+             // Ease out deceleration
+             this.waterRecoverTime += dt;
+             // Decelerate from pushSpeed (approx 0.5) to 0
+             // Let's perform a scripted slowdown
+             let recoverSpeed = Math.max(0, 0.5 - (this.waterRecoverTime * 1.0)); // Stop in 0.5s
+             
+             if (recoverSpeed <= 0.05) {
+                 // Done.
+                 this.waterState = 'normal';
+                 this.waterSlowdownFactor = 1.0;
+                 this.isWaterPushing = false; // RESTORE control
+                 console.log("Water: Recovered. Controls restored.");
+                 return 0;
+             }
+             
+             return -recoverSpeed; // Continue moving back slowly
+        }
+        
+        return moveInput;
+    }
+    
+    handleCollision(velocityReflected) {
+        // ... (existing logic)
+        // REDUCED SHAKE: was 0.5, now 0.2
+        if (this.game.camera && this.game.camera.triggerShake) {
+            const impactSpeed = velocityReflected.length();
+            if (impactSpeed > 1.0) {
+                 this.game.camera.triggerShake(impactSpeed * 0.2); // Reduced from 0.5 to 0.2
+            }
+        }
+    }
+
+    /* 
+    // OLD WATER BEHAVIOR (Replaced)
+    // updateWaterBehavior(dt, moveInput) { ... }
+    */
+
     updateTireTracks(dt) {
         if (!this.scene || !this.tireTrackSegments) return;
-        
-        // === PERFORMANCE MONITORING ===
+    
+    // CHECK TOGGLE
+    if (Unit.enableTracks === false) return;
+    
+    // === PERFORMANCE MONITORING ===
         const now = performance.now();
         const frameTime = now - this.lastFrameTime;
         this.lastFrameTime = now;
@@ -1517,167 +1543,322 @@ export class Unit {
         
         const distMoved = currentPos.distanceTo(this.lastTrackPosition);
         
-        if (distMoved >= this.trackSpacing) {
+        // Detect rotation in place (for tank-style turning)
+        let isRotatingInPlace = false;
+        if (this.lastTrackHeading && distMoved < this.trackSpacing) {
+            const angleDiff = this.headingQuaternion.angleTo(this.lastTrackHeading);
+            // If rotated more than 30 degrees but didn't move much, generate tracks (sparser rotation tracks)
+            isRotatingInPlace = angleDiff > (30 * Math.PI / 180);
+        }
+        
+
+        if (distMoved >= this.trackSpacing || isRotatingInPlace) {
+            // Lazy initialization of InstancedMesh
+            if (!this.trackInstancedMesh) {
+                // Use Soft Texture + Multiply Blending
+                const softTex = this.createSoftTrackTexture();
+                
+                // Material Color MUST be White for Multiply Blending to work with texture colors
+                const mat = new THREE.MeshBasicMaterial({
+                    color: 0xffffff,
+                    map: softTex,
+                    transparent: true,
+                    opacity: 1.0, // Control via color mix in shader
+                    depthWrite: false,
+                    side: THREE.DoubleSide,
+                    blending: THREE.MultiplyBlending, // Darkens the ground
+                    polygonOffset: true,
+                    polygonOffsetFactor: -4, 
+                    polygonOffsetUnits: -4
+                });
+                
+                // Shader injection for Fading (Fading to WHITE = Disappearing in Multiply)
+                mat.onBeforeCompile = (shader) => {
+                    shader.uniforms.uTime = { value: 0 };
+                    shader.vertexShader = `
+                        attribute float aBirthTime;
+                        varying float vBirthTime;
+                    ` + shader.vertexShader;
+                    shader.vertexShader = shader.vertexShader.replace(
+                        '#include <begin_vertex>',
+                        `
+                        #include <begin_vertex>
+                        vBirthTime = aBirthTime;
+                        `
+                    );
+                    shader.fragmentShader = `
+                        uniform float uTime;
+                        varying float vBirthTime;
+                        const float LIFETIME = 600.0; 
+                    ` + shader.fragmentShader;
+                    shader.fragmentShader = shader.fragmentShader.replace(
+                        '#include <map_fragment>',
+                        `
+                        #include <map_fragment>
+                        
+                        // Fade Logic for Multiply Blending
+                        // WHITE (1.0) = invisible, DARKER = visible
+                        // User wants: 20% base opacity (0.8 color = near white)
+                        //             60% max opacity (0.4 color) when layers overlap
+                        // So we start at 0.8 and let Multiply darken to min 0.4
+                        float age = uTime - vBirthTime;
+                        
+                        // Base brightness = 0.9 (10% dark = 90% brightness)
+                        float baseBrightness = 0.9;
+                        
+                        if (age > LIFETIME) {
+                            diffuseColor.rgb = vec3(1.0); // Invisible
+                        } else {
+                            // Fade out over last 15 seconds
+                            float fadeStart = LIFETIME - 15.0;
+                            if (age > fadeStart) {
+                                float fade = (age - fadeStart) / 15.0;
+                                diffuseColor.rgb = mix(diffuseColor.rgb * baseBrightness, vec3(1.0), fade);
+                            } else {
+                                // Apply base brightness (makes tracks lighter/more transparent)
+                                diffuseColor.rgb = diffuseColor.rgb * baseBrightness;
+                            }
+                        }
+                        // Note: With Multiply blending, overlapping tracks will darken more
+                        // but won't go below the texture's base color (approx 40% = 0.4)
+                        `
+                    );
+                    mat.userData.shader = shader;
+                };
+                
+                this.trackInstancedMesh = new THREE.InstancedMesh(this.sharedTrackGeo, mat, this.maxTrackSegments);
+                this.trackInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+                this.trackInstancedMesh.count = 0; 
+                this.trackInstancedMesh.frustumCulled = false; 
+                
+                // Init attribute
+                for (let i = 0; i < this.maxTrackSegments; i++) {
+                    this.trackBirthTimes[i] = -99999; 
+                }
+                const birthAttr = new THREE.InstancedBufferAttribute(this.trackBirthTimes, 1);
+                birthAttr.setUsage(THREE.DynamicDrawUsage);
+                this.trackInstancedMesh.geometry.setAttribute('aBirthTime', birthAttr);
+                
+                // Add to Track Group
+                if (!this.trackGroup) {
+                     this.trackGroup = new THREE.Group();
+                     this.scene.add(this.trackGroup);
+                     this.trackGroup.visible = (Unit.enableTracks !== false);
+                }
+                this.trackGroup.add(this.trackInstancedMesh);
+            }
+
             // Create new track segment
             const basis = SphericalMath.getBasis(this.headingQuaternion);
             
-            // Left and right track positions (wheelbase)
-            const wheelOffset = 0.15;
-            const leftPos = this.position.clone().add(basis.right.clone().multiplyScalar(-wheelOffset));
-            const rightPos = this.position.clone().add(basis.right.clone().multiplyScalar(wheelOffset));
+            // === 4 WHEEL POSITIONS ===
+            const wheelOffsetSide = 0.15; 
+            const wheelOffsetFront = 0.2; 
             
-            // Project to terrain - LIFT above surface to prevent z-fighting
-            const leftDir = leftPos.clone().normalize();
-            const rightDir = rightPos.clone().normalize();
-            const leftRadius = this.planet.terrain.getRadiusAt(leftDir);
-            const rightRadius = this.planet.terrain.getRadiusAt(rightDir);
-            const trackHeightOffset = 0.05; // Higher to prevent terrain overlap
-            const leftFinal = leftDir.multiplyScalar(leftRadius + trackHeightOffset);
-            const rightFinal = rightDir.multiplyScalar(rightRadius + trackHeightOffset);
-            
-            // Check segment limit for performance
-            if (this.tireTrackSegments.length >= this.maxTrackSegments * 2) {
-                // Remove oldest segments
-                const toRemove = this.tireTrackSegments.splice(0, 4);
-                toRemove.forEach(track => {
-                    this.scene.remove(track.mesh);
-                    track.mesh.material.dispose();
-                });
-            }
-            
-            // Get terrain color at track position for multiply effect
-            // This is CPU-based but runs only once per track segment (not per frame)
-            const terrainDir = this.position.clone().normalize();
-            const terrainHeight = this.planet.terrain.getHeight(terrainDir.x, terrainDir.y, terrainDir.z);
-            const terrainColor = this.planet.terrain.getBiomeColor(terrainHeight, 0.5, 0.5, 0);
-            
-            // Blend terrain color with brownish pastel for natural tire track look
-            const brownTint = new THREE.Color(0x8B7355); // Pastel brown
-            const trackColor = terrainColor.clone().lerp(brownTint, 0.5).multiplyScalar(0.5);
-            
-            // Blur shader material for soft edges with terrain color
-            // INDENTATION SHADOW: Simulates depth with sun-based shadow
-            const trackMat = new THREE.ShaderMaterial({
-                uniforms: {
-                    opacity: { value: this.trackInitialOpacity || 0.4 },
-                    color: { value: trackColor },
-                    sunDirection: { value: new THREE.Vector3(0.6, 0.3, 0.4).normalize() } // Matches Game.js sun
-                },
-                vertexShader: `
-                    varying vec2 vUv;
-                    varying vec3 vNormal;
-                    varying vec3 vWorldPos;
-                    void main() {
-                        vUv = uv;
-                        vNormal = normalize(normalMatrix * normal);
-                        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                    }
-                `,
-                fragmentShader: `
-                    uniform float opacity;
-                    uniform vec3 color;
-                    uniform vec3 sunDirection;
-                    varying vec2 vUv;
-                    varying vec3 vNormal;
-                    varying vec3 vWorldPos;
-                    
-                    void main() {
-                        // Rectangular soft edge (more oval than circle)
-                        vec2 center = vec2(0.5, 0.5);
-                        vec2 uv = (vUv - center) * 2.0;
-                        // Oval falloff: X is narrower, Y is longer
-                        float dist = length(vec2(uv.x * 1.5, uv.y * 0.8));
-                        float alpha = smoothstep(1.0, 0.4, dist) * opacity;
-                        
-                        // INDENTATION SHADOW EFFECT
-                        // Simulate a small depression - edges facing away from sun are darker
-                        // Create fake "rim normal" based on UV position
-                        vec3 rimNormal = normalize(vec3(uv.x * 0.5, 1.0, uv.y * 0.5));
-                        
-                        // Calculate shadow factor based on sun angle to rim
-                        float sunDot = dot(rimNormal, sunDirection);
-                        float shadowFactor = smoothstep(-0.3, 0.5, sunDot);
-                        
-                        // Apply shadow - darker on sun-facing rim (simulates shadow cast by opposite rim)
-                        float edgeness = smoothstep(0.3, 0.8, dist);
-                        float indentShadow = mix(1.0, shadowFactor, edgeness * 0.6);
-                        
-                        // SPECULAR HIGHLIGHT on inner edge (sun-facing side catches light)
-                        // The compressed dirt on the inner rim reflects some light
-                        float innerEdge = smoothstep(0.2, 0.5, dist) * (1.0 - smoothstep(0.5, 0.8, dist));
-                        float specAngle = max(0.0, dot(rimNormal, sunDirection));
-                        float specular = pow(specAngle, 4.0) * innerEdge * 0.15; // Subtle glint
-                        
-                        // For MULTIPLY blend: output darker values, with specular brightening
-                        vec3 shadedColor = color * indentShadow;
-                        vec3 multiplyColor = mix(vec3(1.0), shadedColor, alpha);
-                        // Add specular on top (makes it slightly brighter than terrain)
-                        multiplyColor += vec3(specular * alpha);
-                        gl_FragColor = vec4(multiplyColor, 1.0);
-                    }
-                `,
-                transparent: false,
-                side: THREE.DoubleSide,
-                depthWrite: false,
-                blending: THREE.MultiplyBlending
-            });
-            
-            // Helper function to orient track on terrain
-            const orientTrack = (track, pos, normal, forward) => {
-                track.position.copy(pos);
-                const projForward = forward.clone().sub(normal.clone().multiplyScalar(forward.dot(normal))).normalize();
-                const lookTarget = pos.clone().add(normal);
-                track.lookAt(lookTarget);
-                const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(track.quaternion);
-                const angle = Math.atan2(
-                    new THREE.Vector3().crossVectors(currentUp, projForward).dot(normal),
-                    currentUp.dot(projForward)
-                );
-                track.rotateZ(angle);
+            // Helper to get terrain pos
+            const trackHeightOffset = 0.02; 
+            const getWheelPos = (sideMul, frontMul) => {
+                const pos = this.position.clone()
+                    .add(basis.right.clone().multiplyScalar(sideMul * wheelOffsetSide))
+                    .add(basis.forward.clone().multiplyScalar(frontMul * wheelOffsetFront));
+                const dir = pos.normalize();
+                const radius = this.planet.terrain.getRadiusAt(dir);
+                return dir.multiplyScalar(radius + trackHeightOffset);
             };
             
-            // Left track
-            const leftTrack = new THREE.Mesh(this.sharedTrackGeo, trackMat.clone());
-            const leftNormal = this.planet.terrain.getNormalAt(leftFinal);
-            orientTrack(leftTrack, leftFinal, leftNormal, basis.forward);
-            this.scene.add(leftTrack);
-            this.tireTrackSegments.push({ mesh: leftTrack, opacity: 0.6, age: 0 });
+            const pFL = getWheelPos(-1, 1);
+            const pFR = getWheelPos(1, 1);
+            const pBL = getWheelPos(-1, -1);
+            const pBR = getWheelPos(1, -1);
             
-            // Right track
-            const rightTrack = new THREE.Mesh(this.sharedTrackGeo, trackMat.clone());
-            const rightNormal = this.planet.terrain.getNormalAt(rightFinal);
-            orientTrack(rightTrack, rightFinal, rightNormal, basis.forward);
-            this.scene.add(rightTrack);
-            this.tireTrackSegments.push({ mesh: rightTrack, opacity: 0.6, age: 0 });
+            // Dust
+            this.generateDustParticles(pFL, pFR);
+
+            // Update InstancedMesh (4 instances)
+            const dummy = new THREE.Object3D();
+            const nowTime = performance.now() / 1000.0;
+            
+            // Helper to update instance
+            const updateInstance = (pos) => {
+                 const cursor = this.trackCursor;
+                 
+                 // Orient dummy
+                 const normal = this.planet.terrain.getNormalAt(pos);
+                 dummy.position.copy(pos);
+                 
+                 // Align to terrain
+                 const projForward = basis.forward.clone().sub(normal.clone().multiplyScalar(basis.forward.dot(normal))).normalize();
+                 const lookTarget = pos.clone().add(normal);
+                 dummy.lookAt(lookTarget);
+                 const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(dummy.quaternion);
+                 const angle = Math.atan2(
+                     new THREE.Vector3().crossVectors(currentUp, projForward).dot(normal),
+                     currentUp.dot(projForward)
+                 );
+                 dummy.rotateZ(angle);
+                 dummy.updateMatrix();
+                 
+                 this.trackInstancedMesh.setMatrixAt(cursor, dummy.matrix);
+                 // Update birth time attribute manually
+                 this.trackInstancedMesh.geometry.attributes.aBirthTime.setX(cursor, nowTime);
+                 
+                 this.trackCursor = (this.trackCursor + 1) % this.maxTrackSegments;
+            };
+            
+            updateInstance(pFL);
+            updateInstance(pFR);
+            updateInstance(pBL);
+            updateInstance(pBR);
+            
+            this.trackInstancedMesh.instanceMatrix.needsUpdate = true;
+            this.trackInstancedMesh.geometry.attributes.aBirthTime.needsUpdate = true;
+            this.trackInstancedMesh.count = Math.min(this.maxTrackSegments, this.trackInstancedMesh.count + 4); 
             
             this.lastTrackPosition = this.position.clone();
+            this.lastTrackHeading = this.headingQuaternion.clone();
         }
         
-        // Fade existing tracks
-        this.trackFadeTimer += dt;
-        if (this.trackFadeTimer >= this.trackFadeInterval) {
-            this.trackFadeTimer = 0;
-            
-            for (let i = this.tireTrackSegments.length - 1; i >= 0; i--) {
-                const track = this.tireTrackSegments[i];
-                track.opacity -= this.trackFadeStep;
-                
-                // Update shader uniform for opacity
-                if (track.mesh.material.uniforms && track.mesh.material.uniforms.opacity) {
-                    track.mesh.material.uniforms.opacity.value = Math.max(0, track.opacity);
-                } else {
-                    track.mesh.material.opacity = Math.max(0, track.opacity);
-                }
-                
-                // Remove fully faded tracks
-                if (track.opacity <= 0) {
-                    this.scene.remove(track.mesh);
-                    // Don't dispose shared geometry, only material
-                    track.mesh.material.dispose();
-                    this.tireTrackSegments.splice(i, 1);
-                }
+        // Update Time Uniform for Shader
+        if (this.trackInstancedMesh && this.trackInstancedMesh.material.userData.shader) {
+            this.trackInstancedMesh.material.userData.shader.uniforms.uTime.value = performance.now() / 1000.0;
+        }
+        
+        this.updateDustParticles(dt);
+    }
+
+    generateDustParticles(posLeft, posRight) {
+        if (!this.dustTexture) {
+            // Load texture once
+            if (!Unit.dustTextureLoaded) {
+                Unit.dustTextureLoaded = true;
+                new THREE.TextureLoader().load('assets/textures/dust.png', (tex) => {
+                    Unit.sharedDustTexture = tex;
+                    this.dustTexture = tex;
+                });
+            } else if (Unit.sharedDustTexture) {
+                this.dustTexture = Unit.sharedDustTexture;
             }
+        }
+        
+        if (!this.dustTexture) return;
+        
+        // Initialize dust group if not exists
+        if (!this.dustGroup) {
+            this.dustGroup = new THREE.Group();
+            this.scene.add(this.dustGroup);
+            // Sync visibility with static flag immediately
+            this.dustGroup.visible = (Unit.enableDust !== false); 
+        }
+
+        // CHECK TOGGLE (Optimization: Don't spawn if invisible)
+        if (Unit.enableDust === false) return;
+
+        // CHECK DISTANCE
+        let distToCam = 0;
+        if (this.game && this.game.camera) {
+            distToCam = this.mesh.position.distanceTo(this.game.camera.position);
+        }
+        if (distToCam > 80) return; 
+
+        // Create particles at both wheel positions
+        const spawnParticle = (pos) => {
+            const offset = new THREE.Vector3(
+                (Math.random() - 0.5) * 0.3,
+                (Math.random() - 0.5) * 0.3, 
+                (Math.random() - 0.5) * 0.3
+            );
+            const particlePos = pos.clone().add(offset);
+            
+            // User Request: 4 sec, 20x growth, more visible
+            // Bigger initial size for visibility
+            const size = (0.1 + Math.random() * 0.1); // Much bigger starting size
+            
+            const geo = new THREE.SphereGeometry(size, 8, 8); 
+            
+            const mat = new THREE.MeshBasicMaterial({
+                map: this.dustTexture,
+                color: 0xddccbb, 
+                transparent: true,
+                // User Request: "kezdetben is 50% transparenciája" (Opacity = 0.5)
+                opacity: 0.5, 
+                depthWrite: false, 
+                side: THREE.FrontSide,
+            });
+            
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.copy(particlePos);
+            mesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+            
+            this.dustGroup.add(mesh); // Add to GROUP instead of SCENE
+            mesh.renderOrder = 100; // Render ABOVE tire tracks (which are on ground)
+            
+            // Random Variance for Speed
+            // User Request: "Legyen a gömbök fele olyan, ami mindezt fele ilyen gyorsan csinálja"
+            const isSlowOne = Math.random() > 0.5;
+            
+            // User Request: "fele ilyen gyorsan növekedjen" -> "fele ilyen gyorsan" means SLOWER speed => LONGER lifetime?
+            // "Half as fast" usually means "Twice the duration".
+            // Previous Lifetime: 0.4 + rand*0.4 (Avg 0.6s)
+            // New "Normal" Lifetime (Half Speed -> 2x duration): ~1.2s
+            // "Slow One" Lifetime (Half of THAT speed -> 4x duration? Or just relative to original?)
+            // Interpretation: 
+            // - Normal: Slower than before.
+            // - Special Half: Even slower.
+            // User Request: 4 second lifetime
+            let lifeTime = 4.0; // Fixed 4 second duration
+            if (isSlowOne) {
+                 lifeTime *= 1.5; // Some even longer
+            }
+
+            if (!this.dustParticles) this.dustParticles = [];
+            this.dustParticles.push({
+                mesh: mesh,
+                age: 0,
+                lifetime: lifeTime, 
+                // User Request: 20x growth (size * 20)
+                maxSize: size * 20.0, 
+                startOpacity: 0.3, // More visible
+            });
+        };
+        
+        if (Math.random() > 0.7) spawnParticle(posLeft);
+        if (Math.random() > 0.7) spawnParticle(posRight);
+    }
+    
+    updateDustParticles(dt) {
+        if (!this.dustParticles) return;
+        
+        for (let i = this.dustParticles.length - 1; i >= 0; i--) {
+            const p = this.dustParticles[i];
+            p.age += dt;
+            
+            if (p.age >= p.lifetime) {
+                if (p.mesh) {
+                    this.scene.remove(p.mesh);
+                    if (p.mesh.geometry) p.mesh.geometry.dispose();
+                    if (p.mesh.material) p.mesh.material.dispose();
+                }
+                this.dustParticles.splice(i, 1);
+                continue;
+            }
+            
+            if (!p.mesh || !p.mesh.geometry) {
+                 this.dustParticles.splice(i, 1);
+                 continue;
+            }
+            
+            const t = p.age / p.lifetime;
+            
+            // Grow
+            const scale = 1.0 + (p.maxSize / p.mesh.geometry.parameters.radius - 1.0) * t;
+            p.mesh.scale.setScalar(scale);
+            
+            // Fade (Standard Material)
+            p.mesh.material.opacity = p.startOpacity * (1.0 - t);
+            
+            // Move (Rise and drift) - VERY SLOW rise, stays near ground\n            const up = p.mesh.position.clone().normalize();\n            p.mesh.position.addScaledVector(up, dt * 0.03); // Barely rises - stays at ground level
+            p.mesh.rotation.x += dt;
+            p.mesh.rotation.y += dt * 0.5;
         }
     }
 }

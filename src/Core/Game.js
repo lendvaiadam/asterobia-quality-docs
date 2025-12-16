@@ -15,6 +15,7 @@ import { RockDebug } from '../UI/RockDebug.js';
 import { SphericalNavMesh } from '../Navigation/SphericalNavMesh.js';
 import { NavMeshDebug } from '../UI/NavMeshDebug.js';
 import { RockCollisionSystem } from '../Physics/RockCollisionSystem.js';
+import { AudioManager } from './AudioManager.js';
 
 export class Game {
     constructor() {
@@ -50,8 +51,8 @@ export class Game {
         
         starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         const starMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 1.5 });
-        const stars = new THREE.Points(starGeometry, starMaterial);
-        this.scene.add(stars);
+        this.stars = new THREE.Points(starGeometry, starMaterial);
+        this.scene.add(this.stars);
         
         // Log star sizing info with adjustment instructions
         console.log("=== STAR PARAMETERS ===");
@@ -175,6 +176,9 @@ export class Game {
 
         // Interaction Manager (System V3)
         this.interactionManager = new InteractionManager(this);
+        
+        // Audio Manager
+        this.audioManager = new AudioManager();
     }
     
     // Unit Loading handled below
@@ -184,6 +188,9 @@ export class Game {
         // All 5 units - Unit 1 spawns in front of camera
         const models = ['1.glb', '2.glb', '3.glb', '4.glb', '5.glb'];
         let loadedCount = 0;
+        
+        // Pre-allocate units array to preserve order
+        this.units = new Array(models.length).fill(null);
         
         models.forEach((modelName, index) => {
             loader.load(`./modellek/${modelName}`, (gltf) => {
@@ -229,7 +236,11 @@ export class Game {
                 }
                 unit.snapToSurface();
                 
-                this.units.push(unit);
+                // Add unit sound
+                this.audioManager.addUnitSound(unit);
+                
+                // Insert at specific index to preserve order
+                this.units[index] = unit;
                 loadedCount++;
                 
                 // Generate tabs after all units loaded
@@ -363,6 +374,118 @@ export class Game {
         // === SMOOTH TRANSITION ===
         // Look at center of bounding sphere
         this.cameraControls.smoothTransitionToTarget(cameraPos, center, 1.5);
+    }
+    
+    // UNIT FULL VIEW: Frame unit + path + vision radius (Civilization-style top-down)
+    flyToUnitFullView(unit) {
+        if (!unit || !this.cameraControls) return;
+        
+        // === COLLECT BOUNDING POINTS ===
+        // 1. Unit position
+        const points = [unit.position.clone()];
+        
+        // 2. Path waypoints
+        if (unit.waypointControlPoints && unit.waypointControlPoints.length > 0) {
+            for (const wp of unit.waypointControlPoints) {
+                points.push(wp.clone());
+            }
+        }
+        
+        // 3. Vision radius boundary points (8 samples around unit)
+        const visionRadius = this.fogOfWar.currentVisionRadius || 15.0;
+        const unitDir = unit.position.clone().normalize();
+        
+        // Create tangent basis at unit position
+        const tangent1 = new THREE.Vector3(1, 0, 0).cross(unitDir).normalize();
+        if (tangent1.lengthSq() < 0.01) {
+            tangent1.set(0, 1, 0).cross(unitDir).normalize();
+        }
+        const tangent2 = new THREE.Vector3().crossVectors(unitDir, tangent1).normalize();
+        
+        // Sample 8 points around vision circle
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const offset = tangent1.clone().multiplyScalar(Math.cos(angle) * visionRadius)
+                .add(tangent2.clone().multiplyScalar(Math.sin(angle) * visionRadius));
+            
+            // Project to terrain surface
+            const visionPoint = unit.position.clone().add(offset);
+            const visionDir = visionPoint.normalize();
+            const terrainRadius = this.planet.terrain.getRadiusAt(visionDir);
+            visionPoint.copy(visionDir.multiplyScalar(terrainRadius));
+            
+            points.push(visionPoint);
+        }
+        
+        // === CALCULATE BOUNDING SPHERE ===
+        const center = new THREE.Vector3();
+        for (const p of points) {
+            center.add(p);
+        }
+        center.divideScalar(points.length);
+        
+        // Find max distance from center
+        let maxDist = 0;
+        for (const p of points) {
+            const d = center.distanceTo(p);
+            if (d > maxDist) maxDist = d;
+        }
+        
+        // === CALCULATE CAMERA DISTANCE ===
+        // Tighter framing (reduced padding)
+        const fov = this.camera.fov * Math.PI / 180;
+        const aspect = this.camera.aspect;
+        const effectiveFov = Math.min(fov, fov * aspect);
+        const cameraDistance = (maxDist * 1.1) / Math.tan(effectiveFov / 2); // Reduced from 1.5x to 1.1x
+        
+        const finalDistance = Math.max(20, Math.min(200, cameraDistance + 10));
+        
+        // === CALCULATE CAMERA POSITION (Top-Down/Isometric, Closest Angle) ===
+        // 1. Define ideal viewing circle parameters
+        const angle45 = Math.PI / 4; // 45 degree elevation
+        const heightOffset = finalDistance * Math.sin(angle45);
+        const horizontalRadius = finalDistance * Math.cos(angle45);
+        
+        // 2. Determine current camera direction relative to center (in horizontal plane)
+        // This ensures we fly to the CLOSEST point on the viewing circle
+        const currentCamPos = this.camera.position.clone();
+        const centerDir = center.clone().normalize(); // Up vector at target
+        
+        // Vector from center to camera
+        const toCamera = currentCamPos.clone().sub(center);
+        
+        // Project onto tangent plane (remove up component)
+        // This gives us the direction from center to camera "on the ground"
+        let approachDir = toCamera.clone()
+            .sub(centerDir.clone().multiplyScalar(toCamera.dot(centerDir)))
+            .normalize();
+            
+        // Fallback if camera is perfectly above (length is 0) -> use South
+        if (approachDir.lengthSq() < 0.01) {
+            // Default to consistent direction if vertical
+            // Use unit's forward or global Z
+             const unitForward = new THREE.Vector3(0, 0, 1);
+            if (unit.headingQuaternion) {
+                unitForward.applyQuaternion(unit.headingQuaternion);
+            }
+            // Project forward onto plane
+             approachDir = unitForward.clone()
+                .sub(centerDir.clone().multiplyScalar(unitForward.dot(centerDir)))
+                .normalize()
+                .negate(); // View from behind/south
+        }
+        
+        // 3. Calculate Target Position on the optimized circle point
+        // Position = Center + Up * Height + ApproachDir * HorizontalRadius
+        const cameraPos = center.clone()
+            .addScaledVector(centerDir, heightOffset)       // Height (Up)
+            .addScaledVector(approachDir, horizontalRadius); // Horizontal distance (preserving current angle)
+        
+        // 4. Create orthonormal basis for camera orientation?
+        // Not needed for position calculation, lookAt handles orientation.
+        
+        // === SMOOTH TRANSITION (ballistic arc, ease-in/out) ===
+        this.cameraControls.ballisticTransitionToTarget(cameraPos, center);
     }
     
     deselectUnit() {
@@ -595,10 +718,9 @@ export class Game {
             this.cameraControls.chaseTarget = null;
         }
         
-        // Camera: Zoom to show ENTIRE PATH (not just unit)
+        // Camera: Zoom to UNIT FULL VIEW (path + vision radius)
         if (isNewUnit) {
-            // Call zoomCameraToPath which calculates bounding sphere of all waypoints
-            this.zoomCameraToPath(unit);
+            this.flyToUnitFullView(unit);
         }
         
         // Keep panel closed (don't add split-screen class)
@@ -720,11 +842,20 @@ export class Game {
             this.cameraControls.setChaseTarget(unit, true); // Control mode - close third-person
         }
         
+        // GENERIC ID GENERATOR
+        const generateID = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
+        
         // If first waypoint, start from unit's CURRENT position (not where it started)
         if (unit.waypointControlPoints.length === 0) {
             const startPos = unit.position.clone();
+            startPos._id = generateID(); // Attach ID
             unit.waypointControlPoints.push(startPos);
             unit.isPathClosed = false;
+            
+            // AUTO-INITIALIZE: Mark start point as "passed" immediately
+            // This ensures the unit always has a valid anchor for rejoin logic
+            unit.lastPassedControlPointID = startPos._id;
+            unit.passedControlPointCount = 1;
             
             // Create START POINT sphere marker
             const startDir = startPos.clone().normalize();
@@ -741,11 +872,12 @@ export class Game {
             });
             const startMarker = new THREE.Mesh(startMarkerGeo, startMarkerMat);
             startMarker.position.copy(startMarkerPos);
-            startMarker.userData.isFilled = false;
+            startMarker.userData.isFilled = true; // Already passed (we started here!)
             startMarker.userData.controlPointIndex = 0;
             startMarker.userData.isStartMarker = true;
             startMarker.userData.waypointNumber = 0;
-            startMarker.userData.unitId = unit.id; // Link marker to unit
+            startMarker.userData.id = startPos._id; // Link marker via ID
+            startMarker.userData.unitId = unit.id; 
             
             const startLabelSprite = this.createNumberSprite(0);
             startLabelSprite.position.copy(startMarkerPos);
@@ -758,10 +890,12 @@ export class Game {
         }
         
         // Add the clicked point as a new waypoint
-        unit.waypointControlPoints.push(point.clone());
+        const newPoint = point.clone();
+        newPoint._id = generateID(); // Attach ID
+        unit.waypointControlPoints.push(newPoint);
         
         // Create visual marker (Transparent Sphere on terrain surface)
-        const dir = point.clone().normalize();
+        const dir = newPoint.clone().normalize();
         const terrainRadius = this.planet.terrain.getRadiusAt(dir);
         const markerPos = dir.clone().multiplyScalar(terrainRadius);
         
@@ -782,13 +916,14 @@ export class Game {
         labelSprite.position.copy(markerPos);
         labelSprite.renderOrder = 15;
         marker.userData.labelSprite = labelSprite;
-        marker.userData.unitId = unit.id; // Link marker to unit
+        marker.userData.unitId = unit.id;
         this.scene.add(labelSprite);
         
-        // Store fill state
+        // Store metadata
         marker.userData.isFilled = false;
         marker.userData.controlPointIndex = unit.waypointControlPoints.length - 1;
         marker.userData.waypointNumber = waypointNumber;
+        marker.userData.id = newPoint._id; // Link marker via ID
         
         this.scene.add(marker);
         unit.waypointMarkers.push(marker);
@@ -801,7 +936,7 @@ export class Game {
             this.updatePanelContent(this.focusedUnit);
         }
         
-        console.log("Waypoint added:", point, "Control points:", unit.waypointControlPoints.length);
+        console.log("Waypoint added:", newPoint, "ID:", newPoint._id);
     }
     
     closePath() {
@@ -885,190 +1020,58 @@ export class Game {
         unit.waypointCurveLine = new THREE.Mesh(tubeGeo, tubeMat);
         this.scene.add(unit.waypointCurveLine);
         
-        // === PATH SYNC - SMOOTH REJOIN (NO TELEPORT) ===
+        // === PATH SYNC - SIMPLIFIED REJOIN ===
+        // When path changes, find the closest FORWARD point on the new path.
+        // Unit will naturally steer to it (no teleport, no transition curves).
         const newCPCount = controlPoints.length;
         
         if (newCPCount >= 2) {
-            const oldPath = unit.path ? unit.path.slice() : null;
-            const oldPathIndex = unit.pathIndex || 0;
-            
             // Store new permanent path
             unit.path = projectedPoints.map(p => p.clone());
             
-            // === SMOOTH REJOIN LOGIC ===
-            // If unit was already moving, create transition curve instead of teleporting
-            if (oldPath && oldPath.length > 0 && unit.isFollowingPath) {
-                const unitPos = unit.position.clone();
-                const unitVelocity = unit.velocityDirection ? unit.velocityDirection.clone() : null;
-                
-                // Find the best rejoin point on NEW path:
-                // - Must be AHEAD of current position (towards next waypoint)
-                // - Should minimize transition distance while maintaining smooth curve
-                let bestRejoinIdx = 0;
-                let bestScore = Infinity;
-                
-                for (let i = 0; i < unit.path.length; i++) {
-                    const pathPoint = unit.path[i];
-                    const dist = unitPos.distanceTo(pathPoint);
-                    
-                    // Check if this point is "forward" relative to unit direction
-                    let isForward = true;
-                    if (unitVelocity && unitVelocity.lengthSq() > 0.001) {
-                        const toPoint = pathPoint.clone().sub(unitPos).normalize();
-                        const dot = toPoint.dot(unitVelocity);
-                        isForward = dot > -0.3; // Allow some side movement, reject pure backwards
-                    }
-                    
-                    if (isForward) {
-                        // Score: prefer closer points that are forward
-                        const score = dist;
-                        if (score < bestScore) {
-                            bestScore = score;
-                            bestRejoinIdx = i;
-                        }
-                    }
+            // === CRITICAL: Find where unit CURRENTLY IS on the NEW path ===
+            // Then continue forward from that point
+            
+            const unitPos = unit.position.clone();
+            
+            // Find the closest point on the NEW path (absolute closest)
+            let closestIdx = 0;
+            let closestDist = Infinity;
+            
+            for (let i = 0; i < unit.path.length; i++) {
+                const d = unitPos.distanceTo(unit.path[i]);
+                if (d < closestDist) {
+                    closestDist = d;
+                    closestIdx = i;
                 }
-                
-                // If unit is already close to path, just continue normally
-                const rejoinDist = unitPos.distanceTo(unit.path[bestRejoinIdx]);
-                
-                if (rejoinDist < 0.3) {
-                    // Already on path, no transition needed
-                    unit.pathIndex = bestRejoinIdx;
-                    unit.transitionPath = null;
+            }
+            
+            // Now, we want to continue FORWARD from this closest point
+            // The pathIndex should be closestIdx + a small lookahead
+            // This ensures we don't target the point we're standing on
+            
+            // Add small lookahead (e.g., 5-10 points ahead) to target the next segment
+            const lookahead = Math.min(10, Math.floor(unit.path.length * 0.02));
+            let targetIdx = closestIdx + lookahead;
+            
+            // Handle wrap-around for closed paths
+            if (targetIdx >= unit.path.length) {
+                if (unit.isPathClosed) {
+                    targetIdx = targetIdx % unit.path.length;
                 } else {
-                    // === BEZIER-LIKE TRANSITION CURVE ===
-                    // Goal: Continue current direction, then smooth arc to rejoin path
-                    // Target the ORIGINAL waypoint, not just the closest point
-                    
-                    const groundOffset = unit.groundOffset || 0.5;
-                    
-                    // The unit should aim towards its ORIGINAL target (next waypoint)
-                    // Find a rejoin point that's BETWEEN current position and target
-                    const originalTargetIdx = oldPathIndex < oldPath.length ? oldPathIndex : 0;
-                    
-                    // Calculate a blend point between closest path point and forward
-                    let blendedRejoinIdx = bestRejoinIdx;
-                    const lookAhead = Math.min(20, Math.floor(unit.path.length * 0.1)); // Look up to 10% forward
-                    if (bestRejoinIdx + lookAhead < unit.path.length) {
-                        // Pick a point slightly ahead for smoother entry
-                        blendedRejoinIdx = bestRejoinIdx + Math.floor(lookAhead / 2);
-                    }
-                    
-                    const rejoinPoint = unit.path[blendedRejoinIdx];
-                    
-                    // === CUBIC BEZIER CONTROL POINTS ===
-                    // P0: Current position
-                    // P1: Continue in current direction (creates smooth exit tangent)
-                    // P2: Approach point (creates smooth entry tangent)  
-                    // P3: Rejoin point
-                    
-                    let forwardProjection = 2.0; // How far to project current direction
-                    let approachDistance = rejoinDist * 0.3; // Approach control point distance
-                    
-                    let continuationPoint;
-                    if (unitVelocity && unitVelocity.lengthSq() > 0.001) {
-                        // Project forward based on velocity (continue current direction)
-                        continuationPoint = unitPos.clone().add(unitVelocity.clone().multiplyScalar(forwardProjection));
-                    } else {
-                        // Fallback: use tangent
-                        const radialDir = unitPos.clone().normalize();
-                        const tangent = new THREE.Vector3(-radialDir.y, radialDir.x, 0).normalize();
-                        continuationPoint = unitPos.clone().add(tangent.multiplyScalar(forwardProjection));
-                    }
-                    
-                    // Approach point: positioned to create smooth entry angle
-                    // Vector from rejoin back towards continuation point
-                    let afterRejoinIdx = blendedRejoinIdx + 1;
-                    if (afterRejoinIdx >= unit.path.length) {
-                        afterRejoinIdx = unit.isPathClosed ? 0 : unit.path.length - 1;
-                    }
-                    const afterRejoin = unit.path[afterRejoinIdx];
-                    const rejoinDirection = afterRejoin.clone().sub(rejoinPoint).normalize();
-                    const approachPoint = rejoinPoint.clone().sub(rejoinDirection.multiplyScalar(approachDistance));
-                    
-                    // Build cubic Bezier via CatmullRom (using extension points for tangent matching)
-                    const transitionControlPoints = [
-                        unitPos.clone().sub(unitVelocity ? unitVelocity.clone().multiplyScalar(1) : new THREE.Vector3(0,0,0)), // Extension for entry tangent
-                        unitPos.clone(),
-                        continuationPoint,
-                        approachPoint,
-                        rejoinPoint.clone(),
-                        afterRejoin.clone() // Extension for exit tangent
-                    ];
-                    
-                    // Create smooth transition curve
-                    const transitionCurve = new THREE.CatmullRomCurve3(
-                        transitionControlPoints, false, 'chordal', 0.0
-                    );
-                    
-                    // Sample transition - more samples for smoother curve
-                    const numTransitionSamples = 40;
-                    const transitionSamples = transitionCurve.getPoints(numTransitionSamples);
-                    
-                    // Project ALL transition points onto terrain (terrain-following)
-                    // AND check for obstacles (water, etc.) - same as normal path
-                    const waterLevel = this.planet.terrain.params.waterLevel || 0;
-                    const baseRadius = this.planet.terrain.params.radius || 10;
-                    const waterRadius = baseRadius + waterLevel;
-                    const canEnterWater = unit.canWalkUnderwater || unit.canSwim;
-                    
-                    let transitionValid = true;
-                    const transitionProjected = transitionSamples.slice(1, -1).map(p => {
-                        const dir = p.clone().normalize();
-                        const terrainRadius = this.planet.terrain.getRadiusAt(dir);
-                        
-                        // Check if point is underwater
-                        if (!canEnterWater && terrainRadius < waterRadius) {
-                            transitionValid = false; // Mark transition as invalid
-                        }
-                        
-                        return dir.multiplyScalar(terrainRadius + groundOffset);
-                    });
-                    
-                    // If transition goes through water, skip transition and stay on current path
-                    if (!transitionValid) {
-                        unit.transitionPath = null;
-                        unit.isOnTransition = false;
-                        // Keep current position, let unit find closest valid path point naturally
-                    } else {
-                    
-                    // Store as TEMPORARY transition path
-                    unit.transitionPath = transitionProjected;
-                    unit.transitionIndex = 0;
-                    unit.transitionRejoinIdx = blendedRejoinIdx;
-                    unit.isOnTransition = true;
-                    
-                    // pathIndex points to where we'll rejoin after transition
-                    unit.pathIndex = blendedRejoinIdx;
-                    } // End of transitionValid else block
+                    targetIdx = unit.path.length - 1;
                 }
-            } else {
-                // First path setup - find closest point
-                let closestIdx = 0;
-                let bestDist = Infinity;
-                
-                for (let i = 0; i < unit.path.length; i++) {
-                    const dist = unit.position.distanceTo(unit.path[i]);
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        closestIdx = i;
-                    }
-                }
-                
-                unit.pathIndex = closestIdx;
-                unit.transitionPath = null;
-                unit.isOnTransition = false;
             }
             
-            // Clamp pathIndex
-            if (unit.pathIndex >= unit.path.length) {
-                unit.pathIndex = (unit.loopingEnabled || unit.isPathClosed) ? 0 : unit.path.length - 1;
-            }
-            if (unit.pathIndex < 0) unit.pathIndex = 0;
-            
+            unit.pathIndex = targetIdx;
             unit.isFollowingPath = true;
-            unit.lastCommittedControlPointCount = newCPCount;
+            
+            // CRITICAL: Clear savedPath to prevent keyboard override from restoring OLD path!
+            unit.savedPath = null;
+            unit.savedPathIndex = 0;
+            unit.isKeyboardOverriding = false;
+            
+            console.log(`Path updated. Closest: ${closestIdx}, Target: ${targetIdx}, Dist: ${closestDist.toFixed(2)}`);
         }
     }
     
@@ -1123,6 +1126,7 @@ export class Game {
         unit.waypointControlPoints = [];
         unit.lastCommittedControlPointCount = 0;
         unit.passedControlPointCount = 0;
+        unit.lastPassedControlPointID = null; // Reset ID tracking
         unit.loopingEnabled = false;
         unit.isPathClosed = false;
     }
@@ -1138,17 +1142,42 @@ export class Game {
         unit.waypointMarkers.forEach((marker, index) => {
             if (marker.userData.isFilled) return; // Already filled
             
-            const cpIndex = index + 1;
-            if (cpIndex >= unit.waypointControlPoints.length) return;
+            // Only check if we are reasonably close in sequence? 
+            // Or just check all? All is fine for small N.
             
-            const controlPoint = unit.waypointControlPoints[cpIndex];
+            const cpIndex = index + 1; // Markers correspond to points? 
+            // Marker 0 -> Control Point 0 ?
+            // In addWaypoint:
+            // First waypoint: Push startPos (index 0). Marker 0 created. userData.controlPointIndex=0.
+            // Next: addWaypoint(point). Push point (index 1). Marker 1 created. userData.controlPointIndex=1.
+            // So marker index equals control point index.
+            
+            const cpId = marker.userData.id; // We stored ID on marker now
+            // Or find via index?
+            // controlPoint = unit.waypointControlPoints[index];
+            
+            // NOTE: Marker userData.controlPointIndex might be stale if we reordered?
+            // BUT we updated it in reorderWaypointsFromDOM!
+            
+            // Let's use the ID we attached to the marker
+            if (!cpId) return; 
+            
+            // Find actual control point by ID to be safe?
+            const controlPoint = unit.waypointControlPoints.find(cp => cp._id === cpId);
+            if (!controlPoint) return;
+            
             const dist = unitPos.distanceTo(controlPoint);
             
-            if (dist < 2.0) {
+            if (dist < 3.0) { // Increased from 2.0 for easier hitting
                 marker.userData.isFilled = true;
                 marker.material.opacity = 0.9;
                 marker.material.color.setHex(0x00ffaa);
-                unit.passedControlPointCount = Math.max(unit.passedControlPointCount, cpIndex);
+                
+                // Track this as the last passed point
+                unit.lastPassedControlPointID = cpId;
+                unit.passedControlPointCount = Math.max(unit.passedControlPointCount, index + 1);
+                
+                console.log(`Passed Waypoint ${index} (ID: ${cpId})`);
             }
         });
     }
@@ -1271,21 +1300,38 @@ export class Game {
         // UI Transition
         document.body.classList.add('split-screen');
         
-        // Camera Logic
+        // Camera Logic - SMOOTH TRANSITION to overhead view for path editing
         if (this.cameraControls) {
-            // Cinematic Flight if needed
-            // If new unit OR we are not chasing/flying, trigger cinematic
-            if (isNewUnit || !this.cameraControls.chaseTarget) {
-                this.cameraControls.flyTo(unit, () => {
-                    this.cameraControls.setChaseTarget(unit);
-                });
-            } else {
-                // Ensure chase target is set if we are already close/chasing
-                this.cameraControls.setChaseTarget(unit);
+            // STOP CHASING - we want static view for path editing
+            this.cameraControls.setChaseTarget(null);
+            
+            // Calculate target camera position (same as positionCameraAboveUnit)
+            const unitPos = unit.position.clone();
+            const up = unitPos.clone().normalize();
+            const distance = 30;
+            
+            const tangent = new THREE.Vector3(1, 0, 0).cross(up).normalize();
+            if (tangent.lengthSq() < 0.01) {
+                tangent.set(0, 1, 0).cross(up).normalize();
             }
             
-            // NOTE: We no longer change camera config on panel open
-            // This was causing jumps. Camera stays at its current distance.
+            const cameraOffset = up.clone().multiplyScalar(0.6)
+                .add(tangent.clone().multiplyScalar(0.4))
+                .normalize()
+                .multiplyScalar(distance);
+            
+            const targetCameraPos = unitPos.clone().add(cameraOffset);
+            
+            // Build target orientation
+            const lookMatrix = new THREE.Matrix4();
+            lookMatrix.lookAt(targetCameraPos, unitPos, up);
+            const targetQuat = new THREE.Quaternion().setFromRotationMatrix(lookMatrix);
+            
+            // SMOOTH ANIMATION instead of instant jump
+            // Use cameraControls internal smoothing by setting targets
+            this.cameraControls.targetPosition.copy(targetCameraPos);
+            this.cameraControls.targetQuaternion.copy(targetQuat);
+            // Camera will smoothly interpolate with its built-in easing
         }
         
         // Ensure path visualization is VISIBLE when panel is open
@@ -1293,6 +1339,12 @@ export class Game {
         
         // Update Panel Content
         this.updatePanelContent(unit);
+        
+        // SHIFT VIEWPORT: Panel is ~38% of screen height
+        // We shift the view UP so the unit is centered in the remaining space
+        if (this.cameraControls) {
+            this.cameraControls.setViewOffsetPixel(window.innerHeight * 0.38);
+        }
         
         // NOTE: Removed resize trigger - map should not move when panel opens 
     }
@@ -1312,6 +1364,8 @@ export class Game {
         if (this.cameraControls) {
              // Stop chasing when exiting focus mode
              this.cameraControls.chaseTarget = null;
+             // Reset Viewport
+             this.cameraControls.setViewOffsetPixel(0);
         }
     }
     
@@ -1417,6 +1471,7 @@ export class Game {
             item.addEventListener('dragstart', (e) => {
                 draggedItem = item;
                 item.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
             });
             
             item.addEventListener('dragend', () => {
@@ -1426,6 +1481,7 @@ export class Game {
             
             item.addEventListener('dragover', (e) => {
                 e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
                 if (draggedItem && draggedItem !== item) {
                     const rect = item.getBoundingClientRect();
                     const midY = rect.top + rect.height / 2;
@@ -1450,23 +1506,53 @@ export class Game {
         if (!list || !unit || !unit.waypointControlPoints) return;
         
         const items = list.querySelectorAll('.command-item');
-        const newOrder = Array.from(items).map(item => parseInt(item.dataset.index));
+        const newOrderIndices = Array.from(items).map(item => parseInt(item.dataset.index));
         
-        // Reorder control points
-        const reorderedPoints = newOrder.map(i => unit.waypointControlPoints[i]);
+        // 1. Reorder CONTROL POINTS
+        const reorderedPoints = newOrderIndices.map(i => unit.waypointControlPoints[i]);
         unit.waypointControlPoints = reorderedPoints;
         
+        // 2. Reorder MARKERS (Visuals) to match
+        // Map old indices to markers, then reassemble
+        // We have to accept that unit.waypointMarkers[i] corresponds to unit.waypointControlPoints[i] BEFORE sort
+        const oldMarkers = [...unit.waypointMarkers];
+        const reorderedMarkers = newOrderIndices.map(i => oldMarkers[i]);
+        unit.waypointMarkers = reorderedMarkers;
+        
+        // 3. Update Labels (0, 1, 2...)
+        // Renumber markers to reflect new sequence
+        unit.waypointMarkers.forEach((marker, newIndex) => {
+            // Update metadata
+            marker.userData.controlPointIndex = newIndex;
+            marker.userData.waypointNumber = newIndex;
+            
+            // Update Label Sprite
+            if (marker.userData.labelSprite) {
+                // Dispose old sprite material
+                this.scene.remove(marker.userData.labelSprite);
+                if (marker.userData.labelSprite.material.map) marker.userData.labelSprite.material.map.dispose();
+                marker.userData.labelSprite.material.dispose();
+                
+                // Create new sprite with correct number
+                const newLabel = this.createNumberSprite(newIndex);
+                newLabel.position.copy(marker.position);
+                newLabel.renderOrder = 15;
+                marker.userData.labelSprite = newLabel;
+                this.scene.add(newLabel);
+            }
+        });
+        
         // Regenerate curve
-        unit.lastCommittedControlPointCount = 0; // Force full regenerate
-        unit.path = []; // Clear current path
+        // Force full regenerate, no transition optimization for now? 
+        // Logic in updateWaypointCurve will try to smooth rejoin.
         this.updateWaypointCurve();
         
-        // Update panel
+        // Update panel to reflect new indices
         if (this.focusedUnit) {
             this.updatePanelContent(this.focusedUnit);
         }
         
-        console.log("Waypoints reordered:", newOrder);
+        console.log("Waypoints & Markers reordered successfully.", newOrderIndices);
     }
     
     setupPlaybackButtons() {
@@ -1478,15 +1564,27 @@ export class Game {
             playBtn.addEventListener('click', () => {
                 const unit = this.selectedUnit;
                 if (unit && unit.waypointControlPoints && unit.waypointControlPoints.length >= 2) {
-                    // Manual Override Release: Resume path logic
+                    // Reset command pause
                     unit.setCommandPause(false);
                     
-                    // IF user modified position significantly (e.g. manual drive), maybe regenerate?
-                    // But requirement says "visszamegy az útvonalhoz".
-                    // Standard path following logic will steer towards path[pathIndex].
-                    // So we just unpause.
+                    // CRITICAL: Reset water state so unit can move again
+                    unit.waterState = 'normal';
                     
-                    console.log("Playback: PLAY (Unpause Command)");
+                    // Resume path following
+                    unit.isFollowingPath = true;
+                    
+                    // Find closest point on path to resume
+                    if (unit.path && unit.path.length > 0) {
+                        let closest = 0;
+                        let minDist = Infinity;
+                        for (let i = 0; i < unit.path.length; i++) {
+                            const d = unit.position.distanceTo(unit.path[i]);
+                            if (d < minDist) { minDist = d; closest = i; }
+                        }
+                        unit.pathIndex = closest;
+                    }
+                    
+                    console.log("Playback: PLAY - Reset waterState and resumed path");
                 }
             });
         }
@@ -1566,6 +1664,11 @@ export class Game {
     }
 
     start() {
+        // Initialize Audio Manager with camera
+        if (this.audioManager) {
+            this.audioManager.init(this.camera);
+        }
+        
         this.animate();
         // Preloader fade is handled by Main.js onFirstRender callback
     }
@@ -1596,9 +1699,9 @@ export class Game {
                 // Only set chase target if NOT currently transitioning (no duplicate movement)
                 this.cameraControls.setChaseTarget(this.selectedUnit);
             }
-        } else if (this.selectedUnit) {
-            // Keep chase target for obstruction detection even when not keyboard driving
-            // But only if NOT flying (transition animation takes priority)
+        } else if (this.selectedUnit && this.cameraControls.chaseMode === 'thirdPerson') {
+            // Keep chase target ONLY in third-person mode for smooth following
+            // Do NOT set chase target in drone mode (prevents auto third-person transition)
             if (!this.cameraControls.isFlying) {
                 this.cameraControls.setChaseTarget(this.selectedUnit);
             }
@@ -1606,6 +1709,9 @@ export class Game {
 
         // Update all units
         this.units.forEach(unit => {
+            // Skip null units (not yet loaded)
+            if (!unit) return;
+            
             // Sync params
             unit.speed = this.unitParams.speed;
             unit.turnSpeed = this.unitParams.turnSpeed;
@@ -1636,6 +1742,26 @@ export class Game {
             this.visionHelper.position.copy(this.selectedUnit.position);
             const r = this.fogOfWar.currentVisionRadius || 40.0;
             this.visionHelper.scale.set(r/15, r/15, r/15);
+        }
+        
+        // Update visibility indicator
+        const visIndicator = document.getElementById('visibility-indicator');
+        if (visIndicator) {
+            if (this.selectedUnit && this.cameraControls) {
+                visIndicator.classList.remove('hidden');
+                const obstructionHeight = this.cameraControls.currentObstructionHeight || 0;
+                const isObstructed = obstructionHeight > 1.0; // If camera had to rise more than 1 unit
+                
+                if (isObstructed) {
+                    visIndicator.classList.add('obstructed');
+                    visIndicator.querySelector('.visibility-text').textContent = 'OBSTRUCTED';
+                } else {
+                    visIndicator.classList.remove('obstructed');
+                    visIndicator.querySelector('.visibility-text').textContent = 'VISIBLE';
+                }
+            } else {
+                visIndicator.classList.add('hidden');
+            }
         }
         
         // Update FOW with ALL units
@@ -1670,6 +1796,13 @@ export class Game {
         
         // Update Path Visuals
         this.updatePathVisuals();
+        
+        // Update Audio System
+        if (this.audioManager) {
+            // Distance from planet center (Origin)
+            const camDist = this.camera.position.length();
+            this.audioManager.update(camDist, this.units);
+        }
     }
 
     animate() {

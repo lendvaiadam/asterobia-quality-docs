@@ -123,6 +123,7 @@ export class FogOfWar {
         
         // Add a quad for each unit
         units.forEach(unit => {
+            if (!unit) return; // Skip null units (not yet loaded)
             const mesh = new THREE.Mesh(this.quadGeometry, this.brushMaterial.clone());
             mesh.material.uniforms.uUnitPosition.value.copy(unit.position);
             mesh.material.uniforms.uVisionRadius.value = this.currentVisionRadius || 15.0;

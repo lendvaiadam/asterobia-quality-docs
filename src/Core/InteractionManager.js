@@ -42,6 +42,11 @@ export class InteractionManager {
     }
 
     onMouseDown(event) {
+        // Ensure Audio Context is assumed
+        if (this.game.audioManager) {
+            this.game.audioManager.resumeContext();
+        }
+
         // RMB Handling
         if (event.button === 2) {
             if (this.state === 'DRAWING_PATH') {
@@ -214,8 +219,9 @@ export class InteractionManager {
                 // Clear marker reference (no drag happened)
                 this.mouseDownMarker = null;
             } else if (this.mouseDownUnit) {
-                // (1) Click on Unit -> SELECT + FLY (no panel)
-                this.game.selectAndFlyToUnit(this.mouseDownUnit);
+                // (1) Click on Unit -> SELECT ONLY (Don't fly)
+                // User Request: "Ha bal gombbal kiválasztom a unitot, akkor nem kell mozgatni a kamerát"
+                this.game.selectUnit(this.mouseDownUnit, true);
             } else if (this.mouseDownTerrain) {
                 // (2) Click on Terrain
                 if (event.shiftKey && this.game.selectedUnit) {
@@ -316,7 +322,7 @@ export class InteractionManager {
 
     raycastUnit() {
         this.raycaster.setFromCamera(this.mouseNDC, this.game.camera);
-        const unitMeshes = this.game.units.map(u => u.mesh);
+        const unitMeshes = this.game.units.filter(u => u && u.mesh).map(u => u.mesh);
         const intersects = this.raycaster.intersectObjects(unitMeshes, true);
         if (intersects.length > 0) {
             // Find parent Unit object
@@ -351,6 +357,7 @@ export class InteractionManager {
             let closestDist = Infinity;
             
             this.game.units.forEach(unit => {
+                if (!unit) return; // Skip null units
                 // Project unit position to screen space
                 const screenPos = unit.position.clone().project(this.game.camera);
                 const screenX = (screenPos.x + 1) / 2 * window.innerWidth;

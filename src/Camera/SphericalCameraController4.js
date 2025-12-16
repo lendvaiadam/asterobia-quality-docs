@@ -193,6 +193,122 @@ export class SphericalCameraController4 {
     }
     
     /**
+     * Ballistic camera transition with arc trajectory.
+     * - Duration based on surface distance
+     * - Arc height based on distance (low for short, high for long)
+     * - Avoids gimbal lock with proper quaternion interpolation
+     */
+    ballisticTransitionToTarget(targetPos, lookAtPoint) {
+        this.isFlying = true;
+        this.chaseTarget = null;
+        
+        const startPos = this.camera.position.clone();
+        const planetCenter = new THREE.Vector3(0, 0, 0);
+        const planetRadius = this.planet.terrain.params.radius;
+        
+        // === 1. CALCULATE SURFACE ARC DISTANCE ===
+        const startDir = startPos.clone().normalize();
+        const endDir = targetPos.clone().normalize();
+        const arcAngle = Math.acos(THREE.MathUtils.clamp(startDir.dot(endDir), -1, 1));
+        const surfaceDistance = arcAngle * planetRadius;
+        
+        // === 2. CALCULATE DURATION (distance-based) ===
+        // Short distance (0-50): 1s
+        // Medium distance (50-200): 1-2.5s
+        // Long distance (>200): 2.5-4s
+        const minDuration = 1.5;
+        const maxDuration = 5.5;
+        const distanceRatio = THREE.MathUtils.clamp(surfaceDistance / (planetRadius * Math.PI), 0, 1);
+        const duration = THREE.MathUtils.lerp(minDuration, maxDuration, distanceRatio);
+        
+        // === 3. CALCULATE ARC APEX HEIGHT ===
+        // Short distance: low arc (camera stays close)
+        // Long distance (opposite side): high arc (see whole planet)
+        const minArcHeight = planetRadius + 30; // Low arc
+        const maxArcHeight = planetRadius * 2.5; // High enough to see whole planet
+        const apexRadius = THREE.MathUtils.lerp(minArcHeight, maxArcHeight, distanceRatio);
+        
+        // Apex position: midpoint direction at apex radius
+        const midDir = new THREE.Vector3().addVectors(startDir, endDir).normalize();
+        const apexPos = midDir.multiplyScalar(apexRadius);
+        
+        // === 4. SETUP LOOK-AT POINTS ===
+        const startForward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        const startLookAt = startPos.clone().addScaledVector(startForward, 50);
+        const startUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+        const endUp = targetPos.clone().normalize();
+        
+        // Apex position calculation (not needed for Slerp, but kept for height ref)
+        
+        // Apex position calculation (not needed for Slerp, but kept for height ref)
+        
+        let elapsed = 0;
+        
+        this.flyFn = (dt) => {
+            elapsed += dt;
+            const t = Math.min(1.0, elapsed / duration);
+            
+            // === EASE-OUT START (quintic ease-in-out) ===
+            const ease = t < 0.5 
+                ? 16 * t * t * t * t * t 
+                : 1 - Math.pow(-2 * t + 2, 5) / 2;
+            
+            // === SPHERICAL BALLISTIC ARC (Slerp + Height Parabola) ===
+            // 1. Interpolate Direction (Slerp) - follows planet curvature
+            const currentDir = startPos.clone().normalize().lerp(targetPos.clone().normalize(), ease).normalize(); 
+            // Note: normal lerp + normalize approximates slerp well for small angles, 
+            // but for full planet slerp is better. Let's use proper Slerp logic via Quaternion or manually.
+            // Actually, Vector3.slerp is not built-in for vectors in older Three.js, but lerp+normalize is "nlerp".
+            // For strictly accurate Slerp:
+            const startQuatRot = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), startDir);
+            const endQuatRot = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), endDir);
+            const curQuatRot = startQuatRot.clone().slerp(endQuatRot, ease);
+            const slerpDir = new THREE.Vector3(0,1,0).applyQuaternion(curQuatRot);
+            
+            // 2. Interpolate Height (Parabolic Arc)
+            // Height(t) = lerp(startH, endH, t) + arcHeight * (1 - (2t-1)^2)
+            const startHeight = startPos.length();
+            const endHeight = targetPos.length();
+            
+            // Parabola: 4 * t * (1-t) peaks at 1 when t=0.5
+            const arcFactor = 4 * ease * (1 - ease); 
+            // Base height interpolation
+            const baseHeight = THREE.MathUtils.lerp(startHeight, endHeight, ease);
+            // Add arc (apexRadius is the peak height)
+            // We want peak height to be apexRadius. 
+            // apexRadius is absolute from center.
+            const heightBoost = Math.max(0, apexRadius - Math.max(startHeight, endHeight));
+            const currentHeight = baseHeight + (heightBoost * arcFactor);
+            
+            const currentPos = slerpDir.multiplyScalar(currentHeight);
+            
+            // === LOOK-AT INTERPOLATION ===
+            const currentLookAt = new THREE.Vector3().lerpVectors(startLookAt, lookAtPoint, ease);
+            
+            // === UP VECTOR INTERPOLATION (prevents roll) ===
+            const currentUp = new THREE.Vector3().lerpVectors(startUp, endUp, ease).normalize();
+            
+            // === APPLY ===
+            this.camera.position.copy(currentPos);
+            this.targetPosition.copy(currentPos);
+            
+            // Build look-at matrix (no roll)
+            const lookM = new THREE.Matrix4();
+            lookM.lookAt(currentPos, currentLookAt, currentUp);
+            const targetQuat = new THREE.Quaternion().setFromRotationMatrix(lookM);
+            
+            this.camera.quaternion.copy(targetQuat);
+            this.targetQuaternion.copy(targetQuat);
+            
+            if (t >= 1.0) {
+                this.isFlying = false;
+                return true;
+            }
+            return false;
+        };
+    }
+    
+    /**
      * Smoothly transition from drone view to third-person behind the unit.
      * Called when user starts keyboard control.
      * Uses slow, balloon-like movement for a premium feel.
@@ -336,18 +452,9 @@ export class SphericalCameraController4 {
         }
         
         // === CHASE MODE UPDATE ===
-        // DEBUG: Log chase mode conditions
-        console.log("[CHASE DEBUG]", { 
-            hasChaseTarget: !!this.chaseTarget, 
-            isFlying: this.isFlying,
-            chaseTargetName: this.chaseTarget?.name || "null"
-        });
-        
         // Only run chase update if NOT currently in flying animation (prevents interference)
         if (this.chaseTarget && !this.isFlying) {
-            console.log("[CALLING updateChaseMode NOW]");
             this.updateChaseMode();
-            console.log("[AFTER updateChaseMode]");
             
             // === UNIT OCCLUSION CHECK ===
             // If unit is blocked by terrain, raise camera
@@ -403,8 +510,178 @@ export class SphericalCameraController4 {
         
         // Ensure matrix update
         this.camera.updateMatrixWorld();
+        
+        // === PLANET VISIBILITY CONSTRAINT ===
+        // User Request: "Távoli nézetben a bolygót kényszerítsük bele a képkeretbe"
+        // Prevent looking away from planet when zoomed out.
+        this.checkPlanetVisibility(dt);
+        
+        // === DISTANCE-BASED CENTERING ===
+        // User Request: "Ha teljesen kizoomolok, a bolygó egyre kevésbé mozduljon el középről"
+        // As camera moves farther from planet, gently pull camera position so planet stays centered.
+        // This is a position offset, NOT a rotation change.
+        this.applyDistanceCentering(dt);
     }
     
+    /**
+     * Gently pulls the camera so the planet stays centered as distance increases.
+     * Uses a gradual force that increases with distance.
+     */
+    applyDistanceCentering(dt) {
+        if (!this.planet) return;
+        if (this.isFlying || this.isDragging || this.isOrbiting) return; // Don't interfere with user input
+        
+        const dist = this.targetPosition.length();
+        const radius = this.planet.terrain.params.radius;
+        
+        // Start centering at 1.5x radius, full strength at 3x radius
+        const startDist = radius * 1.5;
+        const fullDist = radius * 3.0;
+        
+        if (dist < startDist) return; // Close enough, no centering needed
+        
+        // Calculate centering strength (0 to 1)
+        const t = THREE.MathUtils.clamp((dist - startDist) / (fullDist - startDist), 0, 1);
+        // Ease-in for smooth onset
+        const strength = t * t; // Quadratic ease-in
+        
+        // Calculate ideal "centered" position: same distance, but looking straight at planet center
+        // We want the camera to be positioned such that planet center is in the middle of the view.
+        // This means moving the camera towards the line from planet center through current camera direction.
+        
+        // Current camera forward
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.targetQuaternion);
+        
+        // Ideal position: on the ray from planet center, at current distance
+        const idealPos = forward.clone().negate().normalize().multiplyScalar(dist);
+        
+        // Blend towards ideal position
+        const centeringSpeed = 0.02 * strength; // Gentle pull, stronger when far
+        this.targetPosition.lerp(idealPos, centeringSpeed);
+    }
+
+    /**
+     * Constraints the camera so the planet is always visible in distant views.
+     * Implements "Easy-In" soft stop at the limit.
+     */
+    checkPlanetVisibility(dt) {
+        if (!this.planet) return;
+        
+        const dist = this.targetPosition.length();
+        const radius = this.planet.terrain.params.radius;
+        
+        // Define "Distant View": > 1.2x radius altitude (approx)
+        // If close to surface, full freedom is needed (e.g. looking at horizon).
+        if (dist < radius * 1.2) return;
+        
+        // Calculate limit angle
+        // Angular radius of planet from camera
+        // sin(theta) = R / D
+        // angle = asin(R / D)
+        const planetAngularRadius = Math.asin(radius / dist);
+        
+        // Camera FOV (vertical is usually smaller/restrictive)
+        const fovRad = THREE.MathUtils.degToRad(this.camera.fov);
+        
+        // Max deviation angle from center
+        // If we look away by (PlanetRadius + HalfFOV), the edge touches the screen edge.
+        // We want to KEEP it inside.
+        // So Limit = PlanetAngularRadius + (HalfFOV * 0.8); // 0.8 buffer to be safe
+        const limitAngle = planetAngularRadius + (fovRad * 0.5 * 0.9); 
+        
+        // Current Angle
+        const toCenter = this.targetPosition.clone().negate().normalize();
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.targetQuaternion);
+        
+        const currentAngle = forward.angleTo(toCenter);
+        
+        // Check violation
+        if (currentAngle > limitAngle) {
+            // Calculate correction needed
+            const correction = currentAngle - limitAngle;
+            
+            // "Easy-In" Soft Stop?
+            // If we are strictly overriding targetQuaternion here, input feels "blocked".
+            // To make it smooth, we can slerp towards the valid boundary.
+            
+            // Axis of rotation (Vertical axis perpendicular to deviation)
+            const axis = new THREE.Vector3().crossVectors(forward, toCenter).normalize();
+            
+            // Create correction rotation (rotate Forward TOWARDS Center)
+            const corrQuat = new THREE.Quaternion().setFromAxisAngle(axis, correction);
+            
+            // Apply correction to targetQuaternion
+            this.targetQuaternion.premultiply(corrQuat);
+            this.targetQuaternion.normalize();
+        }
+    }
+
+    /**
+     * Sets the chase target unit and enables chase mode.
+     */
+    setChaseTarget(unit, isControlMode = false) {
+        this.chaseTarget = unit;
+        if (isControlMode) {
+             this.chaseMode = 'thirdPerson';
+        }
+        // If we are NOT in a transition, stop flying so we can chase immediately
+        if (!this.isTransitioningMode) {
+            this.isFlying = false;
+        }
+    }
+
+    /**
+     * Updates the camera position during Chase Mode.
+     * Implements "Balloon" logic: gently drifts behind the unit.
+     */
+    updateChaseMode() {
+        if (!this.chaseTarget) return;
+
+        // 1. Calculate Ideal Chase Position (Behind and Above)
+        const unit = this.chaseTarget;
+        const strictUp = unit.position.clone().normalize();
+        
+        let forwardDef = new THREE.Vector3(0, 0, 1);
+        if (unit.headingQuaternion) forwardDef.applyQuaternion(unit.headingQuaternion);
+        
+        // Remove up component to get pure tangent forward
+        const right = new THREE.Vector3().crossVectors(strictUp, forwardDef).normalize();
+        const forward = new THREE.Vector3().crossVectors(right, strictUp).normalize();
+        
+        const idealPos = unit.position.clone()
+            .addScaledVector(forward, -this.config.chaseDistance) // Behind
+            .addScaledVector(strictUp, this.config.chaseHeight);  // Above
+
+        // 2. Apply Drift (Balloon Effect)
+        // If user is orbiting, we apply a weaker pull, allowing them to look around.
+        // If not orbiting, we apply a stronger (but still smooth) pull.
+        
+        // Drift factor: how fast we align to the ideal position
+        // 0.02 = very loose balloon
+        // 0.05 = tighter leash
+        const driftFactor = this.isOrbiting ? 0.005 : 0.03; 
+        
+        // INTERPOLATE TargetPosition towards IdealPos
+        // We modify targetPosition to pull the camera anchor
+        this.targetPosition.lerp(idealPos, driftFactor);
+        
+        // 3. Ensure Looking At Unit (Point of Interest)
+        // We continuously update the target rotation to look at the unit
+        // UNLESS the user is actively Looking Around (FreeLook)
+        if (!this.isFreeLooking) {
+            const currentPos = this.camera.position.clone();
+            const lookAtPoint = unit.position.clone(); // Center of unit
+            const up = currentPos.clone().normalize(); // Planet Up
+            
+            const lookM = new THREE.Matrix4();
+            lookM.lookAt(currentPos, lookAtPoint, up);
+            const idealQuat = new THREE.Quaternion().setFromRotationMatrix(lookM);
+            
+            // Slerp for smooth rotation (don't snap)
+            this.targetQuaternion.slerp(idealQuat, 0.1);
+        }
+    }
+
     /**
      * Check if chaseTarget (unit) is visible from camera.
      * If occluded by terrain, smoothly raise camera.
@@ -681,6 +958,7 @@ export class SphericalCameraController4 {
         // Orbit (RMB) adjusts relative angle, doesn't break chase.
         if (event.button === 0) { 
              this.chaseTarget = null;
+             this.chaseMode = 'drone'; // Stop Game.js from re-enabling chase
         }
 
         if (event.button === 0) this.isLMBDown = true;
@@ -887,6 +1165,17 @@ export class SphericalCameraController4 {
      */
     setViewOffsetPixel(amount) {
         this.currentViewOffsetY = amount;
+        
+        if (amount > 0) {
+            // Shift center UP = Shift Window DOWN (positive Y offset)
+            // We use 50% of the amount to center the remaining view area
+            // setViewOffset(fullWidth, fullHeight, x, y, width, height)
+            const val = amount * 0.5;
+            this.camera.setViewOffset(window.innerWidth, window.innerHeight, 0, val, window.innerWidth, window.innerHeight);
+        } else {
+            this.camera.clearViewOffset();
+        }
+        this.camera.updateProjectionMatrix();
     }
     
     // Legacy support (Deprecated by direct loop sync)

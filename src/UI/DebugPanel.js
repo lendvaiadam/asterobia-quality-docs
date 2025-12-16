@@ -1,5 +1,6 @@
 import { Pane } from 'tweakpane';
 import { BUILD_HASH, BUILD_DATE } from '../buildInfo.js';
+import { Unit } from '../Entities/Unit.js'; // Import Unit for static flags
 
 export class DebugPanel {
     constructor(game) {
@@ -13,6 +14,9 @@ export class DebugPanel {
             label: '🔧 Build', 
             readonly: true 
         });
+
+        // === PROFILER & TOGGLES ===
+        this.setupProfiler();
         
         // === PERFORMANCE MODE ===
         this.pane.addBinding(this, 'performanceMode', { label: '⚡ PERFORMANCE MODE' })
@@ -20,6 +24,128 @@ export class DebugPanel {
         
         this.setupTerrainControls();
         this.setupUnitControls();
+    }
+    
+    setupProfiler() {
+        // Inject Stats.js
+        const script = document.createElement('script');
+        script.onload = () => {
+            this.stats = new Stats();
+            document.body.appendChild(this.stats.dom);
+            this.stats.dom.style.left = 'unset';
+            this.stats.dom.style.right = '0px';
+            this.stats.dom.style.top = 'unset';
+            this.stats.dom.style.bottom = '0px';
+            
+            // Hook into game loop if possible, or requestAnimationFrame loop
+            const updateStats = () => {
+                this.stats.update();
+                requestAnimationFrame(updateStats);
+            };
+            requestAnimationFrame(updateStats);
+        };
+        script.src = '//mrdoob.github.io/stats.js/build/stats.min.js';
+        document.head.appendChild(script);
+
+        const folder = this.pane.addFolder({ title: 'Profiler & Visibility', expanded: true });
+        
+        const toggles = {
+            terrain: true,
+            water: true,
+            rocks: true,
+            units: true,
+            stars: true,
+            fowStars: true,
+            dust: true,
+            tracks: true,
+            shadows: true,
+            clouds: true
+        };
+        
+        // TERRAIN
+        folder.addBinding(toggles, 'terrain').on('change', (ev) => {
+            if (this.game.planet && this.game.planet.mesh) {
+                this.game.planet.mesh.visible = ev.value;
+            }
+        });
+
+        // WATER
+        folder.addBinding(toggles, 'water').on('change', (ev) => {
+            if (this.game.planet && this.game.planet.waterMesh) {
+                this.game.planet.waterMesh.visible = ev.value;
+            }
+        });
+
+        // ROCKS
+        folder.addBinding(toggles, 'rocks').on('change', (ev) => {
+            if (this.game.planet && this.game.planet.rockSystem && this.game.planet.rockSystem.rocks) {
+                this.game.planet.rockSystem.rocks.visible = ev.value;
+            }
+        });
+
+        // UNITS (Hide all units)
+        folder.addBinding(toggles, 'units').on('change', (ev) => {
+            if (this.game.units) {
+                this.game.units.forEach(unit => {
+                    if (unit && unit.mesh) {
+                        unit.mesh.visible = ev.value;
+                    }
+                });
+            }
+        });
+
+        // DUST (Static Flag + Group Visibility)
+        folder.addBinding(toggles, 'dust').on('change', (ev) => {
+            Unit.enableDust = ev.value;
+            // Toggle visibility of EXISTING dust
+            if (this.game.units) {
+                this.game.units.forEach(u => {
+                    if (u.dustGroup) u.dustGroup.visible = ev.value;
+                });
+            }
+        });
+
+        // TRACKS (Static Flag + Group Visibility)
+        folder.addBinding(toggles, 'tracks').on('change', (ev) => {
+            Unit.enableTracks = ev.value;
+             // Toggle visibility of EXISTING tracks
+            if (this.game.units) {
+                this.game.units.forEach(u => {
+                    if (u.trackGroup) u.trackGroup.visible = ev.value;
+                });
+            }
+        });
+
+        // PLANET SURFACE STARS (FOW STARS)
+        // User Request: "nem látható területen lévő csillagos texturát is le kellene tudni kapcsolni"
+        // Splitting into separate toggles as likely requested (assuming typo "keréknyom" -> "csillag")
+        
+        // BACKGROUND STARS
+        folder.addBinding(toggles, 'stars', { label: 'Space Stars' }).on('change', (ev) => {
+            if (this.game.stars) {
+                this.game.stars.visible = ev.value;
+            }
+        });
+        
+        // SURFACE STARS
+        // Add new key if not in object, or use existing if added
+        if (toggles.fowStars === undefined) toggles.fowStars = true;
+        
+        folder.addBinding(toggles, 'fowStars', { label: 'FOW Stars' }).on('change', (ev) => {
+            if (this.game.planet && this.game.planet.starField) {
+                this.game.planet.starField.visible = ev.value;
+            }
+        });
+
+        // SHADOWS
+        folder.addBinding(toggles, 'shadows').on('change', (ev) => {
+           if (this.game.renderer) {
+               this.game.renderer.shadowMap.enabled = ev.value;
+               if (this.game.sunLight) {
+                   this.game.sunLight.castShadow = ev.value;
+               }
+           } 
+        });
     }
     
     /**
@@ -193,7 +319,33 @@ export class DebugPanel {
         colorFolder.addBinding(params, 'heightMid', { min: 0, max: 5, label: 'Mid H' }).on('change', () => { if (this.autoRegenerate) this.regeneratePlanet(); });
         colorFolder.addBinding(params, 'heightPeak', { min: 2, max: 10, label: 'Peak H' }).on('change', () => { if (this.autoRegenerate) this.regeneratePlanet(); });
         
-        // I'll include these in the replacement content.
+        // === NORMAL MAP INTENSITY ===
+        const normalFolder = folder.addFolder({ title: 'Normal Maps' });
+        
+        // Terrain (Sand) Normal Scale
+        const normalParams = { 
+            terrainNormal: 0.5,  // Original value
+            rockNormal: 1.0     // Original value 
+        };
+        
+        normalFolder.addBinding(normalParams, 'terrainNormal', { 
+            min: 0.1, max: 5.0, label: 'Terrain Normal' 
+        }).on('change', (ev) => {
+            if (this.game.planet.mesh && this.game.planet.mesh.material) {
+                this.game.planet.mesh.material.normalScale.set(ev.value, ev.value);
+            }
+        });
+        
+        normalFolder.addBinding(normalParams, 'rockNormal', { 
+            min: 0.1, max: 5.0, label: 'Rock Normal' 
+        }).on('change', (ev) => {
+            if (this.game.rockSystem && this.game.rockSystem.materials) {
+                this.game.rockSystem.materials.forEach(mat => {
+                    mat.normalScale.set(ev.value, ev.value);
+                });
+                this.game.rockSystem.textureConfig.normalScale = ev.value;
+            }
+        });
         
         // Advanced Terrain
         const advFolder = this.pane.addFolder({ title: 'Advanced Terrain', expanded: false });

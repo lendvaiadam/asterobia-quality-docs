@@ -829,3 +829,148 @@ body.split-screen #bottom-panel .toggle-icon {
 .command-item.start-point .cmd-icon {
     filter: drop-shadow(0 0 5px #00ff88);
 }
+
+/* === Visibility Indicator === */
+#visibility-indicator {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    z-index: 500;
+    backdrop-filter: blur(8px);
+    transition: all 0.3s ease;
+}
+
+#visibility-indicator.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.visibility-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00ff9d;
+    box-shadow: 0 0 8px rgba(0, 255, 157, 0.6);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.visibility-text {
+    color: #00ff9d;
+}
+
+/* Obstructed state */
+#visibility-indicator.obstructed .visibility-dot {
+    background: #ff4757;
+    box-shadow: 0 0 8px rgba(255, 71, 87, 0.6);
+}
+
+#visibility-indicator.obstructed .visibility-text {
+    color: #ff4757;
+}
+
+#visibility-indicator.obstructed {
+    border-color: rgba(255, 71, 87, 0.3);
+}
+
+/* === Start Screen === */
+#start-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #000;
+    z-index: 2000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: opacity 0.5s ease-out;
+}
+
+#start-screen.fade-out {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.start-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+}
+
+/* Initially hide start button, show when ready */
+#start-btn {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 1s ease, transform 1s ease;
+    pointer-events: none;
+
+    background: transparent;
+    border: 1px solid rgba(0, 255, 136, 0.4);
+    color: #00ff88;
+    padding: 10px 24px;
+    /* Even smaller padding */
+    font-size: 14px;
+    /* Even smaller font */
+    font-weight: 400;
+    font-family: 'Rajdhani', sans-serif;
+    letter-spacing: 5px;
+    /* Adjust spacing slightly */
+    text-transform: uppercase;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.1);
+}
+
+#start-btn.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+#start-btn:hover {
+    background: rgba(0, 255, 136, 0.05);
+    border-color: rgba(0, 255, 136, 0.8);
+    box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
+    text-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+}
+
+#start-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.2), transparent);
+    transition: 0.5s;
+}
+
+#start-btn:hover::before {
+    left: 100%;
+}
+
+@keyframes blink {
+
+    0%,
+    100% {
+        opacity: 0.4;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
