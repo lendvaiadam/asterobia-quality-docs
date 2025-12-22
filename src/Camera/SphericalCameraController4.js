@@ -834,7 +834,7 @@ export class SphericalCameraController4 {
         // 2b. UNIT COLLISION (Skip the chase target)
         if (this.game && this.game.units) {
             for (const unit of this.game.units) {
-                if (unit === this.chaseTarget) continue;
+                if (!unit || unit === this.chaseTarget) continue;
 
                 const unitPos = unit.position;
                 const dist = camPos.distanceTo(unitPos);

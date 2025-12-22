@@ -205,6 +205,7 @@ export class Planet {
             shader.uniforms.uUVOffset = { value: new THREE.Vector2(0, 0) };
             shader.uniforms.uDebugMode = { value: 0 };
             shader.uniforms.uFowColor = { value: new THREE.Color(0x000000) };
+            shader.uniforms.uFowSmoothing = { value: 0.0 }; // 0.0 = OFF, >0.0 = Blur Radius
 
             // Tri-planar texturing uniforms
             shader.uniforms.uTextureScale = { value: 0.5 }; // World-space texture repeat
@@ -221,6 +222,29 @@ export class Planet {
                 uniform float uTextureScale;
                 uniform int uUseTriPlanar;
                 uniform float uBlendSharpness;
+                uniform float uFowSmoothing;
+
+                // Smooth FOW sampling (3x3 Blur)
+                vec4 sampleFowSmooth(sampler2D tex, vec2 uv) {
+                    if (uFowSmoothing <= 0.01) return texture2D(tex, uv);
+
+                    vec4 sum = vec4(0.0);
+                    vec2 step = vec2(uFowSmoothing * 0.005); 
+
+                    sum += texture2D(tex, uv + vec2(-step.x, -step.y)) * 1.0;
+                    sum += texture2D(tex, uv + vec2(0.0,     -step.y)) * 2.0;
+                    sum += texture2D(tex, uv + vec2(step.x,  -step.y)) * 1.0;
+                    
+                    sum += texture2D(tex, uv + vec2(-step.x, 0.0))     * 2.0;
+                    sum += texture2D(tex, uv)                          * 4.0;
+                    sum += texture2D(tex, uv + vec2(step.x,  0.0))     * 2.0;
+                    
+                    sum += texture2D(tex, uv + vec2(-step.x, step.y))  * 1.0;
+                    sum += texture2D(tex, uv + vec2(0.0,     step.y))  * 2.0;
+                    sum += texture2D(tex, uv + vec2(step.x,  step.y))  * 1.0;
+                    
+                    return sum / 16.0;
+                }
                 
                 // Tri-planar sampling function
                 vec4 triPlanarSample(sampler2D tex, vec3 worldPos, vec3 normal, float scale) {
@@ -269,8 +293,9 @@ export class Planet {
                     return;
                 }
 
-                vec4 explored = texture2D(uFogTexture, vec2(u, v));
-                vec4 visible = texture2D(uVisibleTexture, vec2(u, v));
+                // Smooth sampling
+                vec4 explored = sampleFowSmooth(uFogTexture, vec2(u, v));
+                vec4 visible = sampleFowSmooth(uVisibleTexture, vec2(u, v));
                 
                 float isVisible = visible.r; 
                 float isExplored = explored.r;

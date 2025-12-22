@@ -70,8 +70,9 @@ export class Game {
 
         // LIGHTING SETUP
         // Increased ambient light for better visibility in shadow (was 0.15)
-        const ambientLight = new THREE.AmbientLight(0x405060, 0.6);
-        this.scene.add(ambientLight);
+        // Increased ambient light for better visibility in shadow (was 0.15)
+        this.ambientLight = new THREE.AmbientLight(0x405060, 0.6);
+        this.scene.add(this.ambientLight);
 
         // Hemisphere Light: Subtle sky/ground color difference
         const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x444422, 0.2);

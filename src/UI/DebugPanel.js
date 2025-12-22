@@ -199,20 +199,34 @@ export class DebugPanel {
 
         // SHADOWS
         folder.addBinding(toggles, 'shadows').on('change', (ev) => {
-            if (this.game.renderer) {
-                this.game.renderer.shadowMap.enabled = ev.value;
-                this.game.renderer.shadowMap.autoUpdate = ev.value;
-                this.game.renderer.shadowMap.needsUpdate = true; // Force immediate update
-                // Force material update
-                this.game.scene.traverse((obj) => {
-                    if (obj.material) obj.material.needsUpdate = true;
-                });
-                if (this.game.sunLight) {
-                    this.game.sunLight.castShadow = ev.value;
-                    this.game.sunLight.shadow.camera.updateProjectionMatrix();
-                }
+            this.updateShadowsState(ev.value);
+        });
+
+        // SHADOW OPACITY (Controlled by Ambient Light)
+        // More ambient light = lighter (more transparent) shadows
+        const shadowParams = { opacity: 0.7 }; // Default 30% transparent (1.0 - 0.3)
+        folder.addBinding(shadowParams, 'opacity', {
+            min: 0.0, max: 1.0, step: 0.05, label: 'Shadow Opacity'
+        }).on('change', (ev) => {
+            // High Opacity = Dark Shadow = Low Ambient
+            // Low Opacity = Light Shadow = High Ambient
+            // Base Ambient was 0.6. Let's map Opacity 1.0 -> Ambient 0.2, Opacity 0.0 -> Ambient 1.5
+            const ambientIntensity = THREE.MathUtils.lerp(1.5, 0.2, ev.value);
+            if (this.game.ambientLight) {
+                this.game.ambientLight.intensity = ambientIntensity;
             }
         });
+
+        // Initial application of shadow settings
+        // Wait for next frame to ensure everything is loaded
+        setTimeout(() => {
+            this.updateShadowsState(toggles.shadows);
+            // Apply initial opacity
+            const initialAmbient = THREE.MathUtils.lerp(1.5, 0.2, shadowParams.opacity);
+            if (this.game.ambientLight) {
+                this.game.ambientLight.intensity = initialAmbient;
+            }
+        }, 100);
 
         // === GRAPHICS SETTINGS ===
         this.setupGraphicsControls();
@@ -785,6 +799,16 @@ export class DebugPanel {
             this.game.fogOfWar.blurAmount = fowBlurParams.blur;
         }
 
+        // FOW Map Smoothing (Shader based)
+        const fowSmoothParams = { smoothing: 0.0 };
+        unitFolder.addBinding(fowSmoothParams, 'smoothing', {
+            min: 0.0, max: 2.0, step: 0.1, label: 'FOW Smoothing'
+        }).on('change', (ev) => {
+            if (this.game.planet.mesh.material.materialShader) {
+                this.game.planet.mesh.material.materialShader.uniforms.uFowSmoothing.value = ev.value;
+            }
+        });
+
 
 
         const debugParams = {
@@ -840,6 +864,26 @@ export class DebugPanel {
                 this.game.planet.mesh.material.materialShader.uniforms.uFowColor.value.setRGB(ev.value.r, ev.value.g, ev.value.b);
             }
         });
+    }
+
+    updateShadowsState(enabled) {
+        if (this.game.renderer) {
+            this.game.renderer.shadowMap.enabled = enabled;
+            this.game.renderer.shadowMap.autoUpdate = enabled;
+            this.game.renderer.shadowMap.needsUpdate = true; // Force immediate update
+
+            // Force material update
+            this.game.scene.traverse((obj) => {
+                if (obj.material) obj.material.needsUpdate = true;
+            });
+
+            if (this.game.sunLight) {
+                this.game.sunLight.castShadow = enabled;
+                if (enabled) {
+                    this.game.sunLight.shadow.camera.updateProjectionMatrix();
+                }
+            }
+        }
     }
 
     regeneratePlanet() {
