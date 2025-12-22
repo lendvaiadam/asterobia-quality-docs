@@ -497,6 +497,29 @@ body.split-screen #bottom-panel .toggle-icon {
     background: rgba(0, 255, 157, 0.03);
 }
 
+/* === Waypoint State Colors (Blue/Orange) === */
+.command-item.state-target {
+    border-color: rgba(255, 170, 0, 0.5);
+    background: rgba(255, 170, 0, 0.1);
+    box-shadow: 0 0 12px rgba(255, 170, 0, 0.2);
+}
+
+.command-item.state-target::before {
+    background: linear-gradient(135deg, #ffaa00 0%, #ff7700 100%);
+    opacity: 1;
+}
+
+.command-item.state-from {
+    border-color: rgba(0, 170, 255, 0.5);
+    background: rgba(0, 170, 255, 0.1);
+    box-shadow: 0 0 12px rgba(0, 170, 255, 0.2);
+}
+
+.command-item.state-from::before {
+    background: linear-gradient(135deg, #00aaff 0%, #0077ff 100%);
+    opacity: 1;
+}
+
 .command-item.start-point::before {
     opacity: 1;
 }

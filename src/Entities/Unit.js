@@ -1066,6 +1066,17 @@ export class Unit {
                 }
             }
         } else if (this.isFollowingPath && this.path && this.path.length > 0) {
+            // === INITIAL STATE: At start, Blue = waypoints[0], Orange = waypoints[1] ===
+            // This runs ONCE when path following begins. Sequence order, not proximity.
+            if (this.waypoints && this.waypoints.length > 1 && !this.targetWaypointId) {
+                this.lastWaypointId = this.waypoints[0].id;    // Start point = Blue (just left)
+                this.targetWaypointId = this.waypoints[1].id; // First destination = Orange
+                console.log(`[Unit ${this.id || 'unknown'}] INIT: last=${this.lastWaypointId?.slice(-4)} target=${this.targetWaypointId?.slice(-4)}`);
+            }
+
+            // NOTE: ID updates happen ONLY in the dist<1.0 block below (after pathIndex++)
+            // This ensures we use the UPDATED pathIndex, not the stale one.
+
             // SEGMENT TRACKING LOGIC (Non-destructive)
             if (this.pathIndex >= this.path.length) {
                 if (this.loopingEnabled) this.pathIndex = 0;
@@ -1082,11 +1093,52 @@ export class Unit {
                     this.pathIndex++; // Advance Index
                     this.targetControlPointIndex = this.pathIndex;     // Update Target Index (Orange - legacy)
 
-                    // === AUTOMATIC STATE INITIALIZATION (Proximity Based) ===
+                    // === CRITICAL: SYNC targetWaypointId WITH pathSegmentIndices ===
+                    // This is what Game.js uses for coloring!
+                    if (this.waypoints && this.pathSegmentIndices && this.waypoints.length > 1) {
+                        // Find which waypoint we just passed by checking pathSegmentIndices
+                        for (let i = 0; i < this.pathSegmentIndices.length; i++) {
+                            // If pathIndex just crossed this segment boundary
+                            if (this.pathIndex >= this.pathSegmentIndices[i] &&
+                                (i === this.pathSegmentIndices.length - 1 || this.pathIndex < this.pathSegmentIndices[i + 1])) {
+                                // We are NOW between waypoint[i] and waypoint[i+1]
+                                // So waypoint[i] was just passed (Blue) and waypoint[i+1] is target (Orange)
+                                if (this.waypoints[i]) {
+                                    this.lastWaypointId = this.waypoints[i].id;
+                                }
+                                let nextIdx = i + 1;
+                                if (nextIdx >= this.waypoints.length) {
+                                    if (this.loopingEnabled || this.isPathClosed) nextIdx = 0;
+                                    else nextIdx = this.waypoints.length - 1;
+                                }
+                                if (this.waypoints[nextIdx]) {
+                                    this.targetWaypointId = this.waypoints[nextIdx].id;
+                                }
+                                // DEBUG LOG: Confirm waypoint switch
+                                console.log(`[Unit ${this.id || 'unknown'}] ARRIVED: last=${this.lastWaypointId?.slice(-4)} target=${this.targetWaypointId?.slice(-4)} segment=${i}`);
+                                break;
+                            }
+                        }
+                    }
+
+                    // === AUTOMATIC STATE INITIALIZATION (Proximity Based & Validation) ===
                     // User Request: "Forget Start Point" - Detect where unit IS.
                     if (this.waypoints && this.waypoints.length > 0) {
 
-                        // If State Missing, Initialize based on Location (Closest Point)
+                        // 1. Validate Existing Data (Sanity Check)
+                        // If current Last/Target IDs don't exist in list (e.g. deleted/reordered), RESET them.
+                        if (this.lastWaypointId) {
+                            if (!this.waypoints.find(wp => wp.id === this.lastWaypointId)) {
+                                this.lastWaypointId = null; // Force re-detection
+                            }
+                        }
+                        if (this.targetWaypointId) {
+                            if (!this.waypoints.find(wp => wp.id === this.targetWaypointId)) {
+                                this.targetWaypointId = null; // Force re-assign
+                            }
+                        }
+
+                        // 2. If State Missing (or Reset), Initialize based on Location (Closest Point)
                         if (!this.lastWaypointId) {
                             let bestD = Infinity;
                             let bestId = this.waypoints[0].id;
@@ -1098,7 +1150,7 @@ export class Unit {
                             this.lastWaypointId = bestId;
                         }
 
-                        // Ensure Target is Valid (Coming From -> Going To)
+                        // 3. Ensure Target is Valid (Coming From -> Going To)
                         if (!this.targetWaypointId || this.targetWaypointId === this.lastWaypointId) {
                             const lastIdx = this.waypoints.findIndex(wp => wp.id === this.lastWaypointId);
                             // Default to Next (Loop safe)

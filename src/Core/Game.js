@@ -863,7 +863,8 @@ export class Game {
 
             // AUTO-INITIALIZE: Mark start point as "passed" immediately
             unit.lastPassedControlPointID = startID;
-            unit.lastWaypointId = startID; // Spec Phase 1 Field
+            // NOTE: Do NOT set lastWaypointId here - let Unit.js handle it dynamically
+            // unit.lastWaypointId = startID; // REMOVED - was causing "Start always Blue" bug
             unit.passedControlPointCount = 1;
 
             // Create START POINT sphere marker
@@ -962,10 +963,7 @@ export class Game {
             unit.isPathClosed = true;
             console.log("Path CLOSED - clicked on start marker!");
 
-            // Visual indicator: Change start marker color to orange
-            if (unit.waypointMarkers && unit.waypointMarkers[0]) {
-                unit.waypointMarkers[0].material.color.setHex(0xffaa00);
-            }
+            // NOTE: Colors are managed by updateWaypointMarkerFill - do not hardcode here
 
             // Regenerate curve as closed loop
             this.updateWaypointCurve();
@@ -1292,13 +1290,13 @@ export class Game {
                 let color = 0x00ff88; // Default: Green
                 let opacity = 0.5;
 
-                // ID-BASED COLORING (Robust to rearrangement)
-                const wp = unit.waypoints[index];
-                if (wp && unit.targetWaypointId && wp.id === unit.targetWaypointId) {
+                // ID-BASED COLORING using marker's own attached ID
+                const markerId = marker.userData.id;
+                if (markerId && unit.targetWaypointId && markerId === unit.targetWaypointId) {
                     // ORANGE: Current Target (Goes to)
                     color = 0xffaa00;
                     opacity = 1.0;
-                } else if (wp && unit.lastWaypointId && wp.id === unit.lastWaypointId) {
+                } else if (markerId && unit.lastWaypointId && markerId === unit.lastWaypointId) {
                     // BLUE: Previous Anchor (Left behind)
                     color = 0x00aaff;
                     opacity = 0.85;
@@ -1348,8 +1346,7 @@ export class Game {
 
                 unit.waypointMarkers.forEach((marker, idx) => {
                     marker.userData.isFilled = false;
-                    marker.material.opacity = 0.5;
-                    marker.material.color.setHex(idx === 0 ? 0x00ff88 : 0x00ff88); // All Green
+                    // NOTE: Colors are managed by updateWaypointMarkerFill - do not set here
                 });
                 unit.passedControlPointCount = 0;
 
@@ -1511,45 +1508,47 @@ export class Game {
             let commandQueueHTML = '<div class="command-queue-list" id="command-queue-list">';
 
             if (unit.waypointControlPoints && unit.waypointControlPoints.length > 0) {
-                // Determine target index for UI coloring
+                // Determine target and last indices for UI coloring (ID-based)
                 let targetIndex = -1;
-                if (unit.targetWaypointId && unit.waypoints) {
-                    targetIndex = unit.waypoints.findIndex(wp => wp.id === unit.targetWaypointId);
+                let lastIndex = -1;
+                if (unit.waypoints) {
+                    if (unit.targetWaypointId) {
+                        targetIndex = unit.waypoints.findIndex(wp => wp.id === unit.targetWaypointId);
+                    }
+                    if (unit.lastWaypointId) {
+                        lastIndex = unit.waypoints.findIndex(wp => wp.id === unit.lastWaypointId);
+                    }
                 }
 
                 unit.waypointControlPoints.forEach((cp, index) => {
                     const coords = `${cp.x.toFixed(1)}, ${cp.y.toFixed(1)}, ${cp.z.toFixed(1)}`;
                     const label = index === 0 ? 'START' : `WP ${index}`;
-                    const isStart = index === 0;
 
-                    // Determine State Class
+                    // Determine State Class (ID-based)
                     let stateClass = '';
-                    let icon = isStart ? '🚀' : '📍';
+                    let icon = '📍';
 
                     if (index === targetIndex) {
-                        stateClass = 'state-target';
+                        stateClass = 'state-target'; // Orange
                         icon = '🎯';
-                    } else if (index === targetIndex - 1) {
-                        stateClass = 'state-from';
-                        icon = '🔙';
-                    } else if (unit.isPathClosed && targetIndex === 0 && index === unit.waypointControlPoints.length - 1) {
-                        stateClass = 'state-from';
+                    } else if (index === lastIndex) {
+                        stateClass = 'state-from'; // Blue
                         icon = '🔙';
                     }
 
                     commandQueueHTML += `
-                        <div class="command-item ${isStart ? 'start-point' : ''} ${stateClass}" draggable="true" data-index="${index}">
-                            <div class="cmd-icon">${icon}</div>
-                            <div class="cmd-info">
-                                <div class="cmd-type">MOVE TO</div>
-                                <div class="cmd-coords">${label}</div>
-                                <div class="cmd-details">${coords}</div>
-                            </div>
-                            <div class="cmd-actions">
-                                <button class="cmd-action-btn delete-btn" title="Remove" data-index="${index}">✕</button>
-                            </div>
+                    <div class="command-item ${stateClass}" draggable="true" data-index="${index}">
+                        <div class="cmd-icon">${icon}</div>
+                        <div class="cmd-info">
+                            <div class="cmd-type">MOVE TO</div>
+                            <div class="cmd-coords">${label}</div>
+                            <div class="cmd-details">${coords}</div>
                         </div>
-                    `;
+                        <div class="cmd-actions">
+                            <button class="cmd-action-btn delete-btn" title="Remove" data-index="${index}">✕</button>
+                        </div>
+                    </div>
+                `;
                 });
             } else {
                 commandQueueHTML += `
@@ -1907,6 +1906,11 @@ export class Game {
 
         // Update waypoint marker fill states
         this.updateWaypointMarkerFill();
+
+        // Update Command Queue UI colors if panel is open
+        if (this.isFocusMode && this.focusedUnit && this.focusedUnit.waypointMarkers && this.focusedUnit.waypointMarkers.length > 0) {
+            this.updatePanelContent(this.focusedUnit);
+        }
 
         // Handle path looping (if unit reached end of path)
         this.handlePathLooping();
