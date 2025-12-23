@@ -1566,6 +1566,9 @@ export class Game {
                     const coords = `${cp.x.toFixed(1)}, ${cp.y.toFixed(1)}, ${cp.z.toFixed(1)}`;
                     const label = index === 0 ? 'START' : `WP ${index}`;
 
+                    // Get stable waypoint ID if available
+                    const waypointId = unit.waypoints && unit.waypoints[index] ? unit.waypoints[index].id : index;
+
                     // Determine State Class (ID-based)
                     let stateClass = '';
                     let icon = '📍';
@@ -1579,7 +1582,7 @@ export class Game {
                     }
 
                     commandQueueHTML += `
-                    <div class="command-item ${stateClass}" draggable="true" data-index="${index}">
+                    <div class="command-item ${stateClass}" draggable="true" data-index="${index}" data-waypoint-id="${waypointId}">
                         <div class="cmd-icon">${icon}</div>
                         <div class="cmd-info">
                             <div class="cmd-type">MOVE TO</div>
@@ -1662,8 +1665,7 @@ export class Game {
                 </div>
             `;
 
-            // Setup drag reorder listeners
-            alert('About to setup drag listeners!');
+            // Setup drag reorder listeners (must run every time - innerHTML overwrites DOM)
             this.setupCommandQueueDragListeners();
 
             // Setup playback button listeners
@@ -1673,25 +1675,42 @@ export class Game {
 
     setupCommandQueueDragListeners() {
         const list = document.getElementById('command-queue-list');
-        console.log('[Drag] setupCommandQueueDragListeners - list:', list);
         if (!list) return;
 
         let draggedItem = null;
+        let dragStartOrder = null;
 
         const items = list.querySelectorAll('.command-item');
-        console.log('[Drag] Found items:', items.length, items);
 
-        items.forEach((item, idx) => {
-            console.log(`[Drag] Attaching listeners to item ${idx}:`, item);
+        // Enable drop on the list container itself
+        list.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        });
+
+        items.forEach((item) => {
             item.addEventListener('dragstart', (e) => {
                 draggedItem = item;
                 item.classList.add('dragging');
                 e.dataTransfer.effectAllowed = 'move';
+                // Store original order to compare later
+                dragStartOrder = Array.from(list.querySelectorAll('.command-item')).map(i => i.dataset.index);
             });
 
             item.addEventListener('dragend', () => {
                 item.classList.remove('dragging');
+
+                // Check if order changed
+                const newOrder = Array.from(list.querySelectorAll('.command-item')).map(i => i.dataset.index);
+                const orderChanged = JSON.stringify(dragStartOrder) !== JSON.stringify(newOrder);
+
+                if (orderChanged) {
+                    // Order changed - apply to game logic
+                    this.reorderWaypointsFromDOM();
+                }
+
                 draggedItem = null;
+                dragStartOrder = null;
             });
 
             item.addEventListener('dragover', (e) => {
@@ -1699,18 +1718,14 @@ export class Game {
                 e.dataTransfer.dropEffect = 'move';
                 if (draggedItem && draggedItem !== item) {
                     const rect = item.getBoundingClientRect();
-                    const midY = rect.top + rect.height / 2;
-                    if (e.clientY < midY) {
+                    // Horizontal layout: compare X position
+                    const midX = rect.left + rect.width / 2;
+                    if (e.clientX < midX) {
                         item.parentNode.insertBefore(draggedItem, item);
                     } else {
                         item.parentNode.insertBefore(draggedItem, item.nextSibling);
                     }
                 }
-            });
-
-            item.addEventListener('drop', () => {
-                // Reorder control points based on new DOM order
-                this.reorderWaypointsFromDOM();
             });
         });
     }
