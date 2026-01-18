@@ -15,7 +15,7 @@ BOOTSTRAP
 2. Read docs/STATUS_WALKTHROUGH.md
 3. Execute ## NOW from STATUS_WALKTHROUGH.
 
-SOURCE INTEGRITY (VERIFY ME) <!-- ops-sync: verified -->
+## SOURCE INTEGRITY (VERIFY ME)
 - index.html: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/index.html
 - src/Main.js: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/src/Main.js
 - package.json: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/package.json
