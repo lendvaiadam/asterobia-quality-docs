@@ -100,7 +100,6 @@ You MUST read these binding specs from `publish/quality_docs_snapshot_2026-01-14
 
 ## Language Rules (Binding)
 - Do NOT add Hungarian translations to coding prompts. English-only for inter-agent coding prompts. Hungarian is only for Ádám-facing summaries and HU test scenarios.
-- Do NOT add Hungarian translations to coding prompts. English-only for inter-agent coding prompts. Hungarian is only for Ádám-facing summaries and HU test scenarios.
 - **Planning Protocol (Binding)**: [docs/PLANNING_PROTOCOL.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/PLANNING_PROTOCOL.md). All implementation work must follow this.
 - **Fresh session rule (binding)**: Open [docs/STATUS_WALKTHROUGH.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/STATUS_WALKTHROUGH.md) and follow the **## NOW** section before asking any questions.
 - **Spec Update Rule**: After any Release is completed and verified: update [CURRENT_SYSTEM_SPEC](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/CURRENT_SYSTEM_SPEC.md) with what changed.
