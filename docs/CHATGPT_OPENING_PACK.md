@@ -32,6 +32,7 @@ OPENING PACK (RAW LINKS)
 - BUGBOOK: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/BUGBOOK.md
 - REPO_REALITY_MAP: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/quality/REPO_REALITY_MAP.md
 - RELEASE_PLAN: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/RELEASE_PLAN.md
+- WORKER_POOL_RUNBOOK: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/WORKER_POOL_RUNBOOK.md
 - RELEASE_SYSTEM: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/RELEASE_SYSTEM.md
 - VERSIONING_ROLLBACK: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/VERSIONING_ROLLBACK.md
 - MAILBOX: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/MAILBOX.md
