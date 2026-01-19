@@ -32,7 +32,13 @@ OPENING PACK (RAW LINKS)
 - BUGBOOK: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/BUGBOOK.md
 - REPO_REALITY_MAP: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/quality/REPO_REALITY_MAP.md
 - RELEASE_PLAN: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/RELEASE_PLAN.md
-- WORKER_POOL_RUNBOOK: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/WORKER_POOL_RUNBOOK.md
+- [docs/WORKER_POOL_RUNBOOK.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/WORKER_POOL_RUNBOOK.md)
+
+## QUALITY ARCHIVE / REPORTS (NON-CANONICAL)
+- [quality/archive/LOCAL_VS_GITHUB_PUBLISH_DIFF.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/quality/archive/LOCAL_VS_GITHUB_PUBLISH_DIFF.md)
+- [quality/archive/NETCODE_PREFLIGHT.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/quality/archive/NETCODE_PREFLIGHT.md)
+- [quality/archive/RELEASE_SYSTEM_REPORT.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/quality/archive/RELEASE_SYSTEM_REPORT.md)
+- [quality/archive/REPO_REALITY_MAP.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/quality/archive/REPO_REALITY_MAP.md)
 - RELEASE_SYSTEM: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/RELEASE_SYSTEM.md
 - VERSIONING_ROLLBACK: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/VERSIONING_ROLLBACK.md
 - MAILBOX: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/MAILBOX.md
