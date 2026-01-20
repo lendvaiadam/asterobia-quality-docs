@@ -33,6 +33,7 @@ OPENING PACK (RAW LINKS)
 - REPO_REALITY_MAP: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/quality/REPO_REALITY_MAP.md
 - RELEASE_PLAN: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/RELEASE_PLAN.md
 - [docs/WORKER_POOL_RUNBOOK.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/WORKER_POOL_RUNBOOK.md)
+- MASTER_PLAN_README: https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/master_plan/README.md
 
 ## QUALITY ARCHIVE / REPORTS (NON-CANONICAL)
 - [quality/archive/LOCAL_VS_GITHUB_PUBLISH_DIFF.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/quality/archive/LOCAL_VS_GITHUB_PUBLISH_DIFF.md)

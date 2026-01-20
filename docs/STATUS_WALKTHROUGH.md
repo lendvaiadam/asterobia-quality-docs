@@ -3,31 +3,28 @@
 ## NOW
 ### Current Work Package
 - **RELEASE 000 — FULL MASTER DEVELOPMENT PLAN ROUND**
-  Obtain two independent end-to-end Master Development Plans that cover the full project target:
-  - multiplayer + backend (staging plan)
-  - full feature roadmap + dependencies
-  - UI/UX + design pipeline integration
-  - persistence/state/snapshots/replay strategy
-  - engineering architecture + repo implications
-  - releases/milestones with “Done When” gates
-  - test/QA strategy + risk register
-  - 5-worker Work Package parallelization map
-  **Constraint**: Both MUST read ALL `*.md` materials + inspect repo code reality before proposing.
+- **Binding Rule**: Both agents MUST read ALL Reading Library links (START_HERE) + inspect repo code reality BEFORE writing.
+- **Output Rule**: Both agents MUST COMMIT their plan files to `docs/master_plan/` and provide commit SHA + RAW links. Chat-only output is NOT acceptable.
+- **Constraint**: Plan depth should aspire to “~40 pages” of detail, covering full architecture, roadmap, and risks.
 
 ### Tasks (2–7 bullets, concrete)
-- [ ] **ChatGPT** requests Antigravity Master Plan (architecture/audit/risk/staging)
-- [ ] **ChatGPT** requests Claude Master Plan (implementation-oriented end-to-end plan, but NOT PR-by-PR yet)
-- [ ] **Antigravity** delivers Master Plan (max 3 blocking questions)
-- [ ] **Claude** delivers Master Plan (max 3 blocking questions)
-- [ ] **ChatGPT** synthesizes both into a single **Master Plan v1 (Release 000)**
-- [ ] **Ádám** approves Master Plan v1
+- [ ] **ChatGPT** requests Antigravity Master Plan (Architecture/Audit, Staging, Risk, 5-Worker Map)
+- [ ] **ChatGPT** requests Claude Master Plan (Implementation-focused, PR sequencing, dependency graph)
+- [ ] **Antigravity** commits `docs/master_plan/MASTER_DEVELOPMENT_PLAN_v1_ANTIGRAVITY.md` (Repo Sync Required)
+- [ ] **Claude** commits `docs/master_plan/MASTER_DEVELOPMENT_PLAN_v1_CLAUDE.md` (Repo Sync Required)
+- [ ] **ChatGPT** synthesizes both into a single **Master Plan v1 Execution Strategy**
+- [ ] **Ádám** approves the synthesized direction
 
 ### Deliverables
-- **Antigravity Master Plan**: full-project architecture + staging + audit + risk register.
-- **Claude Master Plan**: full-project implementation-oriented roadmap + dependency ordering.
+- **Antigravity Plan Link**: (Pending Commit SHA)
+- **Claude Plan Link**: (Pending Commit SHA)
+
+### Done When
+- Both plan files exist on GitHub (branch is OK).
+- Ádám explicitly approves the synthesized direction.
 
 ### Next After This
-- After Master Plan v1 is approved: request PR-by-PR planning for the first executable Release (likely Phase 0 foundations).
+- Request Release 001 PR-by-PR plan (Release 001 Loop).
 
 ## WORK PACKAGE ROLE MAP (BINDING)
 - Antigravity MUST assign and publish the Role Map for each Work Package.
