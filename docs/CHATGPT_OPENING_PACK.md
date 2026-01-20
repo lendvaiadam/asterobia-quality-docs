@@ -3,6 +3,7 @@ MAINTENANCE RULES (BINDING)
 - This file is the single source of truth for the ChatGPT opening pack.
 - Any agent who creates/introduces a new file that ChatGPT must read MUST update this file (and push).
 - The pack should prefer stable main RAW links, but if WIP is on a pinned commit, include commit-SHA RAW links.
+- **NAMING RULE (BINDING):** Use "Asterobia" in all new text. Do NOT use "Astrobia".
 
 ---
 
