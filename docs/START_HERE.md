@@ -5,7 +5,7 @@ It contains stable rules, roles, and pointers to where everything lives.
 ---
 
 ## What this project is
-Asterobia/Asterobia is a strategy/simulation game project.
+Asterobia is a strategy/simulation game project.
 Current engineering priority: Refactor toward Phase 0 “Netcode Readiness” (host-authoritative, deterministic, backend-ready).
 
 ---
