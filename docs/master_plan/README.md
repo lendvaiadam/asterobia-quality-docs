@@ -1,24 +1,22 @@
-# RELEASE 000 — MASTER PLAN
+# Master Development Plan (Release 000)
 
-**Binding Scaffolding for Master Development Plan.**
+> "Release 000" is the dedicated planning phase that MUST occur before any Release 001 coding begins.
 
-## Status
-This folder collects the independent Master Plans from Antigravity and Claude Code.
-Current Priority: **Release 000 (Planning Round)**
+## Purpose
+To force a "measure twice, cut once" discipline. We are transitioning a prototype to a Host-Authoritative Netcode Architecture. This requires a complete mental map of the end-state before writing individual shims.
 
-## Required Files
-- `MASTER_DEVELOPMENT_PLAN_v1_ANTIGRAVITY.md`
-- `MASTER_DEVELOPMENT_PLAN_v1_CLAUDE.md`
+## Expectations (Binding)
+- **Repo-First**: Plans must be committed here, not just output in chat.
+- **Depth**: "~40 pages" is the aspiration. We value completeness over brevity here.
+- **Structure**:
+  1. **Proof-of-Read**: List of sources actually opened.
+  2. **Target Definition**: What "Netcode Readiness" means concretely.
+  3. **Feature Roadmap**: GRFDTRDPU evolutionary stages.
+  4. **Architecture**: SimCore vs World split.
+  5. **Persistence/Multiplayer**: Strategy for data handling.
+  6. **Release Schedule**: Concrete milestones (001...010).
+  7. **Worker Pool Plan**: How 5 parallel workers will be utilized.
 
-## Length & Depth Aspiration
-“~40 pages” is an aspiration, not a hard requirement. The hard requirement is **Completeness**.
-The plan must cover:
-1.  **Engine Architecture** (SimCore vs World split)
-2.  **Feature Roadmap** (Phase 0..3 with dependencies)
-3.  **Netcode Strategy** (Determinism, State Surface, Transport)
-4.  **Work Package Map** (5-Worker parallelization)
-5.  **Risk Register** (Known unknowns)
-
-## Rules
-- Do NOT merge plans yet. Keep them separate for cross-validation.
-- All plans must start with **PROOF-OF-READ** (links actually opened).
+## Files
+- `MASTER_DEVELOPMENT_PLAN_v1_ANTIGRAVITY.md`: Architecture/Audit focus.
+- `MASTER_DEVELOPMENT_PLAN_v1_CLAUDE.md`: Implementation/PR focus.
