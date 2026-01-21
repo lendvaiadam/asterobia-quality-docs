@@ -23,7 +23,11 @@ This is the meta-game loop. It must be implemented as distinct Modules in `SimCo
 5.  **D (Design):** The Blueprint System.
     *   *Code:* `SimCore/modules/Designer.js`
     *   *Input:* Base Feature Stats + Capacity budget.
-    *   *Output:* `UnitType` (Immutable JSON).
+    *   *Generative Pipeline (Async):*
+        1.  **Prompt Gen:** System generates prompt from stats.
+        2.  **Image Gen (Nano Banana):** Generates 4 variations. User selects 1.
+        3.  **3D Gen (MS Trellis):** Converts Image -> `.glb` model.
+    *   *Output:* `UnitType` (Stats + linked `.glb` asset).
 6.  **P (Production):** The Factory.
     *   *Code:* `SimCore/modules/Factory.js`
     *   *Input:* `UnitType` + Resources.
