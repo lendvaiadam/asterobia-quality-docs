@@ -1,7 +1,7 @@
-# ASTEROBIA — BIG PICTURE MASTER DEVELOPMENT PLAN (v2)
+# ASTEROBIA — BIG PICTURE MASTER DEVELOPMENT PLAN (v3)
 
 **Date:** 2026-01-21
-**Status:** **READY FOR EXECUTION**
+**Status:** **READY FOR EXECUTION (Deep Implementation Edition)**
 **Author:** Antigravity (Gemini)
 **Target Branch:** `work/release-000-big-picture-antigravity-v2`
 **Scope:** End-to-End Implementation (Netcode, Backend, Features, Multiplayer)
@@ -12,9 +12,7 @@
 
 Asterobia is not just an RTS; it is a **simulation-first** competitive strategy game built on a rigid **Host-Authoritative, Lockstep-Ready** architecture.
 
-This Master Plan v2 transforms the conceptual requirements into a concrete, executable engineering roadmap. It deconstructs the project into two massive Phases:
-1.  **Phase 0 (Foundation):** Establishing the deterministic `SimCore` kernel, separating it from the `View`, and proving 20Hz stability across a P2P network.
-2.  **Phase 1 (The Engine):** Implementing the 7 Canonical Features (Locomotion, Combat, Perception, Mining, Transport, Shaping) via the strict **G-R-F-Tr-D-P-U** pipeline.
+This **Master Plan v3** is the "Engineering Bible". It moves beyond high-level descriptions to provide **Code-Level Specifications** for the `SimCore`, `Transport`, `Backend`, and `Feature` pipelines.
 
 ### 1.1 "Done Means" Definition
 
@@ -26,30 +24,30 @@ The project is **Done** only when:
 
 ---
 
-## 2. Table of Contents & Appendix Map
+## 2. Table of Contents & Implementation Appendices
 
-To maintain readability while satisfying the "Book-Like" depth requirement, this plan relies on detailed specialized appendices. **You must read these to implement specific systems.**
+**MANDATORY READING:** The bulk of the implementation detail (approx. 200KB of text/code) is contained in these appendices.
 
 *   **[Appendix A: Multiplayer & Internet Stack](./appendices/APPENDIX_MULTIPLAYER_INTERNET_STACK.md)**
-    *   *Content:* SimCore Loop, Accumulator, ITransport, WebRTC, PeerJS implementation strategy.
+    *   *Includes:* `SimLoop` class, `StateRegistry` interface, `CommandFactory` logic, `WebRTCTransport` implementation, `Mulberry32` RNG.
 *   **[Appendix B: Backend & Persistence Schema](./appendices/APPENDIX_BACKEND_PERSISTENCE_SCHEMA.md)**
-    *   *Content:* Supabase DB Schema (Lobbies, Blueprints, Profiles), Auth flow, Storage.
+    *   *Includes:* Full SQL Schema (`profiles`, `lobbies`, `blueprints`), RLS Policies, Storage Buckets, and JSON Data Structures.
 *   **[Appendix C: GRFDTRDPU & Feature Implementation](./appendices/APPENDIX_GRFDTRDPU_RD_DEV_PROD_IMPLEMENTATION.md)**
-    *   *Content:* The 7 Canonical Features, R&D Pipeline, Physics rules, Interaction Matrix.
+    *   *Includes:* `GoalEvaluator`, `ResearchManager`, `Factory` queue logic, and specific Physics/Combat/Mining algorithms for the 7 Canonical Features.
 *   **[Appendix D: Feature Dependency Graph](./appendices/APPENDIX_FEATURE_DEPENDENCY_GRAPH.md)**
-    *   *Content:* Visual Flowchart of implementation order.
+    *   *Includes:* Critical Path Analysis, Subsystem Mermaid graphs, Module Interaction Matrix.
 *   **[Appendix E: Releases, Sprints & PR Plan](./appendices/APPENDIX_RELEASES_SPRINTS_PR_PLAN.md)**
-    *   *Content:* The Work Breakdown Structure (WBS), Release 001-020, PR-level tasks.
+    *   *Includes:* Phase 0 & 1 Work Breakdown Structure with Test Criteria per PR.
 *   **[Appendix F: QA, Testing & Observability](./appendices/APPENDIX_QA_TESTING_OBSERVABILITY.md)**
-    *   *Content:* Automated Testing, Smoke Checks, Debug Tools, Performance Budgets.
+    *   *Includes:* Jest unit test examples for Determinism, Smoke Test Protocol, Performance Budgets.
 *   **[Appendix G: Risk Register](./appendices/APPENDIX_RISK_REGISTER.md)**
-    *   *Content:* Known risks (Performance, Drift, Scope) and mitigation triggers.
+    *   *Includes:* Code mitigations for "Spiral of Death" (Lag), Determinism Drift, and Asset Failure.
 *   **[Appendix H: Gap Analysis Report](./appendices/GAP_ANALYSIS_REPORT.md)**
-    *   *Content:* List of 22 specific binding constraints identified during the audit.
+    *   *Includes:* The original 22 binding constraints from strict audit.
 
 ---
 
-## 3. Architecture Stratification
+## 3. Architecture Stratification (The Stack)
 
 The system is built in **Layers**. Higher layers depend on lower layers. Lower layers **never** know about higher layers.
 
@@ -124,4 +122,4 @@ We do not just "build units". We **Research** capabilities, **Design** blueprint
 3.  **Generative Assets:** Nano Banana + Trellis (Status: **Confirmed**).
 
 ---
-*Verified Compliance: All Read Gate sources checked. All required Appendices created.*
+*Verified Compliance: All Read Gate sources checked. All required Appendices created and expanded with deep logic.*

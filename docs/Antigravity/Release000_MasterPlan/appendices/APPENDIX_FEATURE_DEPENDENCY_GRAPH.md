@@ -1,88 +1,115 @@
-# APPENDIX: FEATURE DEPENDENCY GRAPH
+# APPENDIX D: FEATURE DEPENDENCY GRAPH (v3)
 
-**Parent Document:** [Big Picture Master Plan](../BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md)
-**Scope:** Visualizing the implementation order of the 7 Canonical Features.
-
----
-
-## 1. Dependency Philosophy
-The G-R-F-Tr-D-P-U pipeline dictates order.
-1.  **Locomotion Is Root:** Nothing works if things don't move.
-2.  **Perception Is Key:** You can't shoot what you can't see (or select).
-3.  **Tool Lane Is Complex:** Mining requires Navigation + Tools.
+**Parent Document:** [Big Picture Master Plan v3](../BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md)
+**Scope:** Visual dependency mapping and Critical Path Analysis.
 
 ---
 
-## 2. The Dependency Graph (Mermaid)
+## 1. Critical Path Analysis
+
+The project success relies on a strict sequence. We cannot build "Combat" before "Locomotion" because Combat relies on positioning.
+
+**The Golden Path:**
+1.  **SimCore (Kernel)** - The brain.
+2.  **Transport** - The nervous system.
+3.  **Locomotion** - The legs.
+4.  **Perception** - The eyes.
+5.  **Interaction** - The hands (Mining/Shooting).
+
+---
+
+## 2. Dependency Graph (Mermaid)
 
 ```mermaid
 graph TD
-    classDef baseline fill:#f9f,stroke:#333,stroke-width:2px;
-    classDef phase1 fill:#bbf,stroke:#333,stroke-width:2px;
-    classDef phase2 fill:#ddd,stroke:#333,stroke-width:1px;
+    %% Nodes
+    subgraph Kernel
+        Sim[SimCore Loop]
+        State[State Registry]
+        RNG[Seeded RNG]
+    end
 
-    %% Baseline Infrastructure
-    Net[Netcode Foundation (SimCore)]:::baseline
-    Loop[Fixed Timestep Loop]:::baseline
-    State[State Registry]:::baseline
-    Cmd[Command Queue]:::baseline
+    subgraph Net
+        Trans[ITransport]
+        Lobby[Lobby/Signaling]
+        Pred[Client Prediction]
+    end
 
-    Loop --> Net
-    Cmd --> Net
-    State --> Net
+    subgraph PHY[Locomotion Features]
+        Roll[F01: MOVE_ROLL]
+        Slope[Slope Constraints]
+        Mass[Inertia/Mass]
+    end
 
-    %% Phase 1 Features
-    Move[F01: MOVE_ROLL]:::phase1
-    Vis[F03: PERCEPTION_OPTICAL]:::phase1
-    Mine[F05: MATERA_MINING]:::phase1
-    Trans[F06: MATERA_TRANSPORT]:::phase1
-    Scan[F04: PERCEPTION_SCAN]:::phase1
-    Shape[F07: TERRAIN_SHAPING]:::phase1
-    Wpn[F02: WPN_SHOOT]:::phase1
+    subgraph VIS[Vision Features]
+        Opt[F03: OPTICAL_VIS]
+        Scan[F04: SUBSURFACE]
+        FOW[Fog of War]
+    end
 
-    %% Dependencies
-    Net --> Move
-    Move --> Vis
-    Vis --> Wpn
-    Move --> Scan
-    Move --> Mine
-    Mine --> Trans
-    Trans --> Shape
+    subgraph ECO[Economy Features]
+        Mine[F05: MINING]
+        Haul[F06: TRANSPORT]
+        Shape[F07: SHAPING]
+    end
+
+    subgraph WAR[Combat Features]
+        Shoot[F02: SHOOT]
+        Dmg[Damage System]
+    end
     
-    %% Implicit
-    Vis -.->|Targeting| Wpn
-    Scan -.->|Targeting| Mine
+    subgraph PIPELINE[R&D Pipeline]
+        Goal[Goal Evaluator]
+        Res[Research Mgr]
+        Des[Designer UI]
+        Prod[Factory]
+    end
 
-    %% GRFDTRDPU
-    Design[D - Designer UI]:::phase1
-    Prod[P - Production Factory]:::phase1
+    %% Edges - Core dependencies
+    Sim --> State
+    State --> RNG
+    Sim --> Trans
     
-    Design --> Prod
-    Prod --> Move
-
+    %% Edges - Physics
+    Sim --> Roll
+    Roll --> Slope
+    Roll --> Mass
+    
+    %% Edges - Vision dependent on Position
+    Roll --> Opt
+    Opt --> FOW
+    Roll --> Scan
+    
+    %% Edges - Interaction dependent on Vision + Pos
+    Opt --> Shoot
+    Shoot --> Dmg
+    
+    Scan --> Mine
+    Mine --> Haul
+    Haul --> Shape
+    
+    %% The Pipeline Wraps Everything
+    Res --> Roll
+    Des --> Roll
+    Prod --> Roll
+    
+    %% Styles
+    classDef core fill:#f9f,stroke:#333;
+    classDef feat fill:#bbf,stroke:#333;
+    class Sim,State,RNG,Trans core;
+    class Roll,Opt,Shoot,Mine feat;
 ```
 
-## 3. Sequencing Logic
+---
 
-### Sequence 1: The "rover" (SimCore + Move)
-*   **Why:** Minimum Testable Product. A ball rolling on terrain.
-*   **Requires:** Physics, Input, Rendering.
+## 3. Module Interaction Matrix
 
-### Sequence 2: The "Observer" (Vision)
-*   **Why:** Adds interaction limits (Fog of War).
-*   **Requires:** Grid system, Raycasting.
-
-### Sequence 3: The "Miner" (Scan + Mine)
-*   **Why:** First Economy loop.
-*   **Requires:** World Objects (Deposits), Resource State.
-
-### Sequence 4: The "Truck" (Transport)
-*   **Why:** Completes the economy loop (Source -> Sink).
-*   **Requires:** Inventory State, Weight Physics.
-
-### Sequence 5: The "Soldier" (Weapon)
-*   **Why:** The conflict loop.
-*   **Note:** Left for last in Phase 1 because it's easiest to verify once Movement is solid.
+| Module | Needed By | Provides |
+| :--- | :--- | :--- |
+| **Locomotion** | Combat, Mining, Transport | `Position`, `Velocity` |
+| **Vision** | Combat, Mining | `VisibleEntities[]` |
+| **Inventory** | Transport, Mining | `CargoCapacity`, `MassModifier` |
+| **Stats** | Locomotion, Combat | `Speed`, `Range`, `Damage` |
 
 ---
 *End of Appendix*

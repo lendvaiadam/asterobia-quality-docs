@@ -1,151 +1,293 @@
-# APPENDIX 01: ARCHITECTURE & NETCODE STACK
+# APPENDIX A: MULTIPLAYER & INTERNET STACK (v3)
 
-**Parent Document:** [Big Picture Master Plan](../BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md)
-**Scope:** SimCore Internals, Protocol, Backend Schema, Determinism.
-
----
-
-## 1. SimCore Kernel Architecture
-
-The `SimCore` is a standalone JS/TS module that contains **100% of the gameplay logic**. It must be runnable in a headless Node.js environment (for future validation) or in a Web Worker (for performance).
-
-### 1.1 The "Update" Loop
-The core loop is an **Accumulator Pattern** loop.
-```javascript
-// Conceptual Implementation
-let accumulator = 0;
-const TIMESTEP = 50; // 50ms = 20Hz
-
-function onFrame(delta) {
-  accumulator += delta;
-  while (accumulator >= TIMESTEP) {
-    SimCore.step(); // Strictly advances state by 50ms
-    accumulator -= TIMESTEP;
-  }
-  // View renders state + accumulator/TIMESTEP (alpha) for interpolation
-}
-```
-
-### 1.2 State Tree (The "Database")
-The state is a single JSON-serializable tree.
-```json
-{
-  "tick": 1205,
-  "seed": 9938472,
-  "nextId": 505,
-  "entities": {
-    "u_101": { "type": "UNIT", "pos": [10, 0, 50], "hp": 100, "q": [...] },
-    "m_202": { "type": "MATERA_PILE", "val": 500 }
-  },
-  "terrain": { "mods": [...] },
-  "players": { "p_1": { "resources": 1000 } }
-}
-```
+**Parent Document:** [Big Picture Master Plan v3](../BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md)
+**Scope:** Deep technical specification of the SimCore Kernel, the Loop, and the Transport Layer.
 
 ---
 
-## 2. Networking & Transport Layer
+## 1. The SimCore Kernel (`SimCore.js`)
 
-### 2.1 Interface Abstraction (ITransport)
-We abstract the network so we can swap "Local Loopback" for "WebRTC" without breaking logic.
+The `SimCore` is the **Authoritative Game State Container**. It must run deterministically on any machine (Host or Client).
+
+### 1.1 The Fixed Timestep Loop (Accumulator)
+
+We rely on a "Fix Your Timestep" approach to guarantee that `update()` always sees a `dt` of exactly 50ms (20Hz).
+
 ```javascript
+// src/core/SimLoop.js (Conceptual)
+
+export class SimLoop {
+    constructor(simCore, renderCallback) {
+        this.sim = simCore;
+        this.render = renderCallback;
+        
+        this.accumulator = 0;
+        this.lastTime = performance.now();
+        this.running = false;
+        
+        // CONSTANTS
+        this.TIMESTEP = 50; // 50ms = 20Hz
+        this.MAX_FRAME_TIME = 250; // Prevent spiral of death
+    }
+
+    start() {
+        this.running = true;
+        this.lastTime = performance.now();
+        requestAnimationFrame(this.tick.bind(this));
+    }
+
+    tick(currentTime) {
+        if (!this.running) return;
+
+        let delta = currentTime - this.lastTime;
+        this.lastTime = currentTime;
+
+        // Cap delta to prevent spiral of death on lag spikes
+        if (delta > this.MAX_FRAME_TIME) delta = this.MAX_FRAME_TIME;
+
+        this.accumulator += delta;
+
+        // Consumer: Eat 50ms chunks
+        while (this.accumulator >= this.TIMESTEP) {
+            // 1. Process Network Inputs
+            this.sim.processInputs();
+            
+            // 2. Advance Simulation
+            this.sim.step(this.TIMESTEP);
+            
+            this.accumulator -= this.TIMESTEP;
+        }
+
+        // 3. Render with Interpolation Alpha
+        // alpha = 0.5 means "halfway between previous and current state"
+        const alpha = this.accumulator / this.TIMESTEP;
+        this.render(alpha);
+
+        requestAnimationFrame(this.tick.bind(this));
+    }
+}
+```
+
+### 1.2 State Registry Structure (`StateRegistry.js`)
+
+State is separated into **Authority** (Networked) and **Render** (Local).
+
+```typescript
+// The "Authority" State - Serialized & Sent over network
+interface IGameState {
+    meta: {
+        tick: number;
+        seed: number;       // For RNG
+        nextEntityId: number;
+    };
+    
+    // Players (Economy, Tech)
+    players: Record<string, {
+        id: string;
+        resources: { matera: number; energy: number };
+        techTree: Record<string, number>; // "MOVE_ROLL": 1
+    }>;
+
+    // Entities (Units, Buildings)
+    entities: Record<string, {
+        id: number;
+        type: string;       // "UNIT_DRILLBUG"
+        owner: string;
+        pos: { x: number, z: number }; // 2D Logic Plane (Physics is 2D+HeightMap)
+        rot: number;        // Yaw only
+        hp: number;
+        state: string;      // "IDLE", "MOVING", "MINING"
+        
+        // Component Data (Sparse)
+        cargo?:  { amount: number; type: string };
+        mine?:   { targetNodeId: number };
+        move?:   { target: {x,z}; velocity: {x,z} };
+    }>;
+
+    // World (Deposits, Terrain Mods)
+    world: {
+        deposits: Record<string, { val: number }>;
+        terrainMods: Array<{ x: number, z: number, h: number }>;
+    };
+}
+```
+
+---
+
+## 2. Command Pipeline (Input Handling)
+
+Inputs are **NOT** executed immediately. They are turned into `Commands`, sent to the Host, queued, and executed in the `processInputs()` phase of the SimLoop.
+
+### 2.1 Command Types
+
+```typescript
+type CommandType = 
+    | 'CMD_MOVE' 
+    | 'CMD_STOP' 
+    | 'CMD_BUILD' 
+    | 'CMD_DESIGN' 
+    | 'CMD_ATTACK';
+
+interface ICommand {
+    type: CommandType;
+    tick: number;        // The tick this command SHOULD execute on
+    sender: string;      // Player ID
+    ids: number[];       // Unit IDs selected
+    payload: any;        // { x: 100, z: 50 }
+}
+```
+
+### 2.2 The Command Factory (Client Side)
+
+```javascript
+// src/input/CommandFactory.js
+export class CommandFactory {
+    static createMoveCommand(player, unitIds, vector3Target) {
+        return {
+            type: 'CMD_MOVE',
+            tick: ClientClock.getEstimatedServerTick() + 2, // Buffer 2 ticks
+            sender: player.id,
+            ids: unitIds,
+            payload: {
+                x: Math.round(vector3Target.x),
+                z: Math.round(vector3Target.z)
+            }
+        };
+    }
+}
+```
+
+### 2.3 Command Processing (Server/Sim Side)
+
+```javascript
+// src/core/SimCore.js
+processInputs() {
+    // 1. Sort queue by tick (though we mostly process 'current' tick)
+    const cmdsToRun = this.commandQueue.getCommandsForTick(this.state.meta.tick);
+
+    for (const cmd of cmdsToRun) {
+        if (!this.validateCommand(cmd)) continue; // Anti-Cheat / Logic Check
+
+        switch(cmd.type) {
+            case 'CMD_MOVE': 
+                this.systems.locomotion.applyMove(cmd); 
+                break;
+            case 'CMD_ATTACK':
+                this.systems.combat.applyAttack(cmd);
+                break;
+        }
+    }
+}
+```
+
+---
+
+## 3. The Transport Layer (`ITransport`)
+
+We use an **Interface Pattern** to support Phase 0 (Local), Phase 1 (LAN), and Phase 2 (P2P).
+
+### 3.1 Interface Definition
+
+```typescript
 interface ITransport {
-  connect(hostId: string): Promise<void>;
-  send(cmd: Command): void;
-  onReceive(handler: (cmd: Command) => void): void;
+    // Lifecycle
+    host(lobbyConfig: any): Promise<string>; // Returns PeerID
+    join(hostPeerId: string): Promise<void>;
+    
+    // I/O
+    sendCmd(cmd: ICommand): void;
+    sendSnapshot(state: IGameState): void;
+    
+    // Hooks
+    onCmdReceived(cb: (cmd: ICommand) => void): void;
+    onSnapshotReceived(cb: (state: IGameState) => void): void;
+    onLatencyUpdate(cb: (ms: number) => void): void;
 }
 ```
 
-### 2.2 Phase 0: Local Loopback
-- Uses `BroadcastChannel` or direct memory reference.
-- Allows running 2 tabs (Host + Client) on the same PC.
-- Zero latency, perfect for testing Authority logic.
+### 3.2 Phase 0: `LocalLoopback` (In-Memory)
 
-### 2.3 Phase 1: WebRTC (PeerJS)
-- **Signaling:** Clients connect to Supabase to find Host's PeerID.
-- **Data Channels:** `reliable: true` for Commands, `reliable: false` for Snapshots (optional optimization).
-- **Architecture:** Star Topology.
-    - Host is central. All Clients connect to Host.
-    - Host relays valid actions to other Clients.
+```javascript
+// src/net/LocalTransport.js
+export class LocalTransport {
+    constructor() {
+        this.delay = 0; // Simulate lag (ms)
+        this.hostCallback = null;
+        this.clientCallback = null;
+    }
 
----
+    sendCmd(cmd) {
+        // "Network" is just a setTimeout
+        setTimeout(() => {
+            if (this.hostCallback) this.hostCallback(cmd);
+        }, this.delay);
+    }
+    
+    sendSnapshot(state) {
+        // Must CLONE state to prevent reference sharing cheats
+        const serialized = JSON.stringify(state);
+        setTimeout(() => {
+            if (this.clientCallback) this.clientCallback(JSON.parse(serialized));
+        }, this.delay);
+    }
+}
+```
 
-## 3. Backend (Supabase)
+### 3.3 Phase 2: `WebRTCTransport` (PeerJS)
 
-We use Supabase for persistent data and matchmaking support.
+We use **PeerJS** to abstract the ICE/STUN complexity.
 
-### 3.1 Auth
-- Users sign in (Email/Discord/Anon).
-- `auth.users` table manages identity.
+**Host Logic:**
+1.  Open PeerJS connection.
+2.  Get ID (`uuid-v4`).
+3.  Upload ID to Supabase `Lobbies` table.
+4.  Listen for `connection`.
+    *   On Data: `handleRemoteCommand(data)`.
 
-### 3.2 Database Schema (MVP)
-
-**Table: `lobbies`**
-| Column | Type | Description |
-| :--- | :--- | :--- |
-| `id` | uuid | Unique Room ID |
-| `host_id` | uuid | Current Host User |
-| `host_peer_id` | text | PeerJS ID to connect to |
-| `status` | text | OPEN, PLAYING, CLOSED |
-| `players` | json | List of connected players |
-
-**Table: `blueprints`**
-| Column | Type | Description |
-| :--- | :--- | :--- |
-| `id` | uuid | |
-| `owner_id` | uuid | Creator |
-| `name` | text | "MORDIG10" |
-| `data` | jsonb | Full spec (Features, Axes) |
-| `is_public` | bool | Market availability |
-
-### 3.3 Signaling (Realtime)
-- Clients subscribe to `lobbies` changes.
-- When Host updates `status`, Clients see it.
-- When a Player joins, they write to `lobbies.players` (via RPC to ensure atomic entry).
+**Client Logic:**
+1.  Read `hostPeerId` from Supabase.
+2.  `peer.connect(hostPeerId)`.
+3.  Listen for `data`.
+    *   On Data: `applyServerSnapshot(data)`.
 
 ---
 
-## 4. Determinism Strategy
+## 4. Determinism & Randomness
 
-### 4.1 Random Number Generation (RNG)
-- **Forbidden:** `Math.random()`
-- **Required:** `Mulberry32` or `PCG` algorithm.
-- **Implementation:**
-    - `SimCore` holds the current `seed`.
-    - Every tick, if logic needs random, it calls `this.rng()`.
-    - This updates the seed in the State.
-    - **Result:** Replaying inputs from Tick 0 results in the exact same sequence of random events.
+Determinism is **Critical**. If `Math.random()` is called once, the clients desync.
 
-### 4.2 Entity IDs
-- **Forbidden:** `Date.now()`, `uuid.v4()` (unless seeded)
-- **Required:** Incremental Integers or Deterministic Hashes.
-- **Implementation:** `state.nextId` increments on every spawn.
-    - Host spawns Unit: ID = 100.
-    - Client (predicting) spawns Unit: ID = 100. (Syncs perfectly).
+### 4.1 The Seeded RNG (`Mulberry32`)
 
-### 4.3 Float Precision
-- JavaScript numbers are IEEE 754 doubles. Standard across browsers *mostly*.
-- **Risk:** `Math.sin/cos` may vary slightly on different CPU/Browsers.
-- **Mitigation:**
-    - Avoid complex transcendental streams in critical divergence paths.
-    - Or use a discrete math library (fixed-point) if desyncs occur.
-    - *Decision:* Stick to native Floats for Phase 0. Add fixed-point later if desync is proven.
+We NEVER use `Math.random`. We use a custom PRNG seeded by the Host.
 
----
+```javascript
+// src/core/RNG.js
+export function mulberry32(a) {
+    return function() {
+      var t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+}
 
-## 5. Security & Anti-Cheat (Phase 2)
+// In SimCore
+init(seed) {
+    this.random = mulberry32(seed);
+}
 
-### 5.1 Host Trust
-In Host-Authoritative, the Host *can* cheat.
-- **Mitigation:** "Gentleman's Agreement" for Phase 1.
-- **Future:** Relay Server that validates inputs (Authoritative Server).
+// Usage
+spawnParticles() {
+    const x = this.random() * 100; // Deterministic!
+}
+```
 
-### 5.2 Input Validation
-The Host validates all commands:
-- "Can player P move Unit U?" (Ownership check).
-- "Is Unit U dead?" (State check).
-- "Is cooldown ready?" (Logic check).
-Invalid commands are rejected and dropped; they never execute in the Sim.
+### 4.2 Desync Detection
+
+Every 100 ticks, Host sends a **Hash** of the State.
+Clients compare their Local State Hash.
+*   **Match:** Good.
+*   **Mismatch:** `CRITICAL_DESYNC`. Client requests full Snapshot re-download.
 
 ---
-*End of Appendix 01*
+*End of Appendix*

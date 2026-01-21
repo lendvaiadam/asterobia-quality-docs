@@ -1,73 +1,104 @@
-# APPENDIX 04: RISKS, QA & OBSERVABILITY
+# APPENDIX F: QA, TESTING & OBSERVABILITY (v3)
 
-**Parent Document:** [Big Picture Master Plan](../BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md)
-**Scope:** Risk Management, Test Protocol, and Debugging Tools.
-
----
-
-## 1. Risk Register
-
-### Risk 01: JavaScript Performance Ceiling
-*   **Description:** JS is single-threaded. If `SimCore` logic takes >10ms per 50ms tick, the browser freezes ("Spiral of Death").
-*   **Probability:** Medium (with 20+ units and complex pathfinding).
-*   **Mitigation:**
-    1.  **Web Workers:** Move `SimCore` to a Worker thread early (Release 006+).
-    2.  **Time Budgeting:** Abort low-priority tasks (e.g., pathfinding) if tick time > 5ms.
-    3.  **WASM:** Rewrite heavy math (physics) in Rust/WASM (Long term).
-
-### Risk 02: Determinism Drift ("The Butterfly Effect")
-*   **Description:** One tiny float difference (0.0000001) causes Unit A to go left instead of right. 10 seconds later, the game state is totally different.
-*   **Probability:** High (WebRTC + Different Browsers).
-*   **Mitigation:**
-    1.  **Sync Hash:** Host sends `StateHash` every 60 ticks. Clients compare.
-    2.  **Desync Detection:** If Hash mismatch -> Pause Game -> Request Full Snapshot from Host (Resync).
-    3.  **Avoid Floats:** Use integers for critical Logic Checks (e.g. `if (dist < 100)` -> `if (distSq < 10000)`).
-
-### Risk 03: Feature Scope Creep
-*   **Description:** "Features" document gets bigger faster than implementation.
-*   **Probability:** High.
-*   **Mitigation:** **Strict G-R-F-Tr-D-P-U Pipeline implementation**. Do not implement features ad-hoc. Only implement what the Pipeline supports.
+**Parent Document:** [Big Picture Master Plan v3](../BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md)
+**Scope:** Automated testing framework, manual verification protocols, and performance budgets.
 
 ---
 
-## 2. QA & Test Strategy
+## 1. Automated Testing (Jest)
 
-### 2.1 Automated Unit Tests (Jest)
-We focus testing on the **SimCore** (Pure Logic).
-*   **Goal:** 90% coverage of `SimCore/modules`.
-*   **Critical Tests:**
-    *   `SerializationTest`: Save -> Load -> Save. Output must be identical.
-    *   `DeterminismTest`: Run Sim for 1000 ticks with Seed A. Reset. Run again. States must match.
-    *   `CommandTest`: Queue Move Command -> Unit Position changes correctly.
+We focus on **Logic Verification**. We do NOT test Three.js rendering in Jest.
 
-### 2.2 Manual Verification (The "Smoke Test")
-*   **Frequency:** Every PR Merge.
-*   **Checklist:** `SMOKE_CHECKLIST.md`
-*   **Phase 0 Addition:**
-    *   Open 2 Tabs.
-    *   Move Unit in Tab 1 (Host).
-    *   Verify Unit moves in Tab 2 (Client).
+### 1.1 "SimCore" Unit Tests
 
-### 2.3 Performance Budget
-*   **Sim Tick:** Max 8ms (on avg hardware).
-*   **Render Frame:** Max 16ms (60 FPS).
-*   **Bandwidth:** Max 50KB/s per client (Phase 2).
+```javascript
+// tests/sim/SimCore.test.js
+describe('SimCore Determinism', () => {
+    let sim;
+    
+    beforeEach(() => {
+        sim = new SimCore({ seed: 12345 });
+    });
+
+    test('should produce identical state sequence given identical inputs', () => {
+        const simA = new SimCore({ seed: 111 });
+        const simB = new SimCore({ seed: 111 });
+        
+        const cmd = { type: 'MOVE', tick: 10, payload: { x: 50, z: 50 } };
+        
+        // Advance 100 ticks
+        for(let i=0; i<100; i++) {
+            if (i === 10) {
+                simA.input(cmd);
+                simB.input(cmd);
+            }
+            simA.tick();
+            simB.tick();
+        }
+        
+        expect(JSON.stringify(simA.state)).toEqual(JSON.stringify(simB.state));
+    });
+});
+```
+
+### 1.2 Networking Tests (Mock)
+
+```javascript
+describe('Transport', () => {
+    test('local loopback delivers commands', (done) => {
+        const transport = new LocalTransport();
+        transport.onCmdReceived((cmd) => {
+            expect(cmd.type).toBe('TEST');
+            done();
+        });
+        transport.sendCmd({ type: 'TEST' });
+    });
+});
+```
 
 ---
 
-## 3. Observability & Debugging
+## 2. Manual Verification ("Smoke Test")
 
-### 3.1 The "God Console"
-We need a visible Debug Overlay (already partially implemented).
-*   **Additions:**
-    *   `Tick`: Current Sim Tick.
-    *   `Ping`: Latency to Host.
-    *   `CmdQueue`: # of pending commands.
-    *   `Entities`: Count of active entities.
+**Protocol:** Execute before *every* PR merge.
 
-### 3.2 Visual Debugging
-*   **Path Lines:** Draw lines showing where the Pathfinder *thinks* the unit is going.
-*   **Server Ghost:** In Client mode, verify where the "Server Position" is vs "Interpolated Position". Draw a Ghost mesh.
+| Step | Action | Expected Result |
+| :--- | :--- | :--- |
+| 1 | `npm start` | App loads, no console errors. |
+| 2 | Click "Host Game" (Tab 1) | Lobby Created, PeerID displayed. |
+| 3 | Copy PeerID -> Open Tab 2 | "Join Game" success. |
+| 4 | Tab 1: Select Unit, Move Right | Unit moves on *both* screens. |
+| 5 | Tab 2: Disconnect Network | Game pauses / "Reconnecting" UI appears. |
 
 ---
-*End of Appendix 04*
+
+## 3. Performance & Budget
+
+### 3.1 Strict Limit: 8ms Tick
+The `SimCore.step()` MUST complete in < 8ms on average (M1 Macbook Air baseline).
+*   **Monitor:** `State.meta.lastTickDuration` exposed in Debug Overlay.
+*   **Fail Action:** If > 8ms, we must optimize (Spatial Partitioning, Object Pools).
+
+### 3.2 Memory Budget
+*   **Entities:** Max 500 active.
+*   **Snapshots:** Max 100KB JSON size. (If larger, Delta compression required).
+
+---
+
+## 4. Debug Overlay (The "God Mode")
+
+We need a Runtime Developer UI (`dat.gui` or HTML overlay).
+
+**Required Data Points:**
+*   `Tick`: 12054
+*   `Sim Time`: 8.43ms (Avg)
+*   `Ping`: 45ms
+*   `Cmd Queue`: 0
+*   `Entity Count`: 42
+*   **Visual Debug Toggle:**
+    *   [x] Show Hitboxes
+    *   [x] Show Vision Rays
+    *   [x] Show Pathfinding grid
+
+---
+*End of Appendix*

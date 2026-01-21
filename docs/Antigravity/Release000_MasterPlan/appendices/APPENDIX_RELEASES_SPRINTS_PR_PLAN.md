@@ -1,124 +1,95 @@
-# APPENDIX 03: RELEASES, SPRINTS & PR PLAN
+# APPENDIX E: RELEASES, SPRINTS & PR PLAN (v3)
 
-**Parent Document:** [Big Picture Master Plan](../BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md)
-**Scope:** Detailed Work Breakdown Structure (WBS) for Phase 0 and Phase 1.
-
----
-
-## 1. Development Process & Cadence
-
-### 1.1 Sprint Strategy
-*   **Cadence:** **1 Sprint = 1 Week** (Flexible for Worker Pool).
-*   **Goal:** Each Sprint must end with a **Deployable Snapshot** (even if features are hidden).
-*   **Release vs Sprint:** Releases are Milestones. They can happen mid-sprint.
-
-### 1.2 The "PR Shim" Rule
-*   Do not break `Game.js` in one giant PR.
-*   **Pattern:**
-    1.  Write new `SimCore` module.
-    2.  Unit Test it.
-    3.  Create a "Shim" in `Game.js` to route data to it.
-    4.  Verify functionality.
-    5.  **Merge**.
-    6.  (Later) Remove the old code.
+**Parent Document:** [Big Picture Master Plan v3](../BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md)
+**Scope:** Detailed Work Breakdown Structure (WBS) with PR-level granularity.
 
 ---
 
-## 2. Phase 0: Netcode Readiness (Est. 5 Sprints)
+## 1. Execution Strategy
 
-### Release 001: The Heartbeat (Fixed Timestep)
-*Reference: `NETCODE_PREFLIGHT.md` / `Loop.js`*
-- **PR 1.1: SimCore/Loop**: Implement `Accumulator` loop logic. (Pure JS).
-- **PR 1.2: Game Shim**: Update `Game.animate()` to feed `clock.getDelta()` into `SimCore.accumulate()`.
-- **PR 1.3: Visual Interp**: Modify `Unit.js` slightly to accept `alpha` (interpolation factor).
-    *   *Test:* Throttle Chrome CPU -> Logic stays 20Hz, FPS drops.
-
-### Release 002: Command Queue
-*Reference: `GRFDTRDPU_SYSTEM` Appendix A*
-- **PR 2.1: Command Types**: Define `MoveCommand`, `StopCommand` schemas.
-- **PR 2.2: Input Factory**: Create `InputFactory.js`. Mouse clicks -> `Command` objects.
-- **PR 2.3: Queue Consumer**: SimCore processes queue before `step()`.
-- **PR 2.4: Unit Refactor**: Break `unit.setTarget()` into `unit.processCommand(cmd)`.
-
-### Release 003: Deterministic IDs
-- **PR 3.1: Sequential IDs**: Remove `Date.now()`. Use `sim.nextId++`.
-- **PR 3.2: Map Gen**: Ensure Map entities spawn in stable order.
-
-### Release 004: Seeded RNG
-- **PR 4.1: Mulberry32**: Import/Write 32-bit PRNG.
-- **PR 4.2: Global Seed**: Store seed in `SimState`.
-- **PR 4.3: Injection**: Replace `Math.random` in `Unit.js` logic with `sim.rng()`.
-
-### Release 005: State Surface Partition
-*Reference: `quality/STATE_SURFACE_MAP.md`*
-- **PR 5.1: State Tree**: Create `StateRegistry` to hold the "Master JSON".
-- **PR 5.2: Unit State Extract**: Move properties (`hp`, `pos`) from Unit object to State Registry. Unit object becomes a "View Proxy".
-- **PR 5.3: Serialize**: Implement `SimCore.toJSON()`.
-
-### Release 006: Local Transport
-- **PR 6.1: ITransport**: Interface definition.
-- **PR 6.2: LocalLoopback**: Memory-buffer implementation.
-- **PR 6.3: Transport Injection**: SimCore uses `transport.send()` instead of direct queue push.
+We do not just "code". We execute **Atomic Pull Requests**.
+*   **Rule:** 1 PR = 1 Feature or 1 Fix.
+*   **Rule:** Every PR must include Unit Tests.
+*   **Rule:** Every PR must pass the "Smoke Test" (Appendix F).
 
 ---
 
-## 3. Phase 1: Canonical Features (Est. 8 Sprints)
+## 2. Phase 0: Netcode Foundation (Weeks 1-5)
 
-### Release 011: LOCOMOTION (Move Roll)
-- **PR 11.1: Physics Engine**: Implement Sphere-rolling logic in SimCore.
-- **PR 11.2: Terrain Constraints**: Implement Slope/Water checking.
-- **PR 11.3: Inertia**: Add Mass/Accel stats.
-- **PR 11.4: View Sync**: Update Three.js mesh to follow Rolling physics output.
+**Objective:** A reliable 20Hz Loop sending deterministic state between two browser tabs.
 
-### Release 012: PERCEPTION (Optical)
-- **PR 12.1: VisionSystem v2**: Rewrite `VisionSystem` to use `ownerId` filtering.
-- **PR 12.2: MaxSources Cap**: Implement priority sorting (Distance + Intensity).
-- **PR 12.3: FOW Integration**: Feed filtered visible set to FOW Shader.
+### Sprint 1: The Heartbeat
+*   **Goal:** `SimCore` running in isolation.
+*   **PR 1.0 (Scaffold):** Create `src/sim/SimCore.js`, `SimLoop.js`, `StateRegistry.js`.
+    *   *Test:* `SimLoop` accumulates time correctly (e.g. 1000ms real time = 20 ticks).
+*   **PR 1.1 (Loop Integration):** Hook `SimLoop` into `Game.animate()`.
+    *   *Test:* Console logs "TICK 1... TICK 2..." while `Game.js` renders 60fps.
 
-### Release 013: MINING (Tool Lane)
-- **PR 13.1: Matera Deposit**: Create World Entity `Deposit`.
-- **PR 13.2: Drill Action**: Implement `DrillCommand`.
-- **PR 13.3: Surface Piles**: Logic to spawn `Pile` entities.
+### Sprint 2: The Command Chain
+*   **Goal:** Inputs travel via Queue, not direct execution.
+*   **PR 2.0 (Types):** Define `Command` interfaces in `types/Net.ts`.
+*   **PR 2.1 (Factory):** Create `CommandFactory.js`.
+    *   *Impl:* `onMouseClick -> createMoveCommand(target)`.
+*   **PR 2.2 (Consumer):** Implement `SimCore.processInputs()`.
+    *   *Test:* Push fake command -> Verify Entity position changes after tick.
 
-### Release 014: TRANSPORT (Hauling)
-- **PR 14.1: Cargo State**: Add `cargo` field to Unit State.
-- **PR 14.2: Pickup/Drop**: Helper logic for interacting with Piles/Bases.
-- **PR 14.3: Weight Penalty**: Slow down unit based on `cargo.mass`.
+### Sprint 3: Deterministic Data
+*   **Goal:** Remove all non-deterministic factors.
+*   **PR 3.0 (RNG):** Replace `Math.random` with `Mulberry32`.
+    *   *Test:* Run Sim twice with Seed 12345. Output states must be `JSON.stringify` identical.
+*   **PR 3.1 (IDs):** Replace `Date.now()` with `sim.nextId++`.
 
-### Release 015: COMBAT (Basic)
-- **PR 15.1: Weapon Lane**: Add parallel command processing.
-- **PR 15.2: Projectiles**: Spawn deterministic projectile entities.
-- **PR 15.3: Damage**: HP reduction logic.
+### Sprint 4: The Transport (Local)
+*   **Goal:** Two SimCores talking.
+*   **PR 4.0 (Interface):** Define `ITransport`.
+*   **PR 4.1 (Loopback):** Implement `LocalLoopbackTransport`.
+*   **PR 4.2 (Dual Sim):** Modify `Main.js` to optionally spawn 2 SimCores (Host/Client) for debug.
+*   **PR 4.3 (Sync):** Verify Command Sent on A executes on B.
 
----
-
-## 4. Phase 2: Online Multiplayer (Est. 4 Sprints)
-
-### Release 020: Supabase Signaling
-- **PR 20.1**: Schema Migration (Lobbies table).
-- **PR 20.2**: Host Signaling Logic (Create Lobby).
-- **PR 20.3**: Client Signaling Logic (Join Lobby).
-
-### Release 021: P2P Transport
-- **PR 21.1**: PeerJS Integration.
-- **PR 21.2**: `WebRTCTransport` implements `ITransport`.
-- **PR 21.3**: STUN/TURN Config.
+### Sprint 5: State Serialization
+*   **Goal:** Snapshots.
+*   **PR 5.0 (Partitions):** Separate `GameState` from `RenderState`.
+*   **PR 5.1 (Snapshot):** Implement `sim.createSnapshot()`.
+*   **PR 5.2 (Hydrate):** Implement `sim.loadSnapshot()`.
+    *   *Test:* Save -> Load -> Sim continues correctly.
 
 ---
 
-## 5. Summary Schedule
-| SPRINT | FOCUS | DELIVERABLE |
-| :--- | :--- | :--- |
-| **S1** | Loop & Commands | Release 001-002 |
-| **S2** | Determinism | Release 003-004 |
-| **S3** | State Architecture | Release 005 |
-| **S4** | Transport Layer | Release 006 |
-| **S5** | Feature Framework | Release 010 (Prep) |
-| **S6** | Move Roll | Release 011 |
-| **S7** | Perception | Release 012 |
-| **S8** | Mining | Release 013 |
-| **S9** | Transport | Release 014 |
-| **S10** | Combat | Release 015 |
+## 3. Phase 1: Feature Implementation (Weeks 6-14)
+
+**Objective:** The 7 Features fully implemented.
+
+### Sprint 6: Locomotion (Physics)
+*   **PR 6.0:** `LocomotionSystem` framework.
+*   **PR 6.1:** Rolling Physics (Torque/Friction logic).
+*   **PR 6.2:** Slope Constraints (Dot Product check).
+
+### Sprint 7: Vision (F03)
+*   **PR 7.0:** `VisionSystem` (Distance checks).
+*   **PR 7.1:** `FOW` Shader upgrade (consume Vision data).
+
+### Sprint 8: Mining & Economy (F05)
+*   **PR 8.0:** `MateraDeposit` entity.
+*   **PR 8.1:** `MiningSystem` (Tick logic).
+*   **PR 8.2:** Resource Inventory logic.
+
+### Sprint 9: Transport (F06)
+*   **PR 9.0:** `Cargo` component.
+*   **PR 9.1:** Mass penalty logic in Locomotion.
+
+### Sprint 10: Shaping (F07)
+*   **PR 10.0:** `TerrainSystem` state (Grid).
+*   **PR 10.1:** `Modify` command logic.
+
+### Sprint 11: Combat (F02)
+*   **PR 11.0:** `CombatSystem`.
+*   **PR 11.1:** `Projectile` entity logic.
+*   **PR 11.2:** Damage/HP logic.
+
+### Sprint 12-14: The Pipeline (GRFDTRDPU)
+*   **PR 12.0:** `GoalEvaluator` stub.
+*   **PR 13.0:** `ResearchManager` (Unlock logic).
+*   **PR 14.0:** `Factory` (Production Queue logic).
 
 ---
-*End of Appendix 03*
+*End of Appendix*
