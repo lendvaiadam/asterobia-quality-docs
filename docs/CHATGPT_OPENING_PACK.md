@@ -19,6 +19,15 @@ BOOTSTRAP
 - index.html: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/index.html
 - src/Main.js: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/src/Main.js
 - package.json: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/package.json
+- Antigravity Plan v2: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/67e17868015fa2075801723649fafa9ed3ef9378/docs/Antigravity/Release000_MasterPlan/BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md
+- Antigravity MD Index: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/67e17868015fa2075801723649fafa9ed3ef9378/docs/Antigravity/Release000_MasterPlan/appendices/MD_FILE_INDEX.txt
+- Appendix A: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/67e17868015fa2075801723649fafa9ed3ef9378/docs/Antigravity/Release000_MasterPlan/appendices/APPENDIX_MULTIPLAYER_INTERNET_STACK.md
+- Appendix B: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/67e17868015fa2075801723649fafa9ed3ef9378/docs/Antigravity/Release000_MasterPlan/appendices/APPENDIX_BACKEND_PERSISTENCE_SCHEMA.md
+- Appendix C: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/67e17868015fa2075801723649fafa9ed3ef9378/docs/Antigravity/Release000_MasterPlan/appendices/APPENDIX_GRFDTRDPU_RD_DEV_PROD_IMPLEMENTATION.md
+- Appendix D: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/67e17868015fa2075801723649fafa9ed3ef9378/docs/Antigravity/Release000_MasterPlan/appendices/APPENDIX_FEATURE_DEPENDENCY_GRAPH.md
+- Appendix E: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/67e17868015fa2075801723649fafa9ed3ef9378/docs/Antigravity/Release000_MasterPlan/appendices/APPENDIX_RELEASES_SPRINTS_PR_PLAN.md
+- Appendix F: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/67e17868015fa2075801723649fafa9ed3ef9378/docs/Antigravity/Release000_MasterPlan/appendices/APPENDIX_QA_TESTING_OBSERVABILITY.md
+- Appendix G: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/67e17868015fa2075801723649fafa9ed3ef9378/docs/Antigravity/Release000_MasterPlan/appendices/APPENDIX_RISK_REGISTER.md
 
 OPENING PACK (RAW LINKS)
 
