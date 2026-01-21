@@ -1,225 +1,196 @@
 # MASTER DEVELOPMENT PLAN v1 (ANTIGRAVITY)
 
-**Author:** Antigravity (Gemini)
-**Date:** 2026-01-21
-**Status:** DRAFT (Release 000 Candidate)
-**Scope:** Full Project End-to-End Architecture & Roadmap
+> **Status**: DRAFT
+> **Date**: 2026-01-21
+> **Author**: Antigravity
+> **Objective**: Define the roadmap to "Netcode Readiness" (Phase 0) via Host-Authoritative Architecture.
 
 ---
 
-## PROOF-OF-READ (Source Integrity)
-**I verify that I have read the following sources before drafting this plan:**
+## 1. PROOF-OF-READ (Source Verification)
 
-**Core Documentation:**
-- `docs/START_HERE.md`
-- `docs/STATUS_WALKTHROUGH.md`
-- `docs/PLANNING_PROTOCOL.md`
-- `docs/IMPLEMENTATION_GATES.md`
-- `docs/CANONICAL_SOURCES_INDEX.md`
-- `docs/CURRENT_SYSTEM_SPEC.md`
+I certify that I have read the following canonical documents before constructing this plan:
 
-**Quality & Audits:**
-- `quality/NETCODE_READINESS_AUDIT.md` (Verdict: NOT READY)
-- `quality/STATE_SURFACE_MAP.md`
-- `quality/MULTIPLAYER_TARGET_CHOICE.md` (Target: Host-Authoritative)
-- `quality/archive/NETCODE_PREFLIGHT.md`
-- `quality/archive/REPO_REALITY_MAP.md`
+### **Core Workflow & Rules**
+- [x] `docs/START_HERE.md`
+- [x] `docs/STATUS_WALKTHROUGH.md`
+- [x] `docs/PLANNING_PROTOCOL.md` (Implementation Gates)
+- [x] `docs/IMPLEMENTATION_GATES.md`
+- [x] `docs/WORKER_POOL_RUNBOOK.md`
+- [x] `docs/CANONICAL_SOURCES_INDEX.md`
 
-**Canonical Specifications (Snapshot 2026-01-14):**
-- `ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md`
-- `ASTEROBIA_CANONICAL_GRFDTRDPU_SYSTEM_2026-01-13.md`
-- `ASTEROBIA_CANONICAL_REFACTOR_PROCESS_2026-01-13.md`
-- All Feature Specs including `UNIT_DESIGNER` (v2026-01-18), `MOVE_ROLL`, `WPN_SHOOT`, etc.
+### **Architecture & Quality Audits**
+- [x] `spec_sources/ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md`
+- [x] `spec_sources/ASTEROBIA_CANONICAL_GRFDTRDPU_SYSTEM_2026-01-13.md`
+- [x] `spec_sources/ASTEROBIA_CANONICAL_REFACTOR_PROCESS_2026-01-13.md`
+- [x] `quality/NETCODE_READINESS_AUDIT.md`
+- [x] `quality/STATE_SURFACE_MAP.md`
+- [x] `quality/MULTIPLAYER_TARGET_CHOICE.md` (Host-Authoritative decision)
+- [x] `KNOWN_RISK_AREAS.md` (Unit.js Monolith, Game.js God Object)
+
+### **Feature Specifications**
+- [x] `spec_sources/ASTEROBIA_CANONICAL_FEATURE_MOVE_ROLL_2026-01-13.md`
+- [x] `spec_sources/ASTEROBIA_CANONICAL_FEATURE_WPN_SHOOT_2026-01-13.md`
+- [x] `spec_sources/ASTEROBIA_CANONICAL_FEATURE_PERCEPTION_OPTICAL_VISION_2026-01-13.md`
+- [x] `spec_sources/ASTEROBIA_CANONICAL_FEATURE_PERCEPTION_SUBSURFACE_SCAN_2026-01-13.md`
+- [x] `spec_sources/ASTEROBIA_CANONICAL_FEATURE_MATERA_MINING_2026-01-13.md`
+- [x] `spec_sources/ASTEROBIA_CANONICAL_FEATURE_MATERA_TRANSPORT_2026-01-13.md`
+- [x] `spec_sources/ASTEROBIA_CANONICAL_FEATURE_TERRAIN_SHAPING_2026-01-13.md`
+- [x] `spec_sources/ASTEROBIA_CANONICAL_FEATURE_UNIT_CARRIER_2026-01-13.md`
+- [x] `spec_sources/VISION_MAX_SOURCES_SPEC.md`
+- [x] `spec_sources/VISION_FOW_REFACTOR_AUDIT.md`
+- [x] `spec_sources/VISION_FOW_SYSTEM_AUDIT.md`
+
+### **Missing / Not Found**
+- [ ] `docs/KB-INDEX.md` (Referenced in known risks, but file is missing from repo)
 
 ---
 
-## 1. EXECUTIVE SUMMARY
+## 2. TARGET DEFINITION: "NETCODE READINESS"
 
-**The Goal:** Transition Asterobia from a "Client-Side Prototype" into a **Host-Authoritative, Deterministic Engine** capable of multiplayer, replay, and robust persistence.
+**Goal:** Transform the prototype into a **Host-Authoritative** system where game logic is deterministic, headless-capable, and completely decoupled from rendering.
 
-**The Shift:**
-- **From:** `Game.js` (God Class) running logic at propertities of `requestAnimationFrame` (60Hz+).
-- **To:** `SimCore` running logic at a fixed **20Hz**, utilizing discrete `Command` objects, with `WebeGL` rendering simply interpolating between state snapshots.
+**Concrete Success Criteria:**
+1.  **Strict State Separation:**
+    *   **SimCore (Authoritative):** Contains ALL gameplay data (Position, Health, Inventory, Cooldowns). NO visual types (Three.js, Meshes, Textures).
+    *   **World (Render):** Pure view layer. Reads SimCore state to update meshes. NO game logic.
+2.  **Deterministic Loop:**
+    *   Logic updates at fixed timestep (e.g., 20Hz or 30Hz).
+    *   No `Date.now()`, `Math.random()`, or `requestAnimationFrame` delta times in SimCore.
+    *   Input via **Command Queue** only.
+3.  **Headless Capability:** `SimCore` can run in a Node.js worker without a window/DOM.
+4.  **Serialization:** Full game state can be snapshotted to JSON and restored identically.
 
-**Phase 0 Mandate:** We do not build new features until the "Netcode Kernel" is proven. All future features (Mining, Combat) must be built *into* this new kernel, not added to the legacy `Unit.js`.
+**The "Phase 0" Gate:**
+We are NOT building the multiplayer server yet. We are building the **Single-Player Local Host** architecture that *allows* multiplayer to be added later by simply moving SimCore to a server.
 
 ---
 
-## 2. ENGINEERING ARCHITECTURE
+## 3. FEATURE ROADMAP (GRFDTRDPU EVOLUTION)
 
-### 2.1 The "Wall" (Sim vs World)
-We enforce a strict separation of concerns.
+We follow the **G-R-F-Tr-D-P-U** pipeline. Most features are currently in **F (Functional)** or **Tr (Training/Refinement)** but technologically debt-ridden. We must retro-fit them to the new architecture.
 
-| Layer | Frequency | Responsibility | Access Rules |
+| Feature | Current State | Target State | Refactor Priority |
 | :--- | :--- | :--- | :--- |
-| **SimCore** | **20 Hz** (Fixed) | Truth, Physics, Logic, State. | **Write:** Commands only. **Read:** Own State. |
-| **World** | **FPS** (Variable) | Interpolation, Visuals, Audio. | **Read:** Sim Snapshots. **No Writes.** |
-| **UI** | **DOM** (Event) | Inputs, overlay. | **Write:** Emits Commands. |
-
-### 2.2 Directory Structure
-```text
-src/
-├── SimCore/                      # THE AUTHORITY
-│   ├── runtime/                  # The Execution Environment
-│   │   ├── Loop.js               # Fixed-Timestep Accumulator
-│   │   ├── Store.js              # The "Database" (Entities, Terrain)
-│   │   ├── EventBus.js           # Sim-Internal Events
-│   │   └── Random.js             # Seeded PRNG
-│   ├── transport/                # The I/O Layer
-│   │   ├── CommandQueue.js       # Input Buffer
-│   │   └── ITransport.js         # Network Abstraction
-│   └── features/                 # LOGIC MODULES (Pure Functions preferred)
-│       ├── MoveRoll.js           # Rolling Physics
-│       ├── WpnShoot.js           # Combat Logic
-│       └── MateraMining.js       # Resource Logic
-├── World/                        # THE RENDERER
-│   ├── shim/                     # Adapter (Game.js hooks)
-│   ├── systems/                  # Three.js Systems
-│   │   ├── RenderLoop.js         # Interpolator
-│   │   └── FogRenderer.js        # Visual-only Fog
-│   └── input/                    # Interaction
-│       └── InputCapture.js       # Mouse -> Command
-└── UI/                           # THE INTERFACE
-```
+| **SimLoop** | `Game.js` (Coupled) | `SimCore/GameLoop.js` (Fixed Step) | **CRITICAL (Blocking)** |
+| **Unit State** | `Unit.js` (Monolith) | `SimCore/Entities/UnitState.js` | **CRITICAL** |
+| **Movement** | `Unit.js` update() | `SimCore/Systems/MoveSystem.js` | **HIGH** |
+| **Input** | `InteractionManager` | `SimCore/Input/CommandQueue.js` | **HIGH** |
+| **Vision** | `VisionSystem` + `FogOfWar` | `SimCore/Perception` (Logic) vs `World/VisionRenderer` | **MEDIUM** |
+| **Mining** | `Unit.js` logic | `SimCore/Systems/MiningSystem.js` | **MEDIUM** |
+| **Terrain** | `Planet.js` | `SimCore/World/TerrainState.js` | **LOW** (Static for now) |
 
 ---
 
-## 3. FEATURE ROADMAP (Phased Execution)
+## 4. ARCHITECTURE: SIMCORE vs WORLD
 
-### 🟡 Phase 0: NETCODE KERNEL (The Foundation)
-**Focus:** Refactoring the existing movement/gameplay into the new `SimCore` pattern. No new gameplay mechanics.
+### **4.1 The Boundary (Invariant)**
+*   **src/SimCore/**: The "Host".
+    *   Dependencies: `gl-matrix` (or similar math lib), `seeded-random`.
+    *   Forbidden: `three.js`, `DOM`, `window`, `document`.
+*   **src/World/** & **src/Entities/** (View): The "Client".
+    *   Dependencies: `three.js`, `SimCore`.
+    *   role: Interpolate and Render state from SimCore.
 
-*   **Release 001: The Heartbeat**
-    *   Objective: Decouple Physics from Render Loop.
-    *   Deliverable: `SimCore` running at 20Hz. `Game.js` rendering interpolated state.
-*   **Release 002: Command Shim**
-    *   Objective: Remove direct state mutation.
-    *   Deliverable: `Input.js` emits `MoveCommand`. `SimCore` processes it.
-*   **Release 003: Deterministic IDs**
-    *   Objective: Replay stability.
-    *   Deliverable: `Sim.nextId` replaces `Date.now()`.
-*   **Release 004: Seeded RNG**
-    *   Objective: Map generation stability.
-    *   Deliverable: `Sim.rng` replaces `Math.random()`.
-*   **Release 005: State Export**
-    *   Objective: Save/Load readiness.
-    *   Deliverable: `serializeState()` returns full JSON truth.
-*   **Release 006: Local Transport**
-    *   Objective: Network readiness proof.
-    *   Deliverable: `LoopbackTransport` passes commands via delay/serialization.
+### **4.2 Data Flow**
+1.  **Input:** User clicks -> `CommandGenerator` -> `CommandQueue` (SimCore).
+2.  **Tick:** `GameLoop` processes Queue -> `SimSystems` update `Accessors` (State).
+3.  **Output:** `RenderLoop` (rAF) reads `Accessors` -> Updates `Three.js Meshes`.
 
-### 🟢 Phase 1: THE ACTION LAYER
-**Focus:** Implementing the core "Action" lanes (`TOOL`, `WEAPON`) in the new architecture.
-
-*   **R-101: Terrain Shaping**
-    *   Impl: `features/TerrainShaping.js` (Tool Lane).
-    *   Tech: Keyframed Target Profile algorithm.
-*   **R-102: Mining & Transport**
-    *   Impl: `features/MateraMining.js` + `Cargo.js`.
-    *   Tech: Resource inventory state.
-*   **R-103: Optical Vision (Fog)**
-    *   Impl: `World/services/FogRenderer.js`.
-    *   Tech: GPU-based FOW driven by Sim unit positions.
-*   **R-104: Weapon Shooting**
-    *   Impl: `features/WpnShoot.js` (Weapon Lane).
-    *   Tech: Projectile logic (hitscan or deterministic ballistics).
-
-### 🔵 Phase 2: THE META LOOP
-**Focus:** The "Game" around the mechanics.
-
-*   **R-201: Unit Designer**
-    *   Impl: `UI/panels/Designer`.
-    *   Tech: `TypeBlueprint` generation and validation (20-100% allocations).
-*   **R-202: Production**
-    *   Impl: `features/Production.js`.
-    *   Tech: Spawning instances from Blueprints using Resources.
-
-### 🟣 Phase 3: CONNECTIVITY
-**Focus:** Multiplayer.
-
-*   **R-301: Serialization Pipeline**
-    *   Impl: Compression / Delta updates.
-*   **R-302: Host-Client Handshake**
-    *   Impl: WebRTC via PeerJS (or Supabase).
-    *   Mode: Host-Authoritative (One player is the Server).
+### **4.3 The "Adapter" Pattern**
+We will implement **View Adapters** to bridge the gap during migration.
+*   `UnitAdapter.js`: Owns the `THREE.Mesh`. Reads `UnitState` (Position, Rotation) every frame and updates the mesh.
 
 ---
 
-## 4. NETCODE STRATEGY
+## 5. PERSISTENCE & MULTIPLAYER STRATEGY
 
-### 4.1 Determinism Rules
-1.  **Fixed Tick:** Logic ONLY updates on accum += dt.
-2.  **Seeded Random:** NEVER use `Math.random()`. Use `sim.rng.float()`.
-3.  **Order of Execution:**
-    *   Apply Inputs (Commands).
-    *   Run Feature Systems (Move -> Tool -> Weapon).
-    *   Resolve Collisions.
-    *   Emit Events.
-4.  **Floating Point:** Accept JS `number` (float64) risks for Phase 0. If desyncs occur, switch to fixed-point libraries (Risk Register Item).
+### **5.1 Persistence (Save/Load)**
+*   **Mechanism:** `SimCore` root object must support `serialize()` returning a JSON string.
+*   **Content:**
+    *   `Tick`: Current turn number.
+    *   `Seed`: PRNG state.
+    *   `Entities`: List of all unit IDs and their data components.
+    *   `TerrainDiffs`: Any changes to the base terrain.
+*   **Validation:** `load(saveData)` must restore exact state.
 
-### 4.2 State Surface (Snapshot)
-The Authoritative State (`serializeState()`) must contain:
-```json
-{
-  "tick": 1204,
-  "seed": 993842,
-  "nextId": 55,
-  "entities": [
-    {
-      "id": 1,
-      "type": "MORDIG10",
-      "pos": { "x": 10.2, "y": 0, "z": 5.5 },
-      "vel": { "x": 0.1, "y": 0, "z": 0 },
-      "queue": [ { "type": "MOVE", "target": "..." } ]
-    }
-  ],
-  "terrainMods": []
-}
-```
-**Excluded:** Meshes, Textures, Sounds, Particles.
+### **5.2 Multiplayer (Host-Authoritative)**
+*   **Phase 0 Strategy:** Local Loopback.
+    *   Input is wrapped in "Network Packets" locally to simulate latency (optional) and enforce API strictness.
+    *   We do not need WebSockets for Phase 0, but the *interface* must behave as if it were remote.
 
 ---
 
-## 5. QUALITY ASSURANCE & GATES
+## 6. RELEASE SCHEDULE (001 - 010)
 
-### 5.1 Verification Gates
-Every PR in Phase 0 must pass:
-1.  **Preflight Check:** `node scripts/netcode_preflight.js` (No forbidden tokens).
-2.  **Determinism Test:**
-    *   Run Sim A and Sim B with Seed `12345`.
-    *   Feed identical Commands.
-    *   Assert `JSON.stringify(SimA.state) === JSON.stringify(SimB.state)` after 1000 ticks.
+**Cadence:** 1 Release per ~2-3 days (Flexible). Sequence is strict.
 
-### 5.2 Risk Register
-| Risk | Probability | Impact | Mitigation |
-| :--- | :--- | :--- | :--- |
-| **Float Desync** | Med | High | Use `Math.fround` or switch to fixed-point math lib if verifying cross-browser. |
-| **Legacy Drag** | High | Med | `Unit.js` is sticky. Extract aggressively; do not coexist longer than needed. |
-| **Render Lag** | High | Low | Interpolation adds ~50ms delay. Acceptable for RTS/Strategy. |
-| **Missing Spec** | Low | High | `UNIT_DESIGNER` was missing but recovered. Monitor for others. |
+*   **REL-001: The Kernel**
+    *   **Goal:** Establish `src/SimCore`, `InputQueue`, and `FixedTimestepLoop`.
+    *   **Deliverable:** A moving cube controlled by commands in a deterministic loop (headless capable). No legacy code migration yet.
+
+*   **REL-002: Unit State Extraction**
+    *   **Goal:** Break `Unit.js` dependency on logic.
+    *   **Deliverable:** `UnitState` in SimCore. `Unit.js` becomes a dumb view.
+
+*   **REL-003: Movement System Migration**
+    *   **Goal:** Move `pathFollowing` logic to SimCore.
+    *   **Deliverable:** Units move deterministically. Sync checks pass.
+
+*   **REL-004: Command Pipeline & Selection**
+    *   **Goal:** Formalize `InteractionManager` -> `CommandQueue`.
+    *   **Deliverable:** Multi-unit selection and command issuing via formal protocol.
+
+*   **REL-005: Perception Split (Vision)**
+    *   **Goal:** Separate `VisionSystem` (Logic) from `FogOfWar` (Render).
+    *   **Deliverable:** CPU-side distinct vision source list.
+
+*   **REL-006: Terrain & Physics Stub**
+    *   **Goal:** Abstract terrain height queries.
+    *   **Deliverable:** SimCore can query height without accessing `Planet.mesh`.
+
+*   **REL-007: Gameplay Features I (Mining/Transport)**
+    *   **Goal:** Port Mining logic.
+    *   **Deliverable:** Resource collection via Command Queue.
+
+*   **REL-008: Gameplay Features II (Combat/Shooting)**
+    *   **Goal:** Port Shooting logic (stub).
+    *   **Deliverable:** Firing events generated by SimCore, visualized by World.
+
+*   **REL-009: Persistence & Determinism Verification**
+    *   **Goal:** Save/Load and Replay.
+    *   **Deliverable:** `save()` -> Reload -> Game continues identically.
+
+*   **REL-010: Phase 0 Gold Master (Netcode Ready)**
+    *   **Goal:** Full Regression Test.
+    *   **Deliverable:** All tests pass. Ready for "Phase 1: Networking".
 
 ---
 
-## 6. WORK PACKAGE ORCHESTRATION (5-Worker Pool)
+## 7. WORKER POOL PLAN
 
-**Parallelization Strategy:**
+We have 5 parallel Workers (Claude instances). We will use them to parallelize **non-conflicting** migrations.
 
-*   **Worker 1 (ARCHITECT):** `SimCore` Infrastructure (Loop, Transport, Store).
-    *   *Focus:* Releases 001, 002, 006.
-*   **Worker 2 (PHYSICS):** `MOVE_ROLL` Feature Extraction.
-    *   *Focus:* Migrating `Unit.js` physics logic to pure functions.
-*   **Worker 3 (RENDER):** `World` / Visual Shim.
-    *   *Focus:* Updating `Game.js` to read Snapshots.
-*   **Worker 4 (INPUT):** `InputCapture` & Command Generation.
-    *   *Focus:* Converting UI clicks to JSON Commands.
-*   **Worker 5 (QUALITY):** Test Harness & Audits.
-    *   *Focus:* Writing the Determinism Test Runner.
+### **Parallelization Strategy**
+*   **Controller (Antigravity/Ádám):** Merges PRs, handles "The Kernel" (Core Architecture).
+*   **Workers:** Assigned specific "Systems" or "Modules".
 
----
+### **Example Assignment (Mid-Phase)**
+*   **Worker 1 (Core):** Working on `SimCore/GameLoop` and Infrastructure.
+*   **Worker 2 (Unit A):** Migrating `MoveSystem`.
+*   **Worker 3 (Unit B):** Migrating `MiningSystem`.
+*   **Worker 4 (Vision):** Migrating `PerceptionSystem`.
+*   **Worker 5 (Tests/Docs):** Writing Acceptance Tests and updating Spec docs.
 
-## 7. BLOCKING QUESTIONS (Decisions Needed)
-1.  **Tick Rate:** 20Hz is proposed. Is this fast enough for "Rolling" physics feel? (Recommendation: Start 20Hz, easy to increase to 30Hz if needed).
-2.  **Legacy Types:** Can we bypass the `UNIT_DESIGNER` requirement for Phase 0 and use hardcoded `UnitType` definitions? (Recommendation: YES).
-3.  **Shim Strategy:** Should we refactor `Game.js` in-place (Shim inside) or create `GameCore.js` (Parallel)? (Recommendation: In-place Shim to keep "Play" button working).
+### **Conflict Avoidance**
+*   Strict file ownership rules.
+*   Worker 2 touches `MoveSystem.js`; Worker 3 touches `MiningSystem.js`.
+*   Shared types must be defined in `Core` (Worker 1) first, or mocked until merge.
 
 ---
+
+**Next Steps via `STATUS_WALKTHROUGH.md`:**
+1.  Review this plan.
+2.  Harmonize with Claude's Independent Plan.
+3.  Create consolidated `MASTER_DEVELOPMENT_PLAN_FINAL.md`.
+4.  Begin RELEASE-001.
