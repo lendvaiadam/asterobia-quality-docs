@@ -1,0 +1,42 @@
+# MD FILE INDEX - Short Term Plan v2 (Phase 0 + Phase 1)
+# Generated: 2026-01-21
+# Author: Claude Code
+
+## Primary Documents Read for this Plan
+
+### Control Documents
+- docs/START_HERE.md
+- docs/STATUS_WALKTHROUGH.md
+- docs/CHATGPT_OPENING_PACK.md
+- docs/IMPLEMENTATION_GATES.md
+- docs/CANONICAL_SOURCES_INDEX.md
+
+### Canonical Specifications
+- spec_sources/ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md
+- spec_sources/ASTEROBIA_CANONICAL_GRFDTRDPU_SYSTEM_2026-01-13.md
+- spec_sources/ASTEROBIA_CANONICAL_REFACTOR_PROCESS_2026-01-13.md
+
+### Feature Specifications
+- spec_sources/ASTEROBIA_CANONICAL_FEATURE_MOVE_ROLL_2026-01-13.md
+- spec_sources/ASTEROBIA_CANONICAL_FEATURE_PERCEPTION_OPTICAL_VISION_2026-01-13.md
+- spec_sources/ASTEROBIA_CANONICAL_FEATURE_PERCEPTION_SUBSURFACE_SCAN_2026-01-13.md
+- spec_sources/ASTEROBIA_CANONICAL_FEATURE_MATERA_MINING_2026-01-13.md
+- spec_sources/ASTEROBIA_CANONICAL_FEATURE_MATERA_TRANSPORT_2026-01-13.md
+- spec_sources/ASTEROBIA_CANONICAL_FEATURE_TERRAIN_SHAPING_2026-01-13.md
+
+### Quality Audits
+- quality/NETCODE_READINESS_AUDIT.md
+- quality/STATE_SURFACE_MAP.md
+- quality/MULTIPLAYER_TARGET_CHOICE.md
+
+### Reference Plans
+- docs/master_plan/Claude/MASTER_DEVELOPMENT_PLAN_v1_CLAUDE.md
+- docs/master_plan/Claude/appendices/APPENDIX_E_RELEASES_SPRINTS_PR_PLAN.md
+
+## Scope
+
+This plan covers Phase 0 + Phase 1:
+- Releases 001-020
+- Full feature implementations (MOVE_ROLL, MINING, TRANSPORT, etc.)
+- GRFDTRDPU pipeline
+- NO real internet multiplayer (Phase 2)
