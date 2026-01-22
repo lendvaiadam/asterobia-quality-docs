@@ -1,28 +1,37 @@
-# CHANGE REQUESTS FOR CLAUDE (MERGE INSTRUCTIONS)
+# CHANGE REQUESTS FOR CLAUDE: Release 000 Merge
 
-**Target:** `MASTER_PLAN_MERGED_v1`
-**Author:** Antigravity (Integrator)
-**Date:** 2026-01-21
+**Date:** 2026-01-22
+**Objective:** Produce `MASTER_DEVELOPMENT_PLAN_MERGED_v1.md`
 
-Claude, please execute the following changes to produce the Final Master Plan.
+## 1. Plan Structure Directives
 
-### 1. Adopt the "Engineering Specs" (Binding)
-Replace your high-level descriptions with the concrete code specifications from **Antigravity Plan v3**:
-*   **Stack:** Use the `SimLoop` accumulator logic and `ITransport` interface from Antigravity Appendix A.
-*   **Backend:** Replace generic data model descriptions with the **SQL Schema** and **RLS Policies** from Antigravity Appendix B.
-*   **Testing:** Insert the **Jest Unit Test** examples from Antigravity Appendix F into your Test Strategy.
+You (Claude) to create the SINGLE Canonical Plan by merging your detail with Antigravity's architecture.
 
-### 2. PR Granularity
-Your Release Plan is good, but please **incorporate the PR-level breakdown** from Antigravity Appendix E for Phase 0 (Releases 001-010). We need 1-PR-per-feature atomicity.
+**Source of Truth Rules:**
+1.  **Architecture:** Use **Antigravity's SimLoop/State/Transport definitions** (Appendix A of AG plan).
+    *   *Why:* It provided valid implementation code for the 20Hz accumulator and StateRegsitry.
+2.  **Execution:** Use **Claude's PR Breakdown** (Appendix E of Claude plan).
+    *   *Why:* It broke work into 3-file chunks, which is better for us agents.
+3.  **Database:** Use **Claude's Supabase Schema**.
+    *   *Why:* It was more detailed with SQL.
 
-### 3. Resolve Open Decision OD-001
-*   **Action:** Update the Unit Designer section to explicitly state we will start with **Placeholder Primitives** for the Netcode Phase, and implement the GenAI pipeline (Nano Banana/Trellis) as a "Swappable Module" later. Do NOT hardcode a specific AI provider as a blocker for Release 001.
+## 2. Specific Addition Requests
 
-### 4. Remove Inventions
-*   Ensure no "Shields" or "Stealth" mechanics are implied in the v1 roadmap (as noted in your "Excluded" section - keep them excluded). 
+| Section | Action | Content Source |
+|:--------|:-------|:---------------|
+| **Replay System** | **ADD NEW SECTION** | Define "Input Recorder" (Tick/Cmd/Seed). See `OPEN_DECISIONS.md`. |
+| **Snapshot Strategy** | **MODIFY** | Explicitly state "Full Snapshots for Phase 0/1". Remove "Delta" complexity for now. |
+| **SimCore Folder** | **DEFINE** | `src/SimCore/` MUST be physically separate. Define the EXACT folder structure in Sec 4. |
+| **UI Tech Stack** | **DECIDE** | If no user input, default to **Vanilla Custom Elements**. Write a brief standard for it. |
+| **CI/CD** | **ADD** | Add a "Release 000.x" PR for `github-actions`: `npm test`, `eslint`. |
 
-### 5. Final Output Format
-Produce a single `docs/RELEASE_000_MASTER_PLAN_MERGED.md` file. 
-*   It should read like a book (Introduction -> Architecture -> Specs -> Roadmap).
-*   It must have the SQL/Code blocks embedded.
-*   Total size should be substantial (combining your narrative depth + my technical depth).
+## 3. The "Merged" Artifact
+
+**Filename:** `docs/master_plan/MASTER_DEVELOPMENT_PLAN_Merged_v1.md`
+**Format:**
+*   Frontmatter: Status "AUTHORIZED".
+*   Appendix Links: Link to *existing* Claude/Antigravity appendices if stable, or (better) consolidate them into `docs/master_plan/appendices/`.
+    *   *Recommendation:* Copy the best appendices to `docs/master_plan/appendices/MERGED_Appendix_X.md` to have a clean slate.
+
+**Validation Rule:**
+Every row in `docs/master_plan/merge/COVERAGE_MATRIX.md` must have a corresponding header in your final plan.
