@@ -1,0 +1,20 @@
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Drafts
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Drafts\appendices
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Drafts\MASTER_DEVELOPMENT_PLAN_v1.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Drafts\MASTER_DEVELOPMENT_PLAN_v2.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Drafts\appendices\MD_FILE_INDEX.txt
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Drafts\appendices\PROOF_OF_READ_GATE.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\Antigravity_1.zip [SKIPPED - binary]
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\BIG_PICTURE_MASTER_PLAN_v1_ANTIGRAVITY.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\APPENDIX_BACKEND_PERSISTENCE_SCHEMA.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\APPENDIX_FEATURE_DEPENDENCY_GRAPH.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\APPENDIX_GRFDTRDPU_RD_DEV_PROD_IMPLEMENTATION.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\APPENDIX_MULTIPLAYER_INTERNET_STACK.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\APPENDIX_QA_TESTING_OBSERVABILITY.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\APPENDIX_RELEASES_SPRINTS_PR_PLAN.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\APPENDIX_RISK_REGISTER.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\GAP_ANALYSIS_REPORT.md
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\MD_FILE_INDEX.txt
+D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_\docs\master_plan\sources\Antigravity\Release000_MasterPlan\appendices\PROOF_OF_READ_GATE.md
