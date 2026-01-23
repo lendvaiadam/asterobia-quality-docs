@@ -1,13 +1,16 @@
 # FINAL MASTER PLAN - Navigation Guide
 
-**Status:** AUTHORIZED
-**Date:** 2026-01-22
+**Status:** FINAL
+**Date:** 2026-01-23
 
 ---
 
 ## Quick Start
 
 The **authoritative master plan** is:
+→ [`MASTER_PLAN_FINAL.md`](./MASTER_PLAN_FINAL.md)
+
+The merge working document (historical reference):
 → [`../merged/MASTER_PLAN_MERGED_v1.md`](../merged/MASTER_PLAN_MERGED_v1.md)
 
 ---
