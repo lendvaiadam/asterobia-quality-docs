@@ -2,7 +2,7 @@
 
 **Version:** 2.0.0
 **Date:** 2026-01-24
-**Status:** AUTHORITATIVE
+**Status:** READY FOR PLAN REVIEW
 **Scope:** Demo 1.0 end-to-end development plan
 **Prepared By:** Claude Code (Opus 4.5) + Human Owner (Adam)
 
@@ -53,6 +53,7 @@ This document is the **authoritative development plan** for Asterobia Demo 1.0.
 15. [PR Workflow & Gates](#15-pr-workflow--gates)
 16. [Testing & CI Strategy](#16-testing--ci-strategy)
 17. [Risk Register](#17-risk-register)
+18. [Alternatives & Tradeoffs](#18-alternatives--tradeoffs)
 
 ### Appendices (Separate Files)
 - [Appendix A: Multiplayer Deep Spec](appendices/APPENDIX_A_MULTIPLAYER_DEEP_SPEC.md)
@@ -160,6 +161,60 @@ Demo 1.0 is **DONE** when ALL of the following are verified:
 | Multiplayer sync smoke | Hard | MUST pass (no desync in 5-minute session) |
 | Tick time p95 | Soft | < 8ms with 50 units (measure + trend, no block) |
 | Test coverage | Soft | SimCore > 80% (measure + trend) |
+
+### 2.7 Minimal Acceptance Tests (Per Gate)
+
+Each Done Means gate has a minimal test that must pass:
+
+```javascript
+// 2.1 Single-Player Core Loop
+test('research completes and unlocks feature', async () => {
+  const sim = createTestSim();
+  sim.eventBus.emit('UNIT_STUCK', { unitId: 'central' });
+  const job = sim.research.start('MOVE_ROLL', 'central');
+  while (job.status !== 'DONE') sim.step();
+  expect(sim.features.isUnlocked('MOVE_ROLL')).toBe(true);
+});
+
+test('design creates valid blueprint', () => {
+  const sim = createTestSim();
+  const bp = sim.design.create('central', {
+    features: [{ id: 'MOVE_ROLL', allocation: 50 }, { id: 'OPTICAL_VISION', allocation: 50 }]
+  });
+  expect(bp.allocations.reduce((a,b) => a+b, 0)).toBe(100);
+});
+
+test('production creates unit from blueprint', async () => {
+  const sim = createTestSim();
+  const job = sim.production.build('central', 'type_1');
+  while (job.status !== 'DONE') sim.step();
+  expect(sim.getUnitsByType('type_1').length).toBe(1);
+});
+
+// 2.2 Determinism
+test('replay produces identical state', () => {
+  const log = recordGame(seed, commands, 1000);
+  const result = replayAndVerify(log);
+  expect(result.hashMatch).toBe(true);
+});
+
+// 2.3 Multiplayer
+test('host and client sync after 5 minutes', async () => {
+  const { host, client } = await createTestSession();
+  await playFor(5 * 60 * 1000); // 5 minutes
+  expect(host.getStateHash()).toBe(client.getStateHash());
+});
+
+// 2.4 Save/Load
+test('save round-trips correctly', () => {
+  const sim = createTestSim();
+  playFor(1000);
+  const saved = sim.serialize();
+  const sim2 = new SimCore();
+  sim2.deserialize(saved);
+  expect(sim2.getStateHash()).toBe(sim.getStateHash());
+});
+```
 
 **Source:** Human Owner Q20 answer, `spec_sources/ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md` Section: Goal/Need → Feature Unlock Mappings.
 
@@ -413,6 +468,50 @@ export class GameLoop {
 | **Sequential IDs** | `IdGenerator.next('e')` → `e_0`, `e_1`, ... | Unit test |
 | **Fixed iteration order** | Arrays, not Sets/Maps for ordered ops | Code review |
 | **Same inputs → same output** | Replay test: 1000 ticks, compare state hash | CI gate |
+
+### 5.3 Determinism Invariants Checklist
+
+**Pre-commit checklist for any SimCore change:**
+
+- [ ] No `Math.random()` calls (use `simCore.rng.random()`)
+- [ ] No `Date.now()` or `performance.now()` in game logic (use `simCore.tick`)
+- [ ] No `new Date()` in game logic
+- [ ] No `crypto.randomUUID()` (use `simCore.idGen.next()`)
+- [ ] No `Object.keys()` iteration where order matters (use sorted arrays)
+- [ ] No `Set` or `Map` iteration where order matters
+- [ ] No floating-point accumulation without bounds (e.g., `+=` in tight loop)
+- [ ] No `async/await` in step() path (all sync)
+- [ ] State hash unchanged after identical command sequence
+
+**Determinism test (must pass before merge):**
+```javascript
+// Two SimCore instances, same seed, same commands
+const sim1 = new SimCore({ seed: 12345 });
+const sim2 = new SimCore({ seed: 12345 });
+applyCommands(sim1, commands);
+applyCommands(sim2, commands);
+for (let i = 0; i < 1000; i++) { sim1.step(); sim2.step(); }
+assert(sim1.getStateHash() === sim2.getStateHash());
+```
+
+### 5.4 Data Invariants Checklist
+
+**State consistency rules (must hold at all times):**
+
+| Invariant | Rule | Checked By |
+|-----------|------|------------|
+| Entity ownership | Every entity has exactly one owner (player or neutral) | StateRegistry.validate() |
+| ID uniqueness | No two entities share same ID | IdGenerator guarantees |
+| Tick monotonicity | `simCore.tick` always increases by 1 | GameLoop enforces |
+| RNG state | `simCore.rng.state` updated deterministically | Mulberry32 algorithm |
+| Command ordering | Commands processed in tick order, then seq order | CommandQueue.sort() |
+| Position bounds | Entity positions within world bounds | Feature modules clamp |
+| HP bounds | Entity HP ∈ [0, maxHP] | applyDamage() clamps |
+| Allocation sum | Type blueprint allocations sum to 100% | DesignManager validates |
+
+**Snapshot consistency:**
+- Serialized state must round-trip perfectly: `serialize(deserialize(s)) === s`
+- Hash of loaded state equals hash of saved state
 
 ### 5.3 Seeded PRNG (Mulberry32)
 
@@ -1329,6 +1428,49 @@ assert.deepEqual(replay.getStateHash(), original.stateHash);
 | **M4: Local Complete** | 020 | Full single-player Demo 1.0 |
 | **M5: Multiplayer** | 025 | 2-4 player networked game |
 
+### 14.6 Phase Transition Decision Triggers
+
+**When to advance from Phase 0 to Phase 1:**
+
+| Trigger | Condition | Verification |
+|---------|-----------|--------------|
+| Determinism proven | Replay test passes 100/100 runs | CI gate |
+| Transport abstraction working | LocalTransport + stub WebRTCTransport compile | Smoke test |
+| State separation complete | Unit.js reads from SimCore state | Code review |
+| No regressions | All existing features still work | Full smoke test |
+
+**When to advance from Phase 1 to Phase 2:**
+
+| Trigger | Condition | Verification |
+|---------|-----------|--------------|
+| All required features implemented | 6/6 features pass acceptance | Feature tests |
+| Single-player loop complete | Can play research→build→fight | Manual playtest |
+| Save/Load working | Snapshot round-trip verified | Unit test |
+| Ready for network | ITransport interface used everywhere | Code review |
+
+**When to ship Demo 1.0:**
+
+| Trigger | Condition | Verification |
+|---------|-----------|--------------|
+| All Demo 1.0 Done Means | Section 2 checklist 100% | Manual verification |
+| CI gates pass | Determinism + MP sync + perf | GitHub Actions |
+| No P0 bugs | Bug tracker clean | Triage review |
+| Playtest successful | 30-minute session without crash | Manual test |
+
+### 14.7 Rollback Triggers
+
+**Immediate rollback (revert PR within 1 hour):**
+- Smoke test fails
+- Determinism test fails
+- Direct Control regression
+- Build failure
+
+**Planned rollback (revert after investigation):**
+- Performance regression > 20%
+- Memory growth > 2x
+- New console errors
+- Feature interaction bug
+
 ---
 
 ## 15. PR Workflow & Gates
@@ -1582,6 +1724,125 @@ jobs:
 
 **Full register:** See [Appendix H: Risk Register Detail](appendices/APPENDIX_H_RISK_REGISTER_DETAIL.md)
 
+### 17.3 Top 10 Failure Modes & Early Warning Signals
+
+| # | Failure Mode | Early Warning Signal | Response |
+|---|--------------|---------------------|----------|
+| 1 | **Desync in multiplayer** | State hash mismatch alarm | Trigger auto-resync, log diff for debug |
+| 2 | **Tick time spike** | p95 tick time > 5ms | Profile hot paths, defer non-critical work |
+| 3 | **Memory leak** | Heap growth > 1MB/min | Check entity cleanup, event listener removal |
+| 4 | **Spiral of death** | > 3 catch-up steps/frame | Clamp accumulator, drop frames, warn user |
+| 5 | **Connection drop** | ICE state = "disconnected" | Show reconnect UI, attempt reconnect ×3 |
+| 6 | **Save corruption** | Snapshot parse failure | Keep last-known-good save, alert user |
+| 7 | **Determinism drift** | Different hash same tick | Log RNG state, entity counts; force resync |
+| 8 | **Unit.js regression** | Smoke test fails | Immediate revert, no merge without fix |
+| 9 | **Supabase quota** | Usage > 80% of tier | Alert, trigger cleanup of old data |
+| 10 | **Feature interaction bug** | Unexpected lane conflict | Log feature states, fallback to safe state |
+
+**Monitoring implementation (Post-Demo):**
+- Console warnings for #2, #4
+- Automated hash checks for #1, #7
+- Browser beforeunload for save integrity
+- Supabase dashboard alerts for #9
+
+---
+
+## 18. Alternatives & Tradeoffs
+
+This section documents key architectural decisions, rejected alternatives, and the rationale for choices made.
+
+### 18.1 Network Architecture
+
+| Decision | Chosen | Rejected | Rationale |
+|----------|--------|----------|-----------|
+| Topology | Host-authoritative star | Peer-to-peer mesh | Simpler state management, one authoritative source, easier to migrate to dedicated server |
+| Transport | WebRTC DataChannels | WebSockets | P2P reduces server load, lower latency, TURN fallback available |
+| Signaling | Supabase Realtime | Custom WebSocket server | Managed service, already have Supabase for auth/storage |
+
+**Why not P2P mesh?**
+- Requires N×N connections for N players
+- State reconciliation complexity grows quadratically
+- No clear "truth" on conflict
+- Harder to debug desyncs
+
+**Why not WebSockets?**
+- Requires dedicated server infrastructure
+- Higher latency (server hop)
+- Server costs scale with player count
+- BUT: Easier NAT traversal (future consideration)
+
+### 18.2 State Authority
+
+| Decision | Chosen | Rejected | Rationale |
+|----------|--------|----------|-----------|
+| Simulation | Host runs authoritative SimCore | Lockstep | Lockstep requires perfect sync, any drift = desync; host authority allows correction |
+| Client prediction | None (snapshot interpolation) | Full prediction + rollback | Simpler, acceptable latency for RTS, avoids visual jitter from rollbacks |
+
+**Why not lockstep?**
+- Floating-point variance between browsers
+- One slow client slows everyone
+- Complex to implement rollback
+
+**Why no client prediction?**
+- RTS tolerates 100-150ms latency
+- Prediction + rollback causes visual jitter
+- Snapshot interpolation simpler and sufficient
+
+### 18.3 Persistence Layer
+
+| Decision | Chosen | Rejected | Rationale |
+|----------|--------|----------|-----------|
+| Backend | Supabase | Firebase, Custom server | Postgres + Auth + Storage + Realtime in one; good free tier; SQL familiarity |
+| Save format | JSONB in Postgres | Files in Storage | Queryable, smaller saves; Storage for large replays only |
+
+**Why not Firebase?**
+- NoSQL less flexible for queries
+- Realtime database has different model
+- Already committed to Supabase for auth
+
+### 18.4 UI Framework
+
+| Decision | Chosen | Rejected | Rationale |
+|----------|--------|----------|-----------|
+| UI Components | Web Components (vanilla) | React, Vue, Svelte | No framework dependency, native browser support, encapsulation via Shadow DOM |
+
+**Why not React?**
+- Additional dependency for game overlay
+- Virtual DOM overhead unnecessary for game UI
+- Web Components are framework-agnostic
+
+### 18.5 Refactoring Strategy
+
+| Decision | Chosen | Rejected | Rationale |
+|----------|--------|----------|-----------|
+| Unit.js migration | Shim-based extraction | Full rewrite | Lower risk, preserve working code, incremental migration, easy rollback |
+
+**Why not full rewrite?**
+- Unit.js works today (Direct Control, movement, visuals)
+- Rewrite risks losing features
+- Can't afford timeline slip
+- Shim allows parallel operation during migration
+
+### 18.6 Command Queue UI
+
+| Decision | Chosen | Rejected | Rationale |
+|----------|--------|----------|-----------|
+| Phase 1 UI | List + simple timeline bar | Full AE-style timeline | Data model first, complex UI later; demo can ship with simpler UI |
+| Timeline complexity | Phased (P1 simple, P2 full) | All at once | Reduces Demo 1.0 scope; full timeline is Post-Demo |
+
+### 18.7 Determinism Approach
+
+| Decision | Chosen | Rejected | Rationale |
+|----------|--------|----------|-----------|
+| Random numbers | Seeded PRNG (Mulberry32) | Fixed-point math | Mulberry32 is sufficient for our needs, simpler than fixed-point |
+| ID generation | Sequential integers | UUIDs | Deterministic, shorter, predictable order |
+
+**Why not fixed-point math?**
+- Overkill for our precision needs
+- Significant code complexity
+- Mulberry32 + careful float usage is sufficient
+- Can add later if determinism issues persist
+
 ---
 
 # APPENDICES (Summary)
@@ -1590,15 +1851,15 @@ The following appendices provide deep technical detail. Each is a separate file 
 
 | Appendix | Purpose | Status |
 |----------|---------|--------|
-| A | Multiplayer Deep Spec | To write |
-| B | Backend & Persistence Deep Spec | To write |
-| C | Replay System Spec | To write |
-| D | GRFDTRDPU Implementation Guide | To write |
-| E | Feature Dependency Graph | To write |
-| F | Release/Sprint/PR Breakdown | To write |
-| G | Testing & QA Strategy | To write |
-| H | Risk Register Detail | To write |
-| I | UI/UX Pipeline | To write |
+| A | Multiplayer Deep Spec | Complete |
+| B | Backend & Persistence Deep Spec | Complete |
+| C | Replay System Spec | Complete |
+| D | GRFDTRDPU Implementation Guide | Complete |
+| E | Feature Dependency Graph | Complete |
+| F | Release/Sprint/PR Breakdown | Complete |
+| G | Testing & QA Strategy | Complete |
+| H | Risk Register Detail | Complete |
+| I | UI/UX Pipeline | Complete |
 
 ---
 
@@ -1639,6 +1900,7 @@ Decisions marked for future resolution:
 | 2.0.0 | 2026-01-24 | Claude Code + Adam | Initial v2 from reconciled sources |
 | 2.0.1 | 2026-01-24 | Claude Code | Added Part III (Features) + Part IV (MP/Backend) |
 | 2.0.2 | 2026-01-24 | Claude Code | Added Part V (Execution) + Appendix summary |
+| 2.1.0 | 2026-01-24 | Claude Code | Polish pass: Added Section 18 (Alternatives & Tradeoffs), Determinism/Data invariants, Top 10 Failure Modes, Decision Triggers, Minimal Acceptance Tests |
 
 ---
 
