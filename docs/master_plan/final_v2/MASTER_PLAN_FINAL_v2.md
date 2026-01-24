@@ -1249,9 +1249,386 @@ assert.deepEqual(replay.getStateHash(), original.stateHash);
 
 ---
 
-*End of Part III + IV*
+# PART V: EXECUTION
 
-*Part V (Execution) continues in next commit.*
+---
+
+## 14. Release Plan (Phase 0-2)
+
+### 14.1 Phase Overview
+
+| Phase | Releases | Focus | Goal |
+|-------|----------|-------|------|
+| **Phase 0** | 001-010 | Netcode Readiness | Deterministic SimCore foundation |
+| **Phase 1** | 011-020 | Feature Implementation | Core gameplay loop |
+| **Phase 2** | 021-025 | Multiplayer | Network play + polish |
+
+### 14.2 Phase 0: Netcode Readiness (Releases 001-010)
+
+**Goal:** Establish deterministic SimCore that can later support multiplayer.
+
+| Release | Title | Key Deliverable | Done When |
+|---------|-------|-----------------|-----------|
+| 001 | Fixed Timestep | GameLoop at 20Hz | Tick count stable regardless of FPS |
+| 002 | Command Buffer | CommandQueue + CommandProcessor | All input flows through commands |
+| 003 | Deterministic IDs | IdGenerator (sequential) | No Date.now() or Math.random() in IDs |
+| 004 | Seeded RNG | Mulberry32 PRNG | Same seed → same random sequence |
+| 005 | State Registry | StateRegistry + EntityState | Clear authoritative state separation |
+| 006 | Transport Shim | ITransport + LocalTransport | Transport abstraction in place |
+| 007 | Interpolation | Render interpolation | Smooth visuals at any FPS |
+| 008 | Command Log | CommandLog recording | All commands logged with tick |
+| 009 | Replay Playback | ReplayPlayer | Can replay command log |
+| 010 | Verification | Determinism test | Same inputs → identical state hash |
+
+**PR Breakdown (Release 001 example):**
+
+| PR | Branch | Scope | Size |
+|----|--------|-------|------|
+| 001.1 | `pr/001-1-gameloop` | GameLoop class | S (<200 lines) |
+| 001.2 | `pr/001-2-game-shim` | Game.js integration | S |
+| 001.3 | `pr/001-3-interpolation-prep` | Unit.js render position hook | M |
+
+**Full breakdown:** See [Appendix F: Release/Sprint/PR Plan](appendices/APPENDIX_F_RELEASE_SPRINT_PR_PLAN.md)
+
+### 14.3 Phase 1: Feature Implementation (Releases 011-020)
+
+**Goal:** Implement core gameplay features on SimCore foundation.
+
+| Release | Title | Feature | Done When |
+|---------|-------|---------|-----------|
+| 011 | Locomotion | MOVE_ROLL | Unit moves with slope physics |
+| 012 | Vision | OPTICAL_VISION | FOW reveals, CPU-serializable |
+| 013 | Mining | MATERA_MINING | Extraction creates piles |
+| 014 | Transport | MATERA_TRANSPORT | Collect/deliver with speed penalty |
+| 015 | Combat | WPN_SHOOT | 4-axis damage, wreck state |
+| 016 | Scan | SUBSURFACE_SCAN | Underground deposit reveal |
+| 017 | Terrain (Stretch) | TERRAIN_SHAPING | Height modification |
+| 018 | Carrier (Stretch) | UNIT_CARRIER | Unit transport |
+| 019 | Designer | SYS_DESIGN + Blueprints | Type creation UI |
+| 020 | GRFDTRDPU | Full pipeline | Goal→Research→Feature→Train→Design→Produce→Unit |
+
+### 14.4 Phase 2: Multiplayer (Releases 021-025)
+
+**Goal:** Enable network play with host-authoritative architecture.
+
+| Release | Title | Scope | Done When |
+|---------|-------|-------|-----------|
+| 021 | Signaling | Supabase Realtime channels | Lobby create/join works |
+| 022 | WebRTC | DataChannel establishment | P2P connection works |
+| 023 | State Sync | Snapshot broadcast + apply | Clients see host state |
+| 024 | Host Authority | Command relay + validation | All changes via host |
+| 025 | Late Join | Full state sync on join | Player can join in-progress |
+
+### 14.5 Milestone Checkpoints
+
+| Milestone | After Release | Verification |
+|-----------|---------------|--------------|
+| **M1: Determinism** | 010 | Replay produces identical state |
+| **M2: Core Loop** | 014 | Research→Design→Produce→Move→Mine→Transport |
+| **M3: Combat** | 015 | Attack, damage, wreck |
+| **M4: Local Complete** | 020 | Full single-player Demo 1.0 |
+| **M5: Multiplayer** | 025 | 2-4 player networked game |
+
+---
+
+## 15. PR Workflow & Gates
+
+### 15.1 Branch Naming
+
+**Decision:** Per Human Owner Q17 - current release-branch approach
+
+```
+release/{XXX}              # Release branch (e.g., release/001)
+pr/{XXX}-{N}-{description} # PR branch (e.g., pr/001-1-gameloop)
+```
+
+### 15.2 PR Granularity
+
+**Decision:** Per Human Owner Q3 - **Granular PRs** (Claude style)
+
+- Multiple small PRs per release
+- Each PR: single responsibility, <500 lines ideal
+- Easier review, safer rollback
+
+### 15.3 PR Checklist (Binding)
+
+**Before opening PR:**
+- [ ] Code compiles without errors
+- [ ] All new code has unit tests
+- [ ] Existing tests still pass
+- [ ] Manual smoke test completed
+- [ ] No console errors in browser
+- [ ] PR description includes: goal, files changed, testing performed, rollback instructions
+
+**Review criteria:**
+- [ ] Code follows existing patterns
+- [ ] No new dependencies without justification
+- [ ] Determinism rules followed (no Date.now/Math.random in logic)
+- [ ] State surface rules followed (authoritative vs render)
+
+### 15.4 Merge Process
+
+1. PR approved by reviewer
+2. Squash and merge to release branch
+3. Run full smoke test
+4. If smoke fails, revert immediately
+5. When release complete, merge release branch to `main`
+6. Tag release (`v0.{release}`)
+
+---
+
+## 16. Testing & CI Strategy
+
+### 16.1 Test Pyramid
+
+**Decision:** Per Human Owner Q13 - **Unit + Integration**
+
+```
+            ┌─────────────┐
+            │   Manual    │  <- Few
+            │  Smoke Test │
+            ├─────────────┤
+            │ Integration │  <- Some
+            │   Tests     │
+            ├─────────────┤
+            │    Unit     │  <- Many
+            │   Tests     │
+            └─────────────┘
+```
+
+### 16.2 Coverage Targets
+
+| Component | Target | Focus |
+|-----------|--------|-------|
+| SimCore | 80% | All logic modules |
+| Commands | 90% | All command types |
+| Features | 75% | Core behavior |
+| Transport | 70% | Message handling |
+| UI | 30% | Critical paths only |
+
+### 16.3 Test Categories
+
+#### Unit Tests (Jest)
+
+```javascript
+// Determinism test
+describe('Determinism', () => {
+  test('same inputs produce same outputs', () => {
+    const sim1 = new SimCore({ seed: 12345 });
+    const sim2 = new SimCore({ seed: 12345 });
+
+    // Apply identical commands
+    applyCommands(sim1, commands);
+    applyCommands(sim2, commands);
+
+    // Run 1000 ticks
+    for (let i = 0; i < 1000; i++) {
+      sim1.step();
+      sim2.step();
+    }
+
+    expect(sim1.getStateHash()).toBe(sim2.getStateHash());
+  });
+});
+```
+
+#### Integration Tests
+
+```javascript
+// Multiplayer sync test
+describe('Multiplayer Sync', () => {
+  test('host and client stay synchronized', async () => {
+    const host = new SimCore({ seed: 42, isHost: true });
+    const client = new SimCore({ seed: 42, isHost: false });
+
+    // Client sends command
+    const cmd = createMoveCommand('p2', ['u1'], [100, 0, 0]);
+    client.sendCommand(cmd);
+
+    // Simulate network
+    await transport.flush();
+
+    // Process and sync
+    host.step();
+    client.applySnapshot(host.getSnapshot());
+
+    // Verify
+    expect(host.getEntity('u1').position)
+      .toEqual(client.getEntity('u1').position);
+  });
+});
+```
+
+### 16.4 Smoke Test Checklist
+
+**Quick Smoke (before every commit):**
+- [ ] `npm start` runs without errors
+- [ ] Game loads at localhost:8081
+- [ ] Can select unit
+- [ ] Can issue move command
+- [ ] Unit moves to destination
+
+**Full Smoke (before each release):**
+- [ ] All Quick Smoke items
+- [ ] Camera controls work (pan, orbit, zoom)
+- [ ] Direct Control works (keyboard moves unit)
+- [ ] FOW reveals correctly
+- [ ] No console errors during gameplay
+- [ ] 60 FPS with 10 units
+
+### 16.5 CI Pipeline
+
+**Decision:** Per Human Owner Q14 - **Soft targets** (measure + trend)
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:determinism  # Must pass (hard gate)
+      - run: npm run test:coverage     # Report only (soft)
+      - run: npm run perf:measure      # Report only (soft)
+```
+
+**Hard gates (block merge):**
+- Determinism test passes
+- Multiplayer sync smoke passes
+- No TypeScript errors
+
+**Soft targets (report, trend):**
+- Tick time p95 < 8ms
+- Test coverage > 80%
+- Memory stable over 10-minute run
+
+**Full strategy:** See [Appendix G: Testing & QA Strategy](appendices/APPENDIX_G_TESTING_QA_STRATEGY.md)
+
+---
+
+## 17. Risk Register
+
+### 17.1 Risk Summary
+
+| ID | Risk | Probability | Impact | Mitigation |
+|----|------|-------------|--------|------------|
+| R1 | Performance ceiling | Medium | High | Time budget, Web Worker, WASM fallback |
+| R2 | Determinism drift | High | Critical | State hash checks, auto-resync |
+| R3 | Unit.js monolith | High | Medium | Shim-based extraction, full smoke tests |
+| R4 | WebRTC NAT issues | Medium | Medium | TURN servers, connection quality UI |
+| R5 | Supabase limits | Low | Medium | Compression, cleanup, monitor usage |
+| R6 | Scope creep | Medium | High | Demo 1.0 Done Means as hard boundary |
+
+### 17.2 Risk Details
+
+#### R1: Performance Ceiling
+
+**Description:** JavaScript single-threaded nature may cause frame drops when SimCore.step() > 10ms.
+
+**Triggers:**
+- Unit count > 50
+- Complex pathfinding
+- Large state serialization
+
+**Indicators:**
+- Tick time p95 > 5ms (warning)
+- Tick time p95 > 8ms (critical)
+
+**Mitigations:**
+1. **Immediate:** Time budget with early abort (spiral of death prevention)
+2. **Short-term:** Move SimCore to Web Worker
+3. **Long-term:** WASM for physics calculations
+
+#### R2: Determinism Drift
+
+**Description:** Floating-point variance between browsers/machines causes state divergence.
+
+**Triggers:**
+- Extended gameplay sessions
+- Different CPU architectures
+
+**Indicators:**
+- State hash mismatch
+- Visual desync
+
+**Mitigations:**
+1. **Immediate:** State hash comparison every 60 ticks
+2. **Short-term:** Auto-resync on mismatch
+3. **Long-term:** Fixed-point math library
+
+#### R3: Unit.js Monolith
+
+**Description:** Tightly coupled Unit.js (~1500 lines) makes extraction risky.
+
+**Mitigations:**
+1. **Approach:** Shim-based extraction per Human Owner Q16
+2. **Rule:** Never modify Unit.js without full smoke test
+3. **Rollback:** Revert immediately on failure
+
+#### R4: WebRTC NAT Traversal
+
+**Description:** Symmetric NAT prevents P2P connection.
+
+**Mitigations:**
+1. **Immediate:** Use STUN servers
+2. **Short-term:** Deploy TURN servers (per Q11)
+3. **Fallback:** Display connection quality indicator
+
+**Full register:** See [Appendix H: Risk Register Detail](appendices/APPENDIX_H_RISK_REGISTER_DETAIL.md)
+
+---
+
+# APPENDICES (Summary)
+
+The following appendices provide deep technical detail. Each is a separate file in `appendices/`.
+
+| Appendix | Purpose | Status |
+|----------|---------|--------|
+| A | Multiplayer Deep Spec | To write |
+| B | Backend & Persistence Deep Spec | To write |
+| C | Replay System Spec | To write |
+| D | GRFDTRDPU Implementation Guide | To write |
+| E | Feature Dependency Graph | To write |
+| F | Release/Sprint/PR Breakdown | To write |
+| G | Testing & QA Strategy | To write |
+| H | Risk Register Detail | To write |
+| I | UI/UX Pipeline | To write |
+
+---
+
+## Open Decisions
+
+Decisions marked for future resolution:
+
+| ID | Topic | Options | Decision Trigger |
+|----|-------|---------|------------------|
+| OD-1 | Error reporting service | Sentry vs Console | Post-Demo 1.0 based on bug frequency |
+| OD-2 | Full timeline UI | Phase 2 scope | After Demo 1.0 feedback |
+| OD-3 | Dedicated server | Host migration vs server | Based on player count growth |
+
+---
+
+## Glossary
+
+| Term | Definition |
+|------|------------|
+| **SimCore** | Authoritative simulation core running at 20Hz |
+| **Tick** | Single SimCore update step (50ms) |
+| **Command** | Input event with tick stamp, processed deterministically |
+| **Feature** | Capability module (e.g., MOVE_ROLL, WPN_SHOOT) |
+| **Type** | Blueprint defining unit feature allocations |
+| **Lane** | Command Queue category (LOCOMOTION, TOOL, WEAPON, PERCEPTION) |
+| **Clip** | Scheduled action on timeline with duration |
+| **Gummy Stretch** | Clip extension when action runs longer than estimated |
+| **Host** | Authoritative player in multiplayer (server-shaped) |
+| **Snapshot** | Serialized game state at a tick |
+| **PRNG** | Pseudorandom Number Generator (Mulberry32) |
 
 ---
 
@@ -1261,3 +1638,10 @@ assert.deepEqual(replay.getStateHash(), original.stateHash);
 |---------|------|--------|---------|
 | 2.0.0 | 2026-01-24 | Claude Code + Adam | Initial v2 from reconciled sources |
 | 2.0.1 | 2026-01-24 | Claude Code | Added Part III (Features) + Part IV (MP/Backend) |
+| 2.0.2 | 2026-01-24 | Claude Code | Added Part V (Execution) + Appendix summary |
+
+---
+
+*End of MASTER_PLAN_FINAL_v2.md*
+
+*Appendices follow as separate files.*
