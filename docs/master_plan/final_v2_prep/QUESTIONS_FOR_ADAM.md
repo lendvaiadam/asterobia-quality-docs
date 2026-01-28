@@ -305,30 +305,30 @@ Each question includes:
 
 ## Summary
 
-| Question | Blocker? | Default if No Answer |
-|----------|----------|----------------------|
-| Q1 Replay | No | Defer |
-| Q2 UI Framework | No | Defer to implementation |
-| Q3 PR Granularity | No | Flexible |
-| Q4 Timeline Complexity | **YES** | - |
-| Q5 Direct Control | No | Phase 2 |
-| Q6 Training Mini-Games | No | Placeholder |
-| Q7 Dark Side AI | No | Phased |
-| Q8 Energy Network UI | No | Minimal |
-| Q9 Matera Colors | No | Defer colors |
-| Q10 Multiplayer Scope | **YES** | - |
-| Q11 WebRTC Fallback | No | TURN only |
-| Q12 Supabase Tier | No | Free tier |
-| Q13 Testing Level | No | Unit + Integration |
-| Q14 Performance Gates | No | Soft targets |
-| Q15 Documentation | No | API docs only |
-| Q16 Code Preservation | No | Shim-based |
-| Q17 Branch Strategy | No | Current approach |
-| Q18 Feature Flags | No | Calibration console |
-| Q19 Error Reporting | No | Console logging |
-| Q20 End State | **YES** | - |
+| Question | Blocker? | Default | Decision (per Plan v2) |
+|----------|----------|---------|------------------------|
+| Q1 Replay | No | Defer | **B: Include** (plan line 1289) |
+| Q2 UI Framework | No | Defer | **Web Components** (appendix I) |
+| Q3 PR Granularity | No | Flexible | **A: Granular PRs** (plan line 1489) |
+| Q4 Timeline Complexity | **YES** | - | **C: Phased** (plan line 595) |
+| Q5 Direct Control | No | Phase 2 | *(default)* |
+| Q6 Training Mini-Games | No | Placeholder | **Slider** (plan line 873) |
+| Q7 Dark Side AI | No | Phased | *(default)* |
+| Q8 Energy Network UI | No | Minimal | *(default)* |
+| Q9 Matera Colors | No | Defer colors | *(default)* |
+| Q10 Multiplayer Scope | **YES** | - | **C: 4-player host** (plan line 1111) |
+| Q11 WebRTC Fallback | No | TURN only | *(default)* |
+| Q12 Supabase Tier | No | Free tier | **B: Pro acceptable** (plan line 1198) |
+| Q13 Testing Level | No | Unit + Integration | *(default)* (plan line 1526) |
+| Q14 Performance Gates | No | Soft targets | *(default)* (plan line 1623) |
+| Q15 Documentation | No | API docs only | *(default)* |
+| Q16 Code Preservation | No | Shim-based | *(default)* (plan line 1712) |
+| Q17 Branch Strategy | No | Current approach | *(default)* (plan line 1480) |
+| Q18 Feature Flags | No | Calibration console | *(default)* |
+| Q19 Error Reporting | No | Console logging | *(default)* |
+| Q20 End State | **YES** | - | **A: Confirmed** (plan line 99) |
 
-**BLOCKERS:** Q4, Q10, Q20 require answers before writing Final v2.
+**BLOCKERS:** Q4, Q10, Q20 - answered, plan written.
 
 ---
 
