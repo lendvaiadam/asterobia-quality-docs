@@ -53,6 +53,8 @@ If an agent creates a new repo file that ChatGPT must read and it is not yet lis
 - Update CHATGPT_OPENING_PACK.md to include it,
 - Push to GitHub (SYNC) and provide commit SHA + commit-SHA RAW links.
 
+**Payload integrity rules (binding)**: See `docs/NOTES_CHATGPT.md` for BEGIN/END markers, chunking, and 1-payload-per-message requirements.
+
 ## FIRST WORK PACKAGE — FULL MASTER DEVELOPMENT PLAN (BINDING)
 Before any “first steps”, PR sequencing, or Phase 0 execution planning:
 1) **Antigravity** and **Claude Code** MUST read **ALL** available project materials:
