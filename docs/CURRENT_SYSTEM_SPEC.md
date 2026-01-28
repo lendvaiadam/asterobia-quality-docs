@@ -27,14 +27,20 @@ This document represents the **current implementations state** of the `asterobia
 
 
 ## 2. Runtime Architecture Snapshot
-*   **Game Loop:** Monolithic `Game.js` controls initialization, render loop `requestAnimationFrame`, and input handling.
-    *   *Evidence:* `src/Game.js` (GOD CLASS, see `quality/NETCODE_READINESS_AUDIT.md`)
+*   **Game Loop:** Hybrid.
+    *   **SimLoop:** Fixed 50ms (20Hz) authoritative tick (`SimLoop.acc`).
+    *   **RenderLoop:** `requestAnimationFrame` (interpolated visuals).
+    *   *Evidence:* `src/SimCore/runtime/SimLoop.js` (R001 Merged).
+*   **SimCore Boundary:** `SimCore` initialization wired into `Game.js`.
+
 *   **SimCore Boundary:** `SimCore` exists as a skeleton (`runtime/Store.js`), but major logic (physics, movement) remains in `Unit.js`.
     *   *Evidence:* `quality/REPO_REALITY_MAP.md` (SimCore structure exists but partial)
 
 ## 3. Authority & Determinism Status
-*   **Time Model:** **Client-Authoritative / FPS-Dependent**.
-    *   Uses `clock.getDelta()` in `Game.js`. Non-deterministic.
+*   **Time Model:** **Fixed Timestep (50ms)**.
+    *   `dt` is strictly controlled by `SimLoop` accumulator.
+    *   *Evidence:* `src/SimCore/runtime/SimLoop.js`.
+
     *   *Evidence:* `quality/NETCODE_READINESS_AUDIT.md` Section 2A.
 *   **Randomness:** **Unseeded `Math.random()`**.
     *   Used in Map logic, Unit stats, Rock generation.

@@ -2,16 +2,22 @@
 
 ## NOW
 ### Current Work Package
-- **RELEASE R001 — FIXED TIMESTEP WIRING**
-  Wire SimLoop fixed-tick architecture into Game.js for deterministic simulation.
+- **RELEASE 002 — COMMAND BUFFER**
+  Implement the Command Queue Shim to stop direct state mutation.
 
-### Status
-- [x] SimLoop.js created (50ms fixed tick, accumulator pattern)
-- [x] Game.js wired: simTick() for sim mutations, renderUpdate() for render-only
-- [x] Code migrated from quality-docs repo to `code` remote (branch: `work/r001-determinism-wiring`)
-- [ ] PR merged to code/main
-- [ ] E2 (seeded PRNG) — next blocker
-- [ ] E3 (timestamp removal) — next blocker
+### Tasks
+- [x] **Release 001** (Fixed Timestep) COMPLETE (Merged to `code/main` / Smoke Test PASS).
+- [ ] **Release 002** (Command Object/Queue) STARTING.
+
+### Deliverables
+- `src/SimCore/CommandQueue.js`
+- `src/Core/Input.js` (Refactor to emit commands)
+
+### Previous Blocks (Done)
+- [x] SimLoop.js created (50ms fixed tick)
+- [x] Game.js wired
+- [x] Smoke Test PASS (see `docs/TEST_LOGS/R001_SMOKE_TEST.md`)
+
 
 ### Commits (on code remote)
 - `eea9311` r001: add SimLoop fixed 50ms accumulator
