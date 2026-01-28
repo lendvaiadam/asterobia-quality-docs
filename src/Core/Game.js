@@ -17,6 +17,7 @@ import { NavMeshDebug } from '../UI/NavMeshDebug.js';
 import { RockCollisionSystem } from '../Physics/RockCollisionSystem.js';
 import { AudioManager } from './AudioManager.js';
 import { PathPlanner } from '../Navigation/PathPlanner.js';
+import { SimLoop } from '../SimCore/runtime/SimLoop.js';
 
 import { WaypointDebugOverlay } from '../UI/WaypointDebugOverlay.js';
 
@@ -25,6 +26,10 @@ export class Game {
         // ... (existing)
         this.debugOverlay = new WaypointDebugOverlay(this);
         window.game = this; // Expose for UI interactions
+
+        // R001: Fixed-timestep simulation loop (50ms tick)
+        this.simLoop = new SimLoop({ fixedDtMs: 50 });
+        this.simLoop.onSimTick = (dt, tick) => this.simTick(dt, tick);
         this.container = document.body;
 
         // Renderer
@@ -2615,7 +2620,41 @@ export class Game {
         this.renderer.setSize(width, height);
     }
 
-    update() {
+    /**
+     * R001: Fixed-timestep simulation tick (50ms).
+     * All sim state mutations (unit positions, path logic) happen here.
+     * @param {number} fixedDt - Fixed delta time in seconds (0.050)
+     * @param {number} tickCount - Current tick number
+     */
+    simTick(fixedDt, tickCount) {
+        const keys = this.input.getKeys();
+
+        // Update all units on fixed timestep
+        this.units.forEach(unit => {
+            if (!unit) return;
+
+            // Sync params
+            unit.speed = this.unitParams.speed;
+            unit.turnSpeed = this.unitParams.turnSpeed;
+            unit.groundOffset = this.unitParams.groundOffset;
+            unit.smoothingRadius = this.unitParams.smoothingRadius;
+
+            if (unit === this.selectedUnit) {
+                unit.update(keys, fixedDt, this.pathPlanner);
+            } else {
+                unit.update({ forward: false, backward: false, left: false, right: false }, fixedDt, this.pathPlanner);
+            }
+        });
+
+        // Handle path looping (sim state mutation)
+        this.handlePathLooping();
+    }
+
+    /**
+     * R001: Render-only updates (camera, visuals, UI).
+     * Called every frame after simTick(s). Does NOT mutate sim state.
+     */
+    renderUpdate() {
         this.cameraControls.update(0.016); // Update State
 
 
@@ -2639,24 +2678,9 @@ export class Game {
             }
         }
 
-        // Update all units
+        // Update tire tracks (render-only, visual trails)
         this.units.forEach(unit => {
-            // Skip null units (not yet loaded)
             if (!unit) return;
-
-            // Sync params
-            unit.speed = this.unitParams.speed;
-            unit.turnSpeed = this.unitParams.turnSpeed;
-            unit.groundOffset = this.unitParams.groundOffset;
-            unit.smoothingRadius = this.unitParams.smoothingRadius;
-
-            if (unit === this.selectedUnit) {
-                unit.update(keys, 0.016, this.pathPlanner);
-            } else {
-                unit.update({ forward: false, backward: false, left: false, right: false }, 0.016, this.pathPlanner);
-            }
-
-            // Update tire tracks for all units
             if (!unit.tireTrackSegments) {
                 unit.initTireTracks(this.scene);
             }
@@ -2669,8 +2693,7 @@ export class Game {
         // NOTE: updatePanelContent is now called ONLY on events (waypoint add/delete/reorder)
         // NOT per-frame, because rebuilding DOM destroys event listeners
 
-        // Handle path looping (if unit reached end of path)
-        this.handlePathLooping();
+        // NOTE: handlePathLooping() moved to simTick() for R001 determinism
 
         // Update Vision Helper to follow selected unit
         if (this.visionHelper && this.selectedUnit) {
@@ -2752,7 +2775,9 @@ export class Game {
     }
 
     animate() {
-        this.update();
+        // R001: Run fixed-timestep sim ticks, then render
+        this.simLoop.step(performance.now());
+        this.renderUpdate();
         this.renderer.render(this.scene, this.camera);
 
         // Trigger onFirstRender callback after enough frames to ensure content visible
