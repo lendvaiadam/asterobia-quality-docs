@@ -50,6 +50,12 @@ Purpose:
 
 
 ## Principles (non-negotiable)
+
+### Prompt payload integrity (binding)
+- **All prompts meant for copy/paste MUST be wrapped with markers:** `---BEGIN-PAYLOAD---` and `---END-PAYLOAD---`.
+- **If a prompt is long, split it into numbered chunks** (Chunk 1/N, Chunk 2/N, …). Each chunk must include its own BEGIN/END markers.
+- **Never send multiple unrelated paste-items in one message.** One payload per message.
+- If the receiver reports missing END marker or an abrupt cutoff, **assume truncation** and resend using chunking.
 - Authority must be deterministic: fixed tick, command-stream only, deterministic IDs, seeded PRNG.
 - Clear separation: authoritative state vs render-only state (do not sync render artifacts).
 - Prefer minimal-touch shims first; deep refactors only when gates require it.
