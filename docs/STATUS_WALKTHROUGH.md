@@ -79,9 +79,12 @@ Multiplayer target:
 ---
 
 ## NOW
-### Release 005: Input Factory (Command Abstraction)
-- **Objective**: Refactor `Input` to produce command structs via `InputFactory`.
+### Release 005: State Surface Definition (serializeState)
+- **Objective**: Implement authoritative state serialization/deserialization for snapshotting/recovery.
 - **Status**: TO DO
+
+### Backlog
+- **Release 006: Input Factory (Command Abstraction)** (Deferred)
 
 ---
 
