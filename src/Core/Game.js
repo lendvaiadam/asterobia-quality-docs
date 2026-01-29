@@ -45,6 +45,9 @@ export class Game {
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.container.appendChild(this.renderer.domElement);
 
+        // R006-fix: Enable canvas to receive keyboard focus
+        this._setupCanvasFocus();
+
         // Scene
         this.scene = new THREE.Scene();
 
@@ -2660,6 +2663,34 @@ export class Game {
 
         // Handle path looping (sim state mutation)
         this.handlePathLooping();
+    }
+
+    /**
+     * R006-fix: Setup canvas to receive keyboard focus.
+     * Ensures document.hasFocus() and keyboard events work reliably.
+     */
+    _setupCanvasFocus() {
+        const canvas = this.renderer.domElement;
+
+        // Make canvas focusable
+        canvas.tabIndex = 0;
+        canvas.style.outline = 'none'; // Hide focus ring
+
+        // Focus canvas on first interaction
+        const focusOnce = () => {
+            canvas.focus();
+            canvas.removeEventListener('pointerdown', focusOnce);
+            canvas.removeEventListener('click', focusOnce);
+        };
+        canvas.addEventListener('pointerdown', focusOnce);
+        canvas.addEventListener('click', focusOnce);
+
+        // Also focus when clicking anywhere on body (for edge cases)
+        document.body.addEventListener('click', () => {
+            if (document.activeElement !== canvas) {
+                canvas.focus();
+            }
+        }, { once: false, passive: true });
     }
 
     /**

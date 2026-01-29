@@ -43,15 +43,48 @@ export class CommandDebugOverlay {
         `;
         document.body.appendChild(el);
         this._element = el;
+
+        // R006-fix: Add visible toggle button (fallback for keyboard focus issues)
+        this._createToggleButton();
+    }
+
+    _createToggleButton() {
+        const btn = document.createElement('button');
+        btn.id = 'command-debug-toggle';
+        btn.textContent = 'CMD';
+        btn.title = 'Toggle Command Debug Overlay (Shift+C)';
+        btn.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 340px;
+            width: 40px;
+            height: 24px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #0f0;
+            border: 1px solid #0f0;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 10px;
+            cursor: pointer;
+            z-index: 10001;
+        `;
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggle();
+        });
+        document.body.appendChild(btn);
+        this._toggleButton = btn;
     }
 
     _bindToggle() {
+        // R006-fix: Use capture phase to intercept before any element blocks it
         window.addEventListener('keydown', (e) => {
             // Shift+C to toggle
             if (e.shiftKey && e.code === 'KeyC') {
                 this.toggle();
+                e.preventDefault();
             }
-        });
+        }, { capture: true });
     }
 
     toggle() {
