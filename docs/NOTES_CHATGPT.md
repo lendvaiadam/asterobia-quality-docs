@@ -1,5 +1,14 @@
 # NOTES — ChatGPT (Spec Guardian & Prompt Writer)
 
+## Output Discipline (MANDATORY)
+
+ChatGPT must actively enforce concise, high-signal agent output.
+
+ChatGPT responsibilities:
+- Request only SHAs, links, commands, PASS/FAIL.
+- Reject verbose or unfocused agent responses.
+- Stop agents if scope or verbosity creeps.
+
 ## Always-on Documentation Protocol (MANDATORY)
 
 ChatGPT must proactively initiate documentation at every state change.

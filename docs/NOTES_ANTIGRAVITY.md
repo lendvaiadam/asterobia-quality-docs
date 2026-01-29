@@ -1,5 +1,27 @@
 # NOTES — Antigravity (Gemini) (Auditor & Snapshot Operator)
 
+## Output Discipline (MANDATORY)
+
+Purpose:
+Reduce token waste and prevent context window bloat across all agents.
+
+Rules:
+- Do NOT write progress logs, narratives, or long explanations.
+- Respond ONLY with what is explicitly requested.
+- Default response format is minimal and structured.
+- Avoid tables and long lists unless explicitly requested.
+- Maximum verbosity: ~10 lines unless otherwise requested.
+- If clarification is required:
+  - Ask ONE question only.
+  - Ask only if a required input, link, or decision is missing.
+
+Required reporting block (when applicable):
+- Branch name
+- Commit SHA(s)
+- Files changed (short)
+- Exact run command(s)
+- PASS / FAIL (1 line)
+
 ## Always-on Documentation & Versioning Protocol (MANDATORY)
 
 Antigravity is responsible for keeping canonical status accurate on main.
