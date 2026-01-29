@@ -23,7 +23,12 @@ B) Proactive Notes (optional but encouraged)
 - Max 3 bullets, 1 line each
 - Only include items that reduce risk, catch inconsistencies, or improve next steps
 - Label each bullet as one of: [RISK], [INCONSISTENCY], [SUGGESTION]
-- If you need user input: ask ONE question only, and only if a required input/link/decision is missing
+
+Clarifications / Questions:
+- You may ask any number of questions if they are necessary for correctness.
+- Group questions into a short numbered list.
+- Each question must be specific and tied to a missing required input, a detected inconsistency, or a risk to determinism/binding scope.
+- Avoid rhetorical or repetitive questions.
 
 Hard limits (unless explicitly requested):
 - Avoid long tables and verbose explanations
