@@ -15,11 +15,8 @@ import { rngNextInt } from '../runtime/SeededRNG.js';
  * @returns {string}
  */
 function generateUUID() {
-    // Use crypto.randomUUID if available (modern browsers)
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-        return crypto.randomUUID();
-    }
-    // Fallback for older environments (R004: seeded RNG)
+    // R004: Always use deterministic SeededRNG for UUIDs to ensure simulation consistency.
+    // We removed crypto.randomUUID() because it breaks determinism across clients/replays.
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
         const r = rngNextInt(16);
         const v = c === 'x' ? r : (r & 0x3 | 0x8);

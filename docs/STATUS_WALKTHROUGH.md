@@ -57,9 +57,20 @@ Multiplayer target:
 
 ---
 
+### Release 004: Seeded RNG (Deterministic PRNG) — DONE
+- **Branch**: `work/r004-seeded-rng` (merged to main)
+- **Commits**: `dfb8043..8a2cc60`
+- **Head**: `8a2cc60` r004: implement seeded PRNG (Mulberry32) for determinism
+- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia/work/r004-seeded-rng/src/SimCore/runtime/SeededRNG.js
+- **HU Test**: PASS (2026-01-29)
+  - `seededRNG.test.js` -> 8/8 PASS
+  - `TypeBlueprint` fallback patched to use SeededRNG (deterministic)
+
+---
+
 ## NOW
-### Release 004: Seeded RNG (Deterministic PRNG)
-- **Objective**: Replace all `Math.random()` with a seeded generator (Mulberry32).
+### Release 005: Input Factory (Command Abstraction)
+- **Objective**: Refactor `Input` to produce command structs via `InputFactory`.
 - **Status**: TO DO
 
 ---
@@ -89,4 +100,4 @@ Multiplayer target:
 ## Release Registry
 - **Manifest**: [public/versions.json](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/public/versions.json)
 - **Release Plan**: [docs/RELEASE_PLAN.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/RELEASE_PLAN.md)
-- **Current target release**: Release 004 (Seeded RNG)
+- **Current target release**: Release 005 (Input Factory)
