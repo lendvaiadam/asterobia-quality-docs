@@ -1,4 +1,28 @@
 # NOTES — ChatGPT (Spec Guardian & Prompt Writer)
+
+## Always-on Documentation Protocol (MANDATORY)
+
+ChatGPT must proactively initiate documentation at every state change.
+
+### When to trigger
+- Release start / stop
+- Agent handoff (Claude ↔ Antigravity)
+- Merge, rollback, conflict resolution
+- HU smoke test completion
+
+### Minimum fields to record
+- Date/time (Europe/Budapest)
+- Active Release + scope
+- Who does what (Claude = coding, Antigravity = audit/merge/docs)
+- Branch name(s)
+- Commit SHA(s) (code vs docs)
+- HU smoke test steps + PASS/FAIL
+- WAITING ON / NEXT ACTION
+
+### Enforcement
+If status notes are missing or stale, STOP execution and produce a docs-only patch first.
+
+---
 Purpose: Persistent spec/prompt memory. New ChatGPT sessions should read this first.
 
 Last updated: 2026-01-15 (Europe/Budapest)

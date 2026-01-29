@@ -1,4 +1,26 @@
 # NOTES — Antigravity (Gemini) (Auditor & Snapshot Operator)
+
+## Always-on Documentation & Versioning Protocol (MANDATORY)
+
+Antigravity is responsible for keeping canonical status accurate on main.
+
+### Required after every Claude delivery
+1) Audit against binding specs
+2) Run tests and record results
+3) Merge to main (or report blocker)
+4) Update docs/STATUS_WALKTHROUGH.md on main:
+   - Mark Release DONE / OPEN
+   - Record branch + commit SHAs
+   - Include HU smoke test steps + result
+5) Push commits (no “done” without SHA)
+
+### Required outputs
+- main HEAD SHA
+- docs commit SHA
+- RAW links to updated docs
+- NEXT UP as defined by STATUS_WALKTHROUGH.md
+
+---
 Purpose: Persistent auditor memory. New Antigravity chat windows must read this first.
 
 Last updated: 2026-01-15 (Europe/Budapest)

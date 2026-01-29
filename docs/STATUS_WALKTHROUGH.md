@@ -58,8 +58,8 @@ Multiplayer target:
 ---
 
 ## NOW
-### Release 004: Unit Spawner Refactor (Blueprint System)
-- **Objective**: Formalize `UnitFactory` separate from `Game.js`.
+### Release 004: Seeded RNG (Deterministic PRNG)
+- **Objective**: Replace all `Math.random()` with a seeded generator (Mulberry32).
 - **Status**: TO DO
 
 ---
@@ -89,4 +89,4 @@ Multiplayer target:
 ## Release Registry
 - **Manifest**: [public/versions.json](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/public/versions.json)
 - **Release Plan**: [docs/RELEASE_PLAN.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/RELEASE_PLAN.md)
-- **Current target release**: Release 004 (Blueprint System)
+- **Current target release**: Release 004 (Seeded RNG)
