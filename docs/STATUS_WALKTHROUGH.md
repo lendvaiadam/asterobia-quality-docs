@@ -78,10 +78,14 @@ Multiplayer target:
 
 ---
 
-## NOW
-### Release 005: State Surface Definition (serializeState)
-- **Objective**: Implement authoritative state serialization/deserialization for snapshotting/recovery.
-- **Status**: TO DO
+### Release 005: State Surface Definition (serializeState) — DONE
+- **Branch**: `work/r005-state-surface` (merged to main)
+- **Commits**: `76eb176`
+- **Head**: `76eb176` r005: implement authoritative StateSurface and serialization
+- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia/work/r005-state-surface/src/SimCore/runtime/StateSurface.js
+- **HU Test**: PASS (2026-01-29)
+  - `stateSurface.test.js` -> 8/8 PASS
+  - Determinism Audit: PASS (No `Math.random` / `Date.now`, strict `toFixed(6)` precision)
 
 ### Backlog
 - **Release 006: Input Factory (Command Abstraction)** (Deferred)
