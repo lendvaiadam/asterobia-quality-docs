@@ -133,7 +133,7 @@
             const list = document.getElementById('archived-list');
             try {
                 // Cache buster to ensure fresh list
-                const response = await fetch('versions/versions.json?t=' + Date.now());
+                const response = await fetch('public/versions.json?t=' + Date.now());
                 if (!response.ok) throw new Error("No versions found");
 
                 const versions = await response.json();
