@@ -59,19 +59,19 @@ OPENING PACK (RAW LINKS)
 - CHANGE_REQUESTS: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/work/release-000-merge-round-prep/docs/master_plan/merge/CHANGE_REQUESTS_FOR_CLAUDE.md
 
 ## Canonical Specs (Snapshot 2026-01-14)
-- MASTER_BIBLE: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md
-- REFACTOR_PROCESS: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_REFACTOR_PROCESS_2026-01-13.md
-- GRFDTRDPU_SYSTEM: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_GRFDTRDPU_SYSTEM_2026-01-13.md
-- VISION_MAX_SOURCES: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_VISION_MAX_SOURCES_POLICY_2026-01-13.md
-- FEATURE_MOVE_ROLL: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_FEATURE_MOVE_ROLL_2026-01-13.md
-- FEATURE_WPN_SHOOT: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_FEATURE_WPN_SHOOT_2026-01-13.md
-- FEATURE_OPTICAL_VISION: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_FEATURE_PERCEPTION_OPTICAL_VISION_2026-01-13.md
-- FEATURE_SUBSURFACE_SCAN: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_FEATURE_PERCEPTION_SUBSURFACE_SCAN_2026-01-13.md
-- FEATURE_MINING: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_FEATURE_MATERA_MINING_2026-01-13.md
-- FEATURE_TRANSPORT: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_FEATURE_MATERA_TRANSPORT_2026-01-13.md
-- FEATURE_TERRAIN_SHAPING: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_FEATURE_TERRAIN_SHAPING_2026-01-13.md
-- FEATURE_UNIT_CARRIER: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_FEATURE_UNIT_CARRIER_2026-01-13.md
-- FEATURE_UNIT_DESIGNER: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/publish/quality_docs_snapshot_2026-01-14/spec_sources/ASTEROBIA_CANONICAL_FEATURE_UNIT_DESIGNER_2026-01-18.md
+- MASTER_BIBLE: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md
+- REFACTOR_PROCESS: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_REFACTOR_PROCESS_2026-01-13.md
+- GRFDTRDPU_SYSTEM: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_GRFDTRDPU_SYSTEM_2026-01-13.md
+- VISION_MAX_SOURCES: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_VISION_MAX_SOURCES_POLICY_2026-01-13.md
+- FEATURE_MOVE_ROLL: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_FEATURE_MOVE_ROLL_2026-01-13.md
+- FEATURE_WPN_SHOOT: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_FEATURE_WPN_SHOOT_2026-01-13.md
+- FEATURE_OPTICAL_VISION: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_FEATURE_PERCEPTION_OPTICAL_VISION_2026-01-13.md
+- FEATURE_SUBSURFACE_SCAN: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_FEATURE_PERCEPTION_SUBSURFACE_SCAN_2026-01-13.md
+- FEATURE_MINING: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_FEATURE_MATERA_MINING_2026-01-13.md
+- FEATURE_TRANSPORT: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_FEATURE_MATERA_TRANSPORT_2026-01-13.md
+- FEATURE_TERRAIN_SHAPING: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_FEATURE_TERRAIN_SHAPING_2026-01-13.md
+- FEATURE_UNIT_CARRIER: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_FEATURE_UNIT_CARRIER_2026-01-13.md
+- FEATURE_UNIT_DESIGNER: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_FEATURE_UNIT_DESIGNER_2026-01-18.md
 
 ## Baseline Index
 - https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/baseline/pre-claude-stable/docs/CANONICAL_SOURCES_INDEX.md
