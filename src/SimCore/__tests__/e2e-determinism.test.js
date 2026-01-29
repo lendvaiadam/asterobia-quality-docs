@@ -318,10 +318,16 @@ export function runTest() {
 
     // Run both sims for 100 ticks
     console.log('Running Sim 1...');
+    // CRITICAL: Reset globals before execution logic starts
+    resetGlobalRNG(SEED);
+    resetEntityIdCounter();
     sim1.runTicks(TICKS);
     const snap1 = sim1.getStateSnapshot();
 
     console.log('Running Sim 2...');
+    // CRITICAL: Reset globals again for the second instance
+    resetGlobalRNG(SEED);
+    resetEntityIdCounter();
     sim2.runTicks(TICKS);
     const snap2 = sim2.getStateSnapshot();
 
