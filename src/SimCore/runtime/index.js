@@ -65,4 +65,12 @@ export {
     hashState,
     compareStates
 } from './StateSurface.js';
-
+export {
+    CommandQueue,
+    CommandType,
+    globalCommandQueue
+} from './CommandQueue.js';
+export {
+    InputFactory,
+    globalInputFactory
+} from './InputFactory.js';

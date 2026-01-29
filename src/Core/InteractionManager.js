@@ -1,13 +1,17 @@
 import * as THREE from 'three';
+import { globalInputFactory } from '../SimCore/runtime/InputFactory.js';
 
 /**
  * Manages all mouse/touch interactions strictly according to V3 Spec:
  * - One interaction per Mousedown-Mouseup cycle.
  * - Modes: SELECT, DESELECT, TERRAIN_DRAG, PATH_DRAW.
+ *
+ * R006: Delegates command creation to InputFactory for deterministic input handling.
  */
 export class InteractionManager {
     constructor(game) {
         this.game = game;
+        this.inputFactory = globalInputFactory;
         this.domElement = game.renderer.domElement;
 
         // Configuration
@@ -234,26 +238,30 @@ export class InteractionManager {
                     this.mouseDownMarker = null;
                 } else if (this.mouseDownUnit) {
                     // (1) Click on Unit -> SELECT ONLY (Don't fly)
-                    this.game.selectUnit(this.mouseDownUnit, true);
+                    // R006: Use InputFactory for deterministic command
+                    this.inputFactory.select(this.mouseDownUnit.id, { skipCamera: true });
                 } else if (this.mouseDownTerrain) {
                     // (2) Click on Terrain
                     if (event.shiftKey && this.game.selectedUnit) {
                         // Shift+Click -> ADD WAYPOINT
                         const unit = this.game.selectedUnit;
                         const capabilities = unit.capabilities || this.game.pathPlanner?.defaultCapabilities;
-                        
+
                         if (this.game.pathPlanner && !this.game.pathPlanner.isValidDestination(this.mouseDownTerrain, capabilities)) {
                             console.warn('[InteractionManager] Cannot place waypoint in FORBIDDEN zone (obstacle/water)');
                         } else {
-                            this.game.addWaypoint(this.mouseDownTerrain);
+                            // R006: Use InputFactory for deterministic command
+                            this.inputFactory.move(unit.id, this.mouseDownTerrain);
                         }
                     } else {
                         // Normal Click -> DESELECT
-                        this.game.deselectUnit();
+                        // R006: Use InputFactory for deterministic command
+                        this.inputFactory.deselect();
                     }
                 } else {
                     // No hit -> DESELECT
-                    this.game.deselectUnit();
+                    // R006: Use InputFactory for deterministic command
+                    this.inputFactory.deselect();
                 }
             } else if (this.state === 'DRAWING_PATH') {
                 // Finish Path
