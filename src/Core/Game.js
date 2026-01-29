@@ -18,6 +18,7 @@ import { RockCollisionSystem } from '../Physics/RockCollisionSystem.js';
 import { AudioManager } from './AudioManager.js';
 import { PathPlanner } from '../Navigation/PathPlanner.js';
 import { SimLoop } from '../SimCore/runtime/SimLoop.js';
+import { nextEntityId } from '../SimCore/runtime/IdGenerator.js';
 
 import { WaypointDebugOverlay } from '../UI/WaypointDebugOverlay.js';
 
@@ -183,7 +184,7 @@ export class Game {
         this.scene.add(this.visionHelper);
 
         // UI
-        this.unit = new Unit(this.planet); // Dummy for initial DebugPanel
+        this.unit = new Unit(this.planet, nextEntityId()); // Dummy for initial DebugPanel (R003: deterministic ID)
         this.debugPanel = new DebugPanel(this);
 
         // Refinement: Rock Debugger
@@ -235,9 +236,10 @@ export class Game {
             loader.load(`./modellek/${modelName}`, (gltf) => {
                 const model = gltf.scene;
 
-                // Create a Unit wrapper
-                const unit = new Unit(this.planet);
-                unit.name = `Unit ${index + 1}`; // Set unit name
+                // Create a Unit wrapper (R003: deterministic ID)
+                const unitId = nextEntityId();
+                const unit = new Unit(this.planet, unitId);
+                unit.name = `Unit ${unitId}`; // Set unit name from ID
 
                 // Replace the default cube mesh with the loaded model
                 // CRITICAL FIX: Do NOT replace unit.mesh (Group). Add model TO it.

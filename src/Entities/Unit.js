@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import { SphericalMath } from '../Math/SphericalMath.js';
 
 export class Unit {
-    constructor(planet) {
+    /**
+     * @param {Object} planet - Planet reference for terrain
+     * @param {number} id - Deterministic entity ID from SimCore.nextEntityId()
+     */
+    constructor(planet, id) {
         this.planet = planet;
         this.speed = 5.0;
         this.currentSpeed = 0.0; // Actual speed for audio/visuals
@@ -139,8 +143,13 @@ export class Unit {
         this.dustMaxParticles = 50;        // Default density
         this.dustSpawnInterval = 0.03;     // Default frequency
 
-        // Unit identity
-        this.id = Math.floor(Math.random() * 10000);
+        // Unit identity (R003: deterministic integer ID from SimCore)
+        if (id === undefined || id === null) {
+            console.warn('[Unit] No ID provided - using fallback. This breaks determinism!');
+            this.id = Math.floor(Math.random() * 10000);
+        } else {
+            this.id = id;
+        }
         this.name = `Unit ${this.id}`;
     }
 

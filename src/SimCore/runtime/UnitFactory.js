@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { Unit } from '../../Entities/Unit.js';
 import { getBlueprint } from './BlueprintStorage.js';
 import { bindUnitToBlueprint } from './UnitTypeBinder.js';
+import { nextEntityId } from './IdGenerator.js';
 
 /**
  * Get a spawn position near a reference point on spherical terrain.
@@ -108,8 +109,9 @@ export function spawnUnit(game, blueprintId, options = {}) {
         return null;
     }
 
-    // Create unit
-    const unit = new Unit(game.planet);
+    // Create unit (R003: deterministic ID)
+    const unitId = nextEntityId();
+    const unit = new Unit(game.planet, unitId);
 
     // Get spawn position on spherical terrain
     const spawnPos = getSpawnPosition(game, options);

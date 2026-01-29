@@ -43,4 +43,10 @@ export {
     applyBlueprintToUnit
 } from './UnitFactory.js';
 export { VisionSystem } from './VisionSystem.js';
+export {
+    nextEntityId,
+    peekEntityId,
+    resetEntityIdCounter,
+    setEntityIdCounter
+} from './IdGenerator.js';
 
