@@ -31,6 +31,12 @@ C) Bug Backlog Protocol (MANDATORY)
 - Fixing is optional; recording is mandatory.
 - Use the standard BUGLIST template.
 
+D) Bug Triage (MANDATORY)
+- On each delivery / before next steps: scan `docs/BUGLIST.md`.
+- Surface up to 3 "Fix Now" candidates (high leverage/blocking/risk).
+- Format: `ID`: `Rationale`.
+- Do NOT auto-fix; just flag.
+
 Clarifications / Questions:
 - You may ask any number of questions if they are necessary for correctness.
 - Group questions into a short numbered list.
