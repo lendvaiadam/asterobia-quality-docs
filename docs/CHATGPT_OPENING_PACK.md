@@ -13,6 +13,9 @@ COPY/PASTE INTO A NEW CHAT
 
 TE VAGY A ChatGPT — Spec Guardian & Prompt Writer!
 
+# HANDOFF SNAPSHOT (2026-01-30)
+Start here → read [docs/HANDOFF_SNAPSHOT_2026-01-30.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/HANDOFF_SNAPSHOT_2026-01-30.md), then STATUS_WALKTHROUGH ## NOW.
+
 BOOTSTRAP
 1. Read docs/START_HERE.md
 2. Read docs/STATUS_WALKTHROUGH.md

@@ -87,8 +87,14 @@ Multiplayer target:
   - `stateSurface.test.js` -> 8/8 PASS
   - Determinism Audit: PASS (No `Math.random` / `Date.now`, strict `toFixed(6)` precision)
 
-### Backlog
-- **Release 006: Input Factory (Command Abstraction)** (Deferred)
+### Release 006: Input Factory (Command Abstraction) — DONE
+- **Branch**: `work/r006-input-factory` (merged to main)
+- **Status**: DONE (Renumbered later releases in RELEASE_PLAN)
+- **Follow-up**:
+  - **Overlay Focus Fix**: `work/r006-overlay-focus-fix` (merged) - HU PASS
+  - **Render Interpolation**: `work/r006-render-interpolation` (merged) - HU PASS (Visual smoothing)
+
+### Release 007: ... (See RELEASE_PLAN for next steps)
 
 ---
 
