@@ -152,6 +152,42 @@ export class Unit {
             this.id = id;
         }
         this.name = `Unit ${this.id}`;
+
+        // R006: Render interpolation state (reusable vectors - no per-frame allocs)
+        this._prevPosition = new THREE.Vector3();
+        this._prevQuaternion = new THREE.Quaternion();
+        this._interpPosition = new THREE.Vector3(); // scratch for lerp result
+        this._interpQuaternion = new THREE.Quaternion(); // scratch for slerp result
+        this._prevPosition.copy(this.position);
+        this._prevQuaternion.copy(this.quaternion);
+    }
+
+    /**
+     * R006: Snapshot current authoritative state as "previous" for interpolation.
+     * Call at START of simTick, BEFORE unit.update().
+     */
+    snapshotPrevAuthState() {
+        this._prevPosition.copy(this.position);
+        this._prevQuaternion.copy(this.quaternion);
+    }
+
+    /**
+     * R006: Apply interpolated position/quaternion to mesh for smooth rendering.
+     * Call in renderUpdate with alpha from SimLoop (0 = prev state, 1 = current state).
+     * @param {number} alpha - Interpolation factor [0..1]
+     */
+    applyInterpolatedRender(alpha) {
+        if (!this.mesh) return;
+
+        // Lerp position
+        this._interpPosition.lerpVectors(this._prevPosition, this.position, alpha);
+        this.mesh.position.copy(this._interpPosition);
+
+        // Slerp quaternion for mesh orientation
+        this._interpQuaternion.copy(this._prevQuaternion);
+        this._interpQuaternion.slerp(this.quaternion, alpha);
+        // Note: mesh.quaternion is already updated in update() for surface alignment
+        // We only interpolate the logical quaternion here for consistency
     }
 
     /**

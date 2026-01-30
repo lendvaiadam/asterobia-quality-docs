@@ -2648,6 +2648,9 @@ export class Game {
         this.units.forEach(unit => {
             if (!unit) return;
 
+            // R006: Snapshot prev state BEFORE update (for render interpolation)
+            unit.snapshotPrevAuthState();
+
             // Sync params
             unit.speed = this.unitParams.speed;
             unit.turnSpeed = this.unitParams.turnSpeed;
@@ -2754,6 +2757,14 @@ export class Game {
      * Called every frame after simTick(s). Does NOT mutate sim state.
      */
     renderUpdate() {
+        // R006: Compute interpolation alpha for smooth rendering between sim ticks
+        const alpha = Math.min(1, this.simLoop.accumulatorMs / this.simLoop.fixedDtMs);
+
+        // R006: Apply interpolated positions to unit meshes
+        this.units.forEach(unit => {
+            if (unit) unit.applyInterpolatedRender(alpha);
+        });
+
         this.cameraControls.update(0.016); // Update State
 
 
