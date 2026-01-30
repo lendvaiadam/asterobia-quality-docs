@@ -24,12 +24,14 @@ import { globalCommandQueue, CommandType } from '../SimCore/runtime/CommandQueue
 
 import { WaypointDebugOverlay } from '../UI/WaypointDebugOverlay.js';
 import { globalCommandDebugOverlay } from '../UI/CommandDebugOverlay.js';
+import { PerformanceHUD } from '../UI/PerformanceHUD.js';
 
 export class Game {
     constructor() {
         // ... (existing)
         this.debugOverlay = new WaypointDebugOverlay(this);
         this.commandDebugOverlay = globalCommandDebugOverlay; // R006: Command debug overlay
+        this.performanceHUD = new PerformanceHUD(this); // R006: Performance diagnostics
         window.game = this; // Expose for UI interactions
 
         // R001: Fixed-timestep simulation loop (50ms tick)
@@ -2639,6 +2641,9 @@ export class Game {
      * @param {number} tickCount - Current tick number
      */
     simTick(fixedDt, tickCount) {
+        // R006: Record tick for performance HUD
+        if (this.performanceHUD) this.performanceHUD.recordSimTick();
+
         // R006: Process input commands from queue first
         this._processInputCommands(tickCount);
 
@@ -2762,7 +2767,10 @@ export class Game {
 
         // R006: Apply interpolated positions to unit meshes
         this.units.forEach(unit => {
-            if (unit) unit.applyInterpolatedRender(alpha);
+            if (unit) {
+                unit.applyInterpolatedRender(alpha);
+                if (this.performanceHUD) this.performanceHUD.recordInterpCall();
+            }
         });
 
         this.cameraControls.update(0.016); // Update State
@@ -2885,10 +2893,16 @@ export class Game {
     }
 
     animate() {
+        // R006: Record frame for performance HUD
+        if (this.performanceHUD) this.performanceHUD.recordRenderFrame();
+
         // R001: Run fixed-timestep sim ticks, then render
         this.simLoop.step(performance.now());
         this.renderUpdate();
         this.renderer.render(this.scene, this.camera);
+
+        // R006: Update performance HUD display
+        if (this.performanceHUD) this.performanceHUD.update();
 
         // Trigger onFirstRender callback after enough frames to ensure content visible
         // Wait for 30 frames (about 0.5s at 60fps) to ensure textures loaded
