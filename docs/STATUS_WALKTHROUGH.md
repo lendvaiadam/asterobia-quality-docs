@@ -99,10 +99,16 @@ Multiplayer target:
 - **Status**: **DONE**.
 - **Ref**: `docs/RELEASE_PLAN.md` (Release 007).
   
-### Release 008: Snapshot Interpolation (Verify & Tune) — NEXT
+### Release 008: Snapshot Interpolation (Verify & Tune) — DONE
 - **Objective**: Verify render interpolation sufficiency; Fix Stutter Bug.
-- **Known Issue**: BUG-20260130-003 (Stutter) — target fix here.
+- **Status**: **DONE** (SHA: 4cd448d).
 - **Ref**: `docs/RELEASE_PLAN.md` (Release 008).
+
+### Release 009: Pathfinding Determinism — NEXT
+- **Objective**: Ensure pathfinding runs strictly inside `SimCore.step`.
+- **Ref**: `docs/RELEASE_PLAN.md` (Release 009).
+
+### Current target release: Release 009 (Pathfinding Determinism)
 
 ---
 
