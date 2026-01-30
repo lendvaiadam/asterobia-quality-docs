@@ -39,31 +39,26 @@ This document represents the **current implementations state** of the `asterobia
 ## 3. Authority & Determinism Status
 *   **Time Model:** **Fixed Timestep (50ms)**.
     *   `dt` is strictly controlled by `SimLoop` accumulator.
-    *   *Evidence:* `src/SimCore/runtime/SimLoop.js`.
-
-    *   *Evidence:* `quality/NETCODE_READINESS_AUDIT.md` Section 2A.
-*   **Randomness:** **Unseeded `Math.random()`**.
-    *   Used in Map logic, Unit stats, Rock generation.
-    *   *Evidence:* `quality/NETCODE_READINESS_AUDIT.md` Section 2B.
-*   **Time Source:** **Wall-clock `Date.now() / performance.now()`**.
-    *   Used for Entity IDs and frame timing.
-    *   *Evidence:* `quality/NETCODE_READINESS_AUDIT.md` Section 2C.
+    *   *Evidence:* `src/SimCore/runtime/SimLoop.js` (R001 Merged).
+*   **Randomness:** **Seeded PRNG (Mulberry32)**.
+    *   `SimCore.rng` provides deterministic randoms. `Math.random` removed from logic.
+    *   *Evidence:* `src/SimCore/runtime/SeededRNG.js` (R004 Merged).
+*   **IDs:** **Deterministic Sequential**.
+    *   `IdGenerator` replaces `Date.now()`/UUIDs.
+    *   *Evidence:* `src/SimCore/runtime/IdGenerator.js` (R003 Merged).
 
 ## 4. Command Pipeline Status
-*   **Mechanism:** Hybrid (Transitioning).
-    *   **Clicks (R002):** `CommandQueue` -> `CommandProcessor` (Authorize-First).
-    *   **Keyboard:** Direct Poll in `simTick` (Legacy/Scope Guard).
-*   **Command Objects:** `src/SimCore/commands/Command.js` (Implemented).
-*   **Input Entry:** `InteractionManager` emits commands; `Input.js` still polled.
-    *   *Evidence:* `work/r002-command-buffer` branch.
-
+*   **Mechanism:** **Strict Command Queue**.
+    *   UI/Input -> `InputFactory` -> `CommandQueue` -> `SimCore`.
+    *   Direct state mutation via Input is ABOLISHED.
+    *   *Evidence:* `src/Core/Input.js` (delegates to Factory), `src/SimCore/commands/Command.js` (R002/R006 Merged).
+*   **Overlay:** Command History overlay (`Shift+C`) confirms stream.
 
 ## 5. State Surface Map
-*   **Authoritative State:** Mixed with Render state.
-    *   Units store physics (`position`, `velocity`) and render (`mesh`, `mixer`) on the same object.
-    *   *Evidence:* `quality/STATE_SURFACE_MAP.md` Section 1 & 2.
-*   **Serialization:** **MISSING**. No easy way to snapshot.
-    *   *Evidence:* `quality/NETCODE_READINESS_AUDIT.md` Section 3.
+*   **Authoritative State:** **Defined & Serializeable**.
+    *   `serializeState()` captures Sim-only data (ticks, unit props, queue).
+    *   Render state (meshes) excluded from serialization.
+    *   *Evidence:* `src/SimCore/runtime/StateSurface.js` (R005 Merged).
 
 ## 6. Vision/FOW Status
 *   **Pipeline:** Shader-based visual effect. State persistence is unclear/partial.

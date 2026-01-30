@@ -49,7 +49,9 @@ This document is the **authoritative development plan** for Asterobia Demo 1.0.
 13. [Replay System](#13-replay-system)
 
 ### Part V: Execution
-14. [Release Plan (Phase 0-2)](#14-release-plan-phase-0-2)
+14. [Release Plan (Phase 0-2)](#14-release-plan-phase-0-2) [SUPERSEDED by docs/RELEASE_PLAN.md]
+> **NOTE:** The strict Release numbering in Section 14 is **SUPERSEDED** by `docs/RELEASE_PLAN.md`.
+> Always refer to `docs/RELEASE_PLAN.md` for the binding, live release schedule. This section remains for architectural context.
 15. [PR Workflow & Gates](#15-pr-workflow--gates)
 16. [Testing & CI Strategy](#16-testing--ci-strategy)
 17. [Risk Register](#17-risk-register)
