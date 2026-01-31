@@ -21,7 +21,7 @@ import { SimLoop } from '../SimCore/runtime/SimLoop.js';
 import { nextEntityId, peekEntityId, setEntityIdCounter } from '../SimCore/runtime/IdGenerator.js';
 import { rngNext, getGlobalRNG } from '../SimCore/runtime/SeededRNG.js';
 import { globalCommandQueue, CommandType } from '../SimCore/runtime/CommandQueue.js';
-import { initializeTransport } from '../SimCore/transport/index.js';
+import { initializeTransport, SupabaseTransport } from '../SimCore/transport/index.js';
 import { SaveManager, MemoryStorageAdapter, LocalStorageAdapter } from '../SimCore/persistence/index.js';
 import { serializeState } from '../SimCore/runtime/StateSurface.js';
 
@@ -30,9 +30,36 @@ import { globalCommandDebugOverlay } from '../UI/CommandDebugOverlay.js';
 
 export class Game {
     constructor() {
-        // R007: Initialize transport layer FIRST (before any input handling)
-        // This wires InputFactory → Transport → CommandQueue
-        this._transport = initializeTransport();
+        // R007/R012: Transport Initialization
+        const urlParams = new URLSearchParams(window.location.search);
+        const netMode = urlParams.get('net');
+
+        if (netMode === 'supabase') {
+            const config = window.ASTEROBIA_CONFIG?.supabase;
+            const supabase = window.supabase; // from CDN
+
+            if (config && config.url && config.key && supabase) {
+                console.log('[Game] Initializing Supabase Transport...');
+                const client = supabase.createClient(config.url, config.key);
+                
+                // R012: Initialize with SupabaseTransport
+                this._transport = initializeTransport(new SupabaseTransport({
+                    supabaseClient: client,
+                    room: 'r012-echo',
+                    throttleMs: 100 // 10Hz limit
+                }));
+
+                // Visual Indicator (R012 Requirement)
+                this._createNetIndicator('SUPABASE', '#4caf50'); // Green
+            } else {
+                console.warn('[Game] Supabase config/SDK missing. Falling back to Local.');
+                this._transport = initializeTransport(); // Default Local
+                this._createNetIndicator('CONFIG ERROR', '#f44336'); // Red
+            }
+        } else {
+            // Default: Local Transport
+            this._transport = initializeTransport();
+        }
 
         // ... (existing)
         this.debugOverlay = new WaypointDebugOverlay(this);
@@ -63,6 +90,28 @@ export class Game {
 
         // Scene
         this.scene = new THREE.Scene();
+
+    } // End Constructor
+
+    // R012: Simple HUD indicator for network status
+    _createNetIndicator(status, color) {
+        const div = document.createElement('div');
+        div.id = 'net-indicator';
+        div.textContent = `NET: ${status}`;
+        div.style.cssText = `
+            position: fixed;
+            top: 25px;
+            right: 10px;
+            color: ${color};
+            font-family: monospace;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 9999;
+            pointer-events: none;
+            text-shadow: 1px 1px 1px #000;
+        `;
+        document.body.appendChild(div);
+    }
 
         // Starfield
         this.starDistance = 500; // Distance to stars from origin
