@@ -61,23 +61,29 @@ export class Game {
                     const client = supabase.createClient(config.url, config.key);
                     
                     // R012: Initialize with SupabaseTransport
-                    this._transport = initializeTransport(new SupabaseTransport({
+                    const transport = new SupabaseTransport({
                         supabaseClient: client,
                         room: 'r012-echo',
                         throttleMs: 100 // 10Hz limit
-                    }));
+                    });
+                    this._transport = initializeTransport(transport);
 
-                    // Visual Indicator
-                    this._createNetIndicator('SUPABASE', '#4caf50'); // Green
+                    // Update Indicator on Connection State Change
+                    this._createNetIndicator('SUPABASE', '#4caf50', { auth: 'ANON OK', rt: 'CONNECTING...' });
+                    
+                    // Hook into transport state changes if possible, or just set initial
+                    // For now, we assume connecting triggers quickly.
+                    // Ideally SupabaseTransport would emit events, but let's keep it simple for micro-step.
+                    
                 } else {
                     console.warn('[Game] Invalid/Unsafe Key detected. Falling back to Local.');
                     this._transport = initializeTransport(); // Default Local
-                    this._createNetIndicator('KEY INVALID', '#f44336'); // Red
+                    this._createNetIndicator('KEY INVALID', '#f44336', { auth: 'FAIL' }); // Red
                 }
             } else {
                 console.warn('[Game] Supabase config/SDK missing. Falling back to Local.');
                 this._transport = initializeTransport(); // Default Local
-                this._createNetIndicator('CONFIG ERROR', '#f44336'); // Red
+                this._createNetIndicator('CONFIG ERROR', '#f44336', { auth: 'MISSING' }); // Red
             }
         } else {
             // Default: Local Transport
@@ -116,22 +122,38 @@ export class Game {
 
     } // End Constructor
 
-    // R012: Simple HUD indicator for network status
-    _createNetIndicator(status, color) {
+    // R012: Enhanced HUD indicator for network status
+    _createNetIndicator(status, color, extraInfo = {}) {
+        const existing = document.getElementById('net-indicator');
+        if (existing) existing.remove();
+
         const div = document.createElement('div');
         div.id = 'net-indicator';
-        div.textContent = `NET: ${status}`;
+        
+        let html = `<div>NET: <span style="color:${color}">${status}</span></div>`;
+        
+        if (extraInfo.auth) {
+            html += `<div>AUTH: ${extraInfo.auth}</div>`;
+        }
+        if (extraInfo.rt) {
+            html += `<div>RT: ${extraInfo.rt}</div>`;
+        }
+
+        div.innerHTML = html;
         div.style.cssText = `
             position: fixed;
-            top: 25px;
+            top: 40px;
             right: 10px;
-            color: ${color};
+            color: #ccc;
             font-family: monospace;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: bold;
             z-index: 9999;
             pointer-events: none;
-            text-shadow: 1px 1px 1px #000;
+            text-align: right;
+            background: rgba(0,0,0,0.5);
+            padding: 4px;
+            border-radius: 4px;
         `;
         document.body.appendChild(div);
     }
