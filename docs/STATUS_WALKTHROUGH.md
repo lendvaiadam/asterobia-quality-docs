@@ -124,6 +124,9 @@ Multiplayer target:
 - **Ref**: `docs/RELEASE_PLAN.md` (Release 011).
 
 ### Current target release: Release 012 (Supabase Integration)
+- **Objective**: Replace `LocalTransport` with `SupabaseTransport` using Realtime broadcast.
+- **Reference**: `docs/RELEASE_PLAN.md` -> `docs/specs/R012_SUPABASE_SETUP.md`
+- **Security**: See `docs/specs/R012_CONFIG_AND_SECRETS_STRATEGY.md` for Dev/Prod key isolation.
 
 ---
 

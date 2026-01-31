@@ -30,6 +30,7 @@ Current engineering priority: Refactor toward Phase 0 “Netcode Readiness” (h
 - **Work Tracking**: `docs/STATUS_WALKTHROUGH.md`
 - **Bug Tracking**: `docs/BUGLIST.md`
 - **Claude Skills**: `docs/CLAUDE_CODE_SKILLS.md` (See `/.claude/skills/` for local tools)
+- **R012 Config Strategy**: `docs/specs/R012_CONFIG_AND_SECRETS_STRATEGY.md` (Prod-grade secrets management)
 
 ### Claude / Claude Code — Coder-of-Remember
 - **Primary Coder**: Implements complex features and core systems.

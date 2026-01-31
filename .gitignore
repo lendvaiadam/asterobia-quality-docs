@@ -8,3 +8,6 @@ modellek/
 # Temporary test runners
 run_r003_tests.mjs
 run_r004_tests.mjs
+
+# Local Development Config (Secrets)
+public/config.js

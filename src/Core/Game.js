@@ -39,18 +39,41 @@ export class Game {
             const supabase = window.supabase; // from CDN
 
             if (config && config.url && config.key && supabase) {
-                console.log('[Game] Initializing Supabase Transport...');
-                const client = supabase.createClient(config.url, config.key);
-                
-                // R012: Initialize with SupabaseTransport
-                this._transport = initializeTransport(new SupabaseTransport({
-                    supabaseClient: client,
-                    room: 'r012-echo',
-                    throttleMs: 100 // 10Hz limit
-                }));
+                // R012 Security Gate: Validate Key Role
+                let isValidKey = false;
+                try {
+                    // JWT is header.payload.signature
+                    const parts = config.key.split('.');
+                    if (parts.length === 3) {
+                        const payload = JSON.parse(atob(parts[1]));
+                        if (payload.role === 'anon') {
+                            isValidKey = true;
+                        } else {
+                            console.error('[Game] SECURITY VIOLATION: Supplied key is NOT an anonymous key. Role:', payload.role);
+                        }
+                    }
+                } catch (e) {
+                    console.error('[Game] Config Key is not a valid JWT.');
+                }
 
-                // Visual Indicator (R012 Requirement)
-                this._createNetIndicator('SUPABASE', '#4caf50'); // Green
+                if (isValidKey) {
+                    console.log('[Game] Initializing Supabase Transport...');
+                    const client = supabase.createClient(config.url, config.key);
+                    
+                    // R012: Initialize with SupabaseTransport
+                    this._transport = initializeTransport(new SupabaseTransport({
+                        supabaseClient: client,
+                        room: 'r012-echo',
+                        throttleMs: 100 // 10Hz limit
+                    }));
+
+                    // Visual Indicator
+                    this._createNetIndicator('SUPABASE', '#4caf50'); // Green
+                } else {
+                    console.warn('[Game] Invalid/Unsafe Key detected. Falling back to Local.');
+                    this._transport = initializeTransport(); // Default Local
+                    this._createNetIndicator('KEY INVALID', '#f44336'); // Red
+                }
             } else {
                 console.warn('[Game] Supabase config/SDK missing. Falling back to Local.');
                 this._transport = initializeTransport(); // Default Local
