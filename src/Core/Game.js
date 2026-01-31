@@ -18,10 +18,12 @@ import { RockCollisionSystem } from '../Physics/RockCollisionSystem.js';
 import { AudioManager } from './AudioManager.js';
 import { PathPlanner } from '../Navigation/PathPlanner.js';
 import { SimLoop } from '../SimCore/runtime/SimLoop.js';
-import { nextEntityId } from '../SimCore/runtime/IdGenerator.js';
-import { rngNext } from '../SimCore/runtime/SeededRNG.js';
+import { nextEntityId, peekEntityId, setEntityIdCounter } from '../SimCore/runtime/IdGenerator.js';
+import { rngNext, getGlobalRNG } from '../SimCore/runtime/SeededRNG.js';
 import { globalCommandQueue, CommandType } from '../SimCore/runtime/CommandQueue.js';
 import { initializeTransport } from '../SimCore/transport/index.js';
+import { SaveManager, MemoryStorageAdapter, LocalStorageAdapter } from '../SimCore/persistence/index.js';
+import { serializeState } from '../SimCore/runtime/StateSurface.js';
 
 import { WaypointDebugOverlay } from '../UI/WaypointDebugOverlay.js';
 import { globalCommandDebugOverlay } from '../UI/CommandDebugOverlay.js';
@@ -42,6 +44,10 @@ export class Game {
         this.simLoop.onSimTick = (dt, tick) => this.simTick(dt, tick);
         // R008: Hook render callback for interpolation
         this.simLoop.onRender = (alpha) => this._applyInterpolatedRender(alpha);
+
+        // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
+        this._setupDevSaveLoad();
+
         this.container = document.body;
 
         // Renderer
@@ -2690,6 +2696,108 @@ export class Game {
             if (!unit) return;
             unit.applyInterpolatedRender(alpha);
         });
+    }
+
+    /**
+     * R011: Dev-only save/load hotkeys.
+     * Ctrl+Alt+S = Save quicksave to localStorage
+     * Ctrl+Alt+L = Load quicksave from localStorage
+     * Only active when ?dev=1 URL param is present.
+     */
+    _setupDevSaveLoad() {
+        // Guard: dev-only
+        const isDevMode = new URLSearchParams(window.location.search).has('dev');
+        if (!isDevMode) return;
+
+        // Create adapter wrapper for SaveManager (maps to global functions)
+        const gameAdapter = {
+            simLoop: this.simLoop,
+            units: this.units,
+            selectedUnit: null,
+            rng: {
+                getState: () => getGlobalRNG().getState(),
+                setState: (s) => getGlobalRNG().setState(s)
+            },
+            idGenerator: {
+                peekEntityId: () => peekEntityId(),
+                setEntityIdCounter: (v) => setEntityIdCounter(v)
+            },
+            restoreUnit: (data) => this._restoreUnitFromSave(data)
+        };
+
+        // Lazy-initialize SaveManager on first use
+        let saveManager = null;
+        const getSaveManager = () => {
+            if (!saveManager) {
+                // Sync adapter refs
+                gameAdapter.units = this.units;
+                gameAdapter.selectedUnit = this.selectedUnit;
+                saveManager = new SaveManager(gameAdapter, new LocalStorageAdapter());
+            }
+            return saveManager;
+        };
+
+        // Keyboard handler
+        document.addEventListener('keydown', (e) => {
+            // Ctrl+Alt+S = Save
+            if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                gameAdapter.units = this.units;
+                gameAdapter.selectedUnit = this.selectedUnit;
+                const mgr = getSaveManager();
+                const result = mgr.save('quicksave');
+                if (result.success) {
+                    console.log(`[R011] Saved quicksave at tick ${this.simLoop.tickCount}`);
+                } else {
+                    console.error(`[R011] Save failed: ${result.error}`);
+                }
+            }
+
+            // Ctrl+Alt+L = Load
+            if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'l') {
+                e.preventDefault();
+                const mgr = getSaveManager();
+                const result = mgr.load('quicksave');
+                if (result.success) {
+                    console.log(`[R011] Loaded quicksave at tick ${this.simLoop.tickCount}`);
+                } else {
+                    console.error(`[R011] Load failed: ${result.error}`);
+                }
+            }
+        });
+
+        console.log('[R011] Dev save/load enabled: Ctrl+Alt+S=Save, Ctrl+Alt+L=Load');
+    }
+
+    /**
+     * R011: Restore a unit from serialized save data.
+     * Creates a new Unit instance with saved state.
+     * @param {Object} data - Serialized unit data
+     */
+    _restoreUnitFromSave(data) {
+        // Find existing unit or create placeholder
+        // For now, we restore position/state to existing units by ID
+        const existing = this.units.find(u => u && u.id === data.id);
+        if (existing) {
+            // Update existing unit's authoritative state
+            if (data.position) {
+                existing.position.set(data.position.x, data.position.y, data.position.z);
+            }
+            if (data.quaternion) {
+                existing.quaternion.set(data.quaternion.x, data.quaternion.y, data.quaternion.z, data.quaternion.w);
+            }
+            if (data.velocity) {
+                existing.velocity.set(data.velocity.x, data.velocity.y, data.velocity.z);
+            }
+            existing.health = data.health ?? existing.health;
+            existing.currentSpeed = data.currentSpeed ?? 0;
+            existing.pathIndex = data.pathIndex ?? 0;
+            existing.isFollowingPath = data.isFollowingPath ?? false;
+            existing.pausedByCommand = data.pausedByCommand ?? false;
+            return existing;
+        }
+        // If unit doesn't exist, store raw data (would need UnitFactory for full hydration)
+        return data;
     }
 
     /**

@@ -104,6 +104,39 @@ export class SimLoop {
     }
 
     /**
+     * Set tick count (for save/load restore).
+     * R011: Required for restoring simulation state from save.
+     * @param {number} tick - Tick count to restore to
+     */
+    setTickCount(tick) {
+        this.tickCount = tick;
+    }
+
+    /**
+     * Get loop state for save/load.
+     * R011: Returns minimal state needed for deterministic restore.
+     * @returns {{ tickCount: number, accumulatorMs: number }}
+     */
+    getState() {
+        return {
+            tickCount: this.tickCount,
+            accumulatorMs: this.accumulatorMs
+        };
+    }
+
+    /**
+     * Set loop state from save data.
+     * R011: Restores loop to saved state.
+     * @param {{ tickCount: number, accumulatorMs: number }} state
+     */
+    setState(state) {
+        this.tickCount = state.tickCount;
+        this.accumulatorMs = state.accumulatorMs ?? 0;
+        // Reset lastFrameMs to prevent large delta on next step()
+        this.lastFrameMs = 0;
+    }
+
+    /**
      * Get simulation time in seconds (tickCount * fixedDtSec).
      * @returns {number}
      */

@@ -1,2 +1,10 @@
 # Local Claude Code settings (user-specific)
 .claude/settings.local.json
+
+# Build/output artifacts (not source)
+css/
+modellek/
+
+# Temporary test runners
+run_r003_tests.mjs
+run_r004_tests.mjs
