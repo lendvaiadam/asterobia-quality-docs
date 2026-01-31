@@ -45,14 +45,14 @@ export class Game {
 
         if (netMode === 'supabase') {
             const configObj = window.ASTEROBIA_CONFIG;
-            const config = configObj?.supabase;
+            const config = (configObj && configObj.supabase) ? configObj.supabase : null;
             const supabase = window.supabase; // from CDN
 
             // R012: Validate config was loaded and has non-placeholder values
-            const configLoaded = configObj?._loaded === true;
-            const hasPlaceholders = config?.url?.includes('YOUR_PROJECT_ID') ||
-                                    config?.key?.includes('YOUR_ANON_KEY') ||
-                                    config?.url?.includes('xyzcompany');
+            const configLoaded = (configObj && configObj._loaded) === true;
+            const hasPlaceholders = (config && config.url && config.url.includes('YOUR_PROJECT_ID')) ||
+                                    (config && config.key && config.key.includes('YOUR_ANON_KEY')) ||
+                                    (config && config.url && config.url.includes('xyzcompany'));
 
             if (!configLoaded || !config || !config.url || !config.key) {
                 console.warn('[Game] Supabase config missing. Falling back to Local.');
