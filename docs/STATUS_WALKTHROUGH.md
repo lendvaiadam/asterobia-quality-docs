@@ -123,10 +123,11 @@ Multiplayer target:
 - **Notes**: See [Persistent World State Notes](specs/PERSISTENT_WORLD_STATE_NOTES.md) for future server-sync requirements.
 - **Ref**: `docs/RELEASE_PLAN.md` (Release 011).
 
-### Current target release: Release 012 (Supabase Integration)
-- **Objective**: Replace `LocalTransport` with `SupabaseTransport` using Realtime broadcast.
-- **Reference**: `docs/RELEASE_PLAN.md` -> `docs/specs/R012_SUPABASE_SETUP.md`
-- **Security**: See `docs/specs/R012_CONFIG_AND_SECRETS_STRATEGY.md` for Dev/Prod key isolation.
+### Current target release: Release 013 (Multiplayer Handshake)
+- **Objective**: Implement the Host-Authority Handshake protocol.
+- **Spec**: `docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md`
+- **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
+- **Status**: **Ready for Implementation** (Docs Merged).
 
 ### Release 013: Multiplayer Handshake & Host Authority (Specs Ready)
 - **Objective**: Implement the Host-Authority Handshake protocol.
@@ -161,4 +162,4 @@ Multiplayer target:
 ## Release Registry
 - **Manifest**: [public/versions.json](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/public/versions.json)
 - **Release Plan**: [docs/RELEASE_PLAN.md](https://raw.githubusercontent.com/lendvaiadam/asterobia/main/docs/RELEASE_PLAN.md)
-- **Current target release**: Release 012 (Supabase Integration)
+- **Current target release**: Release 013 (Multiplayer Handshake)

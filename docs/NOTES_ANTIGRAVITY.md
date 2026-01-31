@@ -135,6 +135,16 @@ Default output: MD files under /quality or /docs.
 ## Snapshot Log
 
 
+
+### Savepoint 003
+- **Date**: 2026-02-01
+- **Tag**: `savepoint/context-reset-pack`
+- **SHA**: `(pending merge)`
+- **Scope**: Docs-only: Added `CONTEXT_RESET_PACK.md` + Multi-Claude Roster rules.
+- **Gates**: Consistency verified. Links validated.
+- **Risk notes**: None.
+- **Rollback**: `git checkout savepoint/context-reset-pack`
+
 ### Savepoint 002
 - **Date**: 2026-02-01
 - **Tag**: `savepoint/r013-docs-pack-merged`

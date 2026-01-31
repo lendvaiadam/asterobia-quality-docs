@@ -40,6 +40,12 @@
 4) Snapshot export (DONE).
 5) ITransport Local shim (Release 007 - NEXT).
 
-## 6. Risks
+## 6. Claude Code Instances (2) (Binding)
+- **CC#1 (Runtime)**: Owns `src/` and implementation.
+- **CC#2 (Docs)**: Owns `docs/` and specs.
+- **Rule**: Never edit the same file concurrently. `git pull` before starting.
+- **Ref**: `docs/CONTEXT_RESET_PACK.md`
+
+## 7. Risks
 - Unit.js is a monolith. Avoid deep rewrites; prefer routing through shim entrypoints.
 
