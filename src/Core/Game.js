@@ -30,64 +30,91 @@ import { globalCommandDebugOverlay } from '../UI/CommandDebugOverlay.js';
 
 export class Game {
     constructor() {
-        // R007/R012: Transport Initialization
+        // R012: Check dev mode early for HUD
         const urlParams = new URLSearchParams(window.location.search);
+        const hash = window.location.hash;
+        this._isDevMode = urlParams.has('dev') || hash.includes('dev=1');
+
+        // R012: Create unified dev HUD FIRST (so transport init can update it)
+        if (this._isDevMode) {
+            this._createDevHUD();
+        }
+
+        // R007/R012: Transport Initialization
         const netMode = urlParams.get('net');
 
         if (netMode === 'supabase') {
-            const config = window.ASTEROBIA_CONFIG?.supabase;
+            const configObj = window.ASTEROBIA_CONFIG;
+            const config = configObj?.supabase;
             const supabase = window.supabase; // from CDN
 
-            if (config && config.url && config.key && supabase) {
-                // R012 Security Gate: Validate Key Role
+            // R012: Validate config was loaded and has non-placeholder values
+            const configLoaded = configObj?._loaded === true;
+            const hasPlaceholders = config?.url?.includes('YOUR_PROJECT_ID') ||
+                                    config?.key?.includes('YOUR_ANON_KEY') ||
+                                    config?.url?.includes('xyzcompany');
+
+            if (!configLoaded || !config || !config.url || !config.key) {
+                console.warn('[Game] Supabase config missing. Falling back to Local.');
+                this._transport = initializeTransport();
+                this._updateNetStatus('LOCAL', { config: 'MISSING', auth: 'N/A', rt: 'N/A' });
+            } else if (hasPlaceholders) {
+                console.warn('[Game] Supabase config has placeholder values. Edit public/config.js');
+                this._transport = initializeTransport();
+                this._updateNetStatus('LOCAL', { config: 'PLACEHOLDER', auth: 'N/A', rt: 'N/A' });
+            } else if (!supabase) {
+                console.warn('[Game] Supabase SDK not loaded from CDN.');
+                this._transport = initializeTransport();
+                this._updateNetStatus('LOCAL', { config: 'SDK MISSING', auth: 'N/A', rt: 'N/A' });
+            } else {
+                // R012 Security Gate: Validate Key Role (must be "anon")
                 let isValidKey = false;
+                let keyRole = 'unknown';
                 try {
-                    // JWT is header.payload.signature
                     const parts = config.key.split('.');
                     if (parts.length === 3) {
                         const payload = JSON.parse(atob(parts[1]));
-                        if (payload.role === 'anon') {
+                        keyRole = payload.role || 'unknown';
+                        if (keyRole === 'anon') {
                             isValidKey = true;
                         } else {
-                            console.error('[Game] SECURITY VIOLATION: Supplied key is NOT an anonymous key. Role:', payload.role);
+                            console.error('[Game] SECURITY: Key role is "' + keyRole + '" (expected "anon")');
                         }
                     }
                 } catch (e) {
-                    console.error('[Game] Config Key is not a valid JWT.');
+                    console.error('[Game] Config key is not a valid JWT.');
                 }
 
                 if (isValidKey) {
                     console.log('[Game] Initializing Supabase Transport...');
                     const client = supabase.createClient(config.url, config.key);
-                    
-                    // R012: Initialize with SupabaseTransport
+
                     const transport = new SupabaseTransport({
                         supabaseClient: client,
                         room: 'r012-echo',
-                        throttleMs: 100 // 10Hz limit
+                        throttleMs: 100
                     });
                     this._transport = initializeTransport(transport);
+                    this._supabaseTransport = transport; // Store ref for status polling
 
-                    // Update Indicator on Connection State Change
-                    this._createNetIndicator('SUPABASE', '#4caf50', { auth: 'ANON OK', rt: 'CONNECTING...' });
-                    
-                    // Hook into transport state changes if possible, or just set initial
-                    // For now, we assume connecting triggers quickly.
-                    // Ideally SupabaseTransport would emit events, but let's keep it simple for micro-step.
-                    
+                    // Initial status
+                    this._updateNetStatus('SUPABASE', { config: 'OK', auth: 'ANON OK', rt: 'CONNECTING...' });
+
+                    // R012: Poll transport state and update HUD
+                    this._startRealtimeStatusPolling();
                 } else {
-                    console.warn('[Game] Invalid/Unsafe Key detected. Falling back to Local.');
-                    this._transport = initializeTransport(); // Default Local
-                    this._createNetIndicator('KEY INVALID', '#f44336', { auth: 'FAIL' }); // Red
+                    console.warn('[Game] Invalid/Unsafe key. Falling back to Local.');
+                    this._transport = initializeTransport();
+                    const keyMsg = keyRole === 'service_role' ? 'SERVICE_ROLE!' : 'KEY INVALID';
+                    this._updateNetStatus('LOCAL', { config: keyMsg, auth: 'FAIL', rt: 'N/A' });
                 }
-            } else {
-                console.warn('[Game] Supabase config/SDK missing. Falling back to Local.');
-                this._transport = initializeTransport(); // Default Local
-                this._createNetIndicator('CONFIG ERROR', '#f44336', { auth: 'MISSING' }); // Red
             }
         } else {
             // Default: Local Transport
             this._transport = initializeTransport();
+            if (this._isDevMode) {
+                this._updateNetStatus('LOCAL', { config: 'N/A', auth: 'N/A', rt: 'N/A' });
+            }
         }
 
         // ... (existing)
@@ -122,40 +149,133 @@ export class Game {
 
     } // End Constructor
 
-    // R012: Enhanced HUD indicator for network status
-    _createNetIndicator(status, color, extraInfo = {}) {
-        const existing = document.getElementById('net-indicator');
-        if (existing) existing.remove();
-
-        const div = document.createElement('div');
-        div.id = 'net-indicator';
-        
-        let html = `<div>NET: <span style="color:${color}">${status}</span></div>`;
-        
-        if (extraInfo.auth) {
-            html += `<div>AUTH: ${extraInfo.auth}</div>`;
-        }
-        if (extraInfo.rt) {
-            html += `<div>RT: ${extraInfo.rt}</div>`;
-        }
-
-        div.innerHTML = html;
-        div.style.cssText = `
+    // R012: Unified dev HUD for observability (only shown when dev=1)
+    _createDevHUD() {
+        const hud = document.createElement('div');
+        hud.id = 'r012-dev-hud';
+        hud.style.cssText = `
             position: fixed;
-            top: 40px;
-            right: 10px;
+            top: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.9);
             color: #ccc;
             font-family: monospace;
             font-size: 11px;
-            font-weight: bold;
-            z-index: 9999;
-            pointer-events: none;
-            text-align: right;
-            background: rgba(0,0,0,0.5);
-            padding: 4px;
-            border-radius: 4px;
+            padding: 10px 14px;
+            border-radius: 6px;
+            z-index: 99999;
+            user-select: none;
+            min-width: 180px;
+            border: 1px solid #333;
         `;
-        document.body.appendChild(div);
+
+        hud.innerHTML = `
+            <div style="color:#0ff;font-weight:bold;margin-bottom:8px;border-bottom:1px solid #333;padding-bottom:4px;">R012 DEV HUD</div>
+            <div id="r012-net-mode" style="margin-bottom:4px;">NET MODE: <span style="color:#888;">---</span></div>
+            <div id="r012-config" style="margin-bottom:4px;">CONFIG: <span style="color:#888;">---</span></div>
+            <div id="r012-auth" style="margin-bottom:4px;">AUTH: <span style="color:#888;">---</span></div>
+            <div id="r012-realtime" style="margin-bottom:8px;">REALTIME: <span style="color:#888;">---</span></div>
+            <div style="border-top:1px solid #333;padding-top:8px;margin-bottom:6px;">
+                <div style="display:flex;gap:8px;margin-bottom:6px;">
+                    <button id="r012-btn-save" style="
+                        background:#1a1;color:#fff;border:none;padding:4px 12px;
+                        border-radius:3px;cursor:pointer;font-family:monospace;font-size:11px;
+                    ">Save</button>
+                    <button id="r012-btn-load" style="
+                        background:#17a;color:#fff;border:none;padding:4px 12px;
+                        border-radius:3px;cursor:pointer;font-family:monospace;font-size:11px;
+                    ">Load</button>
+                </div>
+            </div>
+            <div id="r012-db-status" style="color:#888;font-size:10px;">DB: ready</div>
+        `;
+        document.body.appendChild(hud);
+
+        // Store reference for updates
+        this._devHUD = {
+            netMode: document.getElementById('r012-net-mode').querySelector('span'),
+            config: document.getElementById('r012-config').querySelector('span'),
+            auth: document.getElementById('r012-auth').querySelector('span'),
+            realtime: document.getElementById('r012-realtime').querySelector('span'),
+            dbStatus: document.getElementById('r012-db-status'),
+            btnSave: document.getElementById('r012-btn-save'),
+            btnLoad: document.getElementById('r012-btn-load')
+        };
+    }
+
+    // R012: Update network status in dev HUD
+    _updateNetStatus(status, extraInfo = {}) {
+        if (!this._devHUD) return;
+
+        // NET MODE
+        const isSupabase = status === 'SUPABASE';
+        this._devHUD.netMode.textContent = isSupabase ? 'SUPABASE' : 'LOCAL';
+        this._devHUD.netMode.style.color = isSupabase ? '#4caf50' : '#888';
+
+        // CONFIG status
+        if (extraInfo.config) {
+            const cfg = extraInfo.config;
+            this._devHUD.config.textContent = cfg;
+            this._devHUD.config.style.color = cfg === 'OK' ? '#4caf50' : '#f44336';
+        }
+
+        // AUTH status
+        if (extraInfo.auth) {
+            const auth = extraInfo.auth;
+            this._devHUD.auth.textContent = auth;
+            this._devHUD.auth.style.color = auth === 'ANON OK' ? '#4caf50' : '#f44336';
+        }
+
+        // REALTIME status
+        if (extraInfo.rt) {
+            const rt = extraInfo.rt;
+            this._devHUD.realtime.textContent = rt;
+            if (rt === 'CONNECTED') {
+                this._devHUD.realtime.style.color = '#4caf50';
+            } else if (rt === 'CONNECTING...') {
+                this._devHUD.realtime.style.color = '#ff9800';
+            } else {
+                this._devHUD.realtime.style.color = '#f44336';
+            }
+        }
+    }
+
+    // R012: Update DB status in dev HUD (called by save/load)
+    _updateDBStatus(msg, isError = false) {
+        if (!this._devHUD) return;
+        this._devHUD.dbStatus.textContent = `DB: ${msg}`;
+        this._devHUD.dbStatus.style.color = isError ? '#f44336' : '#4caf50';
+    }
+
+    // R012: Poll Supabase transport state and update REALTIME status in HUD
+    _startRealtimeStatusPolling() {
+        if (!this._supabaseTransport || !this._devHUD) return;
+
+        let lastState = null;
+        const poll = () => {
+            const state = this._supabaseTransport.state;
+            if (state !== lastState) {
+                lastState = state;
+                let rtText = 'UNKNOWN';
+                if (state === 'CONNECTED') rtText = 'CONNECTED';
+                else if (state === 'CONNECTING') rtText = 'CONNECTING...';
+                else if (state === 'DISCONNECTED') rtText = 'DISCONNECTED';
+                else if (state === 'ERROR') rtText = 'ERROR';
+
+                this._devHUD.realtime.textContent = rtText;
+                if (state === 'CONNECTED') {
+                    this._devHUD.realtime.style.color = '#4caf50';
+                } else if (state === 'CONNECTING') {
+                    this._devHUD.realtime.style.color = '#ff9800';
+                } else {
+                    this._devHUD.realtime.style.color = '#f44336';
+                }
+            }
+        };
+
+        // Poll every 500ms
+        this._rtStatusInterval = setInterval(poll, 500);
+        poll(); // Initial check
     }
 
         // Starfield
@@ -2799,54 +2919,17 @@ export class Game {
      * Only active when ?dev=1 or #dev=1 is present.
      */
     _setupDevSaveLoad() {
-        // Guard: dev-only (check both querystring and hash)
-        const params = new URLSearchParams(window.location.search);
-        const hash = window.location.hash;
-        const isDevMode = params.has('dev') || hash.includes('dev=1');
-        if (!isDevMode) return;
+        // R012: Guard - only run in dev mode (HUD created by _createDevHUD)
+        if (!this._isDevMode || !this._devHUD) return;
 
-        // Create on-screen HUD with clickable buttons
-        const hud = document.createElement('div');
-        hud.id = 'r011-dev-hud';
-        hud.style.cssText = `
-            position: fixed;
-            top: 8px;
-            right: 8px;
-            background: rgba(0,0,0,0.85);
-            color: #0f0;
-            font-family: monospace;
-            font-size: 12px;
-            padding: 8px 12px;
-            border-radius: 4px;
-            z-index: 99999;
-            user-select: none;
-        `;
+        // Use unified HUD buttons (created by _createDevHUD)
+        const btnSave = this._devHUD.btnSave;
+        const btnLoad = this._devHUD.btnLoad;
+        if (!btnSave || !btnLoad) return;
 
-        // HUD structure with buttons
-        hud.innerHTML = `
-            <div style="margin-bottom:6px;color:#0f0;">DEV SAVE/LOAD</div>
-            <div style="display:flex;gap:8px;margin-bottom:6px;">
-                <button id="r011-btn-save" style="
-                    background:#1a1;color:#fff;border:none;padding:4px 12px;
-                    border-radius:3px;cursor:pointer;font-family:monospace;font-size:12px;
-                ">Save</button>
-                <button id="r011-btn-load" style="
-                    background:#17a;color:#fff;border:none;padding:4px 12px;
-                    border-radius:3px;cursor:pointer;font-family:monospace;font-size:12px;
-                ">Load</button>
-            </div>
-            <div id="r011-status" style="color:#888;font-size:11px;">ready</div>
-        `;
-        document.body.appendChild(hud);
-
-        const statusEl = document.getElementById('r011-status');
-        const btnSave = document.getElementById('r011-btn-save');
-        const btnLoad = document.getElementById('r011-btn-load');
-
-        // Update status line (persistent, no timeout reset)
+        // Update status uses unified HUD method
         const showStatus = (msg, isError = false) => {
-            statusEl.style.color = isError ? '#f44' : '#0f0';
-            statusEl.textContent = msg;
+            this._updateDBStatus(msg, isError);
         };
 
         // Create adapter wrapper for SaveManager (maps to global functions)
@@ -2890,10 +2973,14 @@ export class Game {
             const result = mgr.save('quicksave');
             if (result.success) {
                 const tick = this.simLoop.tickCount;
-                showStatus(`saved at tick ${tick}`);
-                console.log(`[R011] Saved quicksave at tick ${tick}`);
+                // Try to get save size from localStorage
+                const saveData = localStorage.getItem('asterobia_quicksave');
+                const bytes = saveData ? saveData.length : 0;
+                const kb = (bytes / 1024).toFixed(1);
+                showStatus(`SAVE OK t:${tick} ${kb}KB`);
+                console.log(`[R011] Saved quicksave at tick ${tick} (${kb}KB)`);
             } else {
-                showStatus(`save failed: ${result.error}`, true);
+                showStatus(`SAVE FAIL: ${result.error}`, true);
                 console.error(`[R011] Save failed: ${result.error}`);
             }
         };
@@ -2904,10 +2991,13 @@ export class Game {
             const result = mgr.load('quicksave');
             if (result.success) {
                 const tick = this.simLoop.tickCount;
-                showStatus(`loaded at tick ${tick}`);
-                console.log(`[R011] Loaded quicksave at tick ${tick}`);
+                const saveData = localStorage.getItem('asterobia_quicksave');
+                const bytes = saveData ? saveData.length : 0;
+                const kb = (bytes / 1024).toFixed(1);
+                showStatus(`LOAD OK t:${tick} ${kb}KB`);
+                console.log(`[R011] Loaded quicksave at tick ${tick} (${kb}KB)`);
             } else {
-                showStatus(`load failed: ${result.error}`, true);
+                showStatus(`LOAD FAIL: ${result.error}`, true);
                 console.error(`[R011] Load failed: ${result.error}`);
             }
         };
