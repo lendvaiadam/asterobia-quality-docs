@@ -2699,15 +2699,49 @@ export class Game {
     }
 
     /**
-     * R011: Dev-only save/load hotkeys.
-     * Ctrl+Alt+S = Save quicksave to localStorage
-     * Ctrl+Alt+L = Load quicksave from localStorage
-     * Only active when ?dev=1 URL param is present.
+     * R011: Dev-only save/load hotkeys with on-screen HUD.
+     * F9 = Save quicksave, F10 = Load quicksave (primary, AltGr-safe)
+     * Ctrl+Alt+S/L = backup hotkeys
+     * Only active when ?dev=1 or #dev=1 is present.
      */
     _setupDevSaveLoad() {
-        // Guard: dev-only
-        const isDevMode = new URLSearchParams(window.location.search).has('dev');
+        // Guard: dev-only (check both querystring and hash)
+        const params = new URLSearchParams(window.location.search);
+        const hash = window.location.hash;
+        const isDevMode = params.has('dev') || hash.includes('dev=1');
         if (!isDevMode) return;
+
+        // Create on-screen HUD indicator (visible even when console logs suppressed)
+        const hud = document.createElement('div');
+        hud.id = 'r011-dev-hud';
+        hud.style.cssText = `
+            position: fixed;
+            top: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.75);
+            color: #0f0;
+            font-family: monospace;
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 4px;
+            z-index: 99999;
+            pointer-events: none;
+            white-space: pre;
+        `;
+        hud.textContent = 'DEV SAVE/LOAD: F9=Save  F10=Load';
+        document.body.appendChild(hud);
+
+        // Feedback display (updates HUD text temporarily)
+        let feedbackTimeout = null;
+        const showFeedback = (msg, isError = false) => {
+            hud.style.color = isError ? '#f44' : '#0f0';
+            hud.textContent = msg;
+            clearTimeout(feedbackTimeout);
+            feedbackTimeout = setTimeout(() => {
+                hud.style.color = '#0f0';
+                hud.textContent = 'DEV SAVE/LOAD: F9=Save  F10=Load';
+            }, 3000);
+        };
 
         // Create adapter wrapper for SaveManager (maps to global functions)
         const gameAdapter = {
@@ -2729,7 +2763,6 @@ export class Game {
         let saveManager = null;
         const getSaveManager = () => {
             if (!saveManager) {
-                // Sync adapter refs
                 gameAdapter.units = this.units;
                 gameAdapter.selectedUnit = this.selectedUnit;
                 saveManager = new SaveManager(gameAdapter, new LocalStorageAdapter());
@@ -2737,36 +2770,68 @@ export class Game {
             return saveManager;
         };
 
-        // Keyboard handler
-        document.addEventListener('keydown', (e) => {
-            // Ctrl+Alt+S = Save
-            if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 's') {
+        // Save action
+        const doSave = () => {
+            gameAdapter.units = this.units;
+            gameAdapter.selectedUnit = this.selectedUnit;
+            const mgr = getSaveManager();
+            const result = mgr.save('quicksave');
+            if (result.success) {
+                const tick = this.simLoop.tickCount;
+                showFeedback(`SAVED at tick ${tick}`);
+                console.log(`[R011] Saved quicksave at tick ${tick}`);
+            } else {
+                showFeedback(`SAVE FAILED: ${result.error}`, true);
+                console.error(`[R011] Save failed: ${result.error}`);
+            }
+        };
+
+        // Load action
+        const doLoad = () => {
+            const mgr = getSaveManager();
+            const result = mgr.load('quicksave');
+            if (result.success) {
+                const tick = this.simLoop.tickCount;
+                showFeedback(`LOADED at tick ${tick}`);
+                console.log(`[R011] Loaded quicksave at tick ${tick}`);
+            } else {
+                showFeedback(`LOAD FAILED: ${result.error}`, true);
+                console.error(`[R011] Load failed: ${result.error}`);
+            }
+        };
+
+        // Window-level keyboard handler (works regardless of canvas focus)
+        window.addEventListener('keydown', (e) => {
+            // F9 = Save (primary, AltGr-safe)
+            if (e.key === 'F9') {
                 e.preventDefault();
-                gameAdapter.units = this.units;
-                gameAdapter.selectedUnit = this.selectedUnit;
-                const mgr = getSaveManager();
-                const result = mgr.save('quicksave');
-                if (result.success) {
-                    console.log(`[R011] Saved quicksave at tick ${this.simLoop.tickCount}`);
-                } else {
-                    console.error(`[R011] Save failed: ${result.error}`);
-                }
+                doSave();
+                return;
             }
 
-            // Ctrl+Alt+L = Load
+            // F10 = Load (primary, AltGr-safe)
+            if (e.key === 'F10') {
+                e.preventDefault();
+                doLoad();
+                return;
+            }
+
+            // Ctrl+Alt+S = Save (backup)
+            if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                doSave();
+                return;
+            }
+
+            // Ctrl+Alt+L = Load (backup)
             if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'l') {
                 e.preventDefault();
-                const mgr = getSaveManager();
-                const result = mgr.load('quicksave');
-                if (result.success) {
-                    console.log(`[R011] Loaded quicksave at tick ${this.simLoop.tickCount}`);
-                } else {
-                    console.error(`[R011] Load failed: ${result.error}`);
-                }
+                doLoad();
+                return;
             }
         });
 
-        console.log('[R011] Dev save/load enabled: Ctrl+Alt+S=Save, Ctrl+Alt+L=Load');
+        console.log('[R011] Dev save/load enabled: F9=Save, F10=Load (or Ctrl+Alt+S/L)');
     }
 
     /**
