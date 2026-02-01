@@ -1,12 +1,14 @@
 ---BEGIN-PAYLOAD---
 
 # START HERE — Asterobia Control Entry Point (Stable)
+
 This file is the single entrypoint link you can give to any AI (ChatGPT, Antigravity Gemini, Claude, Claude Code).
 It contains stable rules, roles, and pointers to where everything lives.
 
 ---
 
 ## What this project is
+
 Asterobia/Asterobia is a strategy/simulation game project.
 Current engineering priority: Refactor toward Phase 0 “Netcode Readiness” (host-authoritative, deterministic, backend-ready).
 
@@ -15,6 +17,7 @@ Current engineering priority: Refactor toward Phase 0 “Netcode Readiness” (h
 ## Roles (who does what)
 
 ### Ádám (Human Owner / Router)
+
 - Proposes ideas in Hungarian.
 - Reads HU impact/consequence notes and decides priorities/scope.
 - Relays English prompts between AIs (copy/paste).
@@ -22,12 +25,14 @@ Current engineering priority: Refactor toward Phase 0 “Netcode Readiness” (h
 - Approves acceptance decisions (PASS/FAIL); agents perform merges after explicit approval.
 
 ### Antigravity (Gemini) — Repo Operator / Integrator / Quality Gatekeeper
+
 - **Repo Operator**: PR packaging, releases, git operations, doc updates.
 - **Integrator**: Reviews Claude's code, runs compliance checks (determinism, sizing), manages the merge process.
 - **Quality**: Enforces gates, rollbacks, and delivers evidence (commit SHA, RAW links).
 - **Escalation Rule**: If a PR is risky/complex → Claude codes, Antigravity reviews/packages. If mechanical → Antigravity may code.
 
 ### Tools / Workflow / How we work
+
 - **Source of Truth**: `docs/START_HERE.md` (this file)
 - **Work Tracking**: `docs/STATUS_WALKTHROUGH.md`
 - **Bug Tracking**: `docs/BUGLIST.md`
@@ -37,11 +42,13 @@ Current engineering priority: Refactor toward Phase 0 “Netcode Readiness” (h
 - **R013 Multiplayer Spec**: `docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md` (Host Authority Handshake)
 
 ### Claude / Claude Code — Coder-of-Remember
+
 - **Primary Coder**: Implements complex features and core systems.
 - **Planner**: Authors concrete plan packages and PR sequences.
 - **Focus**: Pure implementation velocity within the constraints set by Antigravity.
 
 ### ChatGPT — Spec Guardian & Prompt Writer
+
 - Produces prompts for Claude and Antigravity.
 - Read-only on GitHub; requests doc edits via Antigravity using exact patches.
 
@@ -53,12 +60,14 @@ Current engineering priority: Refactor toward Phase 0 “Netcode Readiness” (h
   https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/CHATGPT_OPENING_PACK.md
 
 **Fresh ChatGPT session procedure**
+
 1) ChatGPT reads START_HERE.
 2) ChatGPT opens CHATGPT_OPENING_PACK.md.
 3) ChatGPT pastes the “COPY/PASTE INTO A NEW CHAT” block into the chat for Ádám.
 4) Ádám copies that exact block and pastes it back as the next user message (so the full file library is present in the conversation).
 
 **New file announcement rule (binding)**
+
 If an agent creates a new repo file that ChatGPT must read and it is not yet listed in CHATGPT_OPENING_PACK.md, the creator MUST:
 - Send the RAW link (commit-SHA RAW if not on main) + 1-line purpose via Ádám in chat,
 - Update CHATGPT_OPENING_PACK.md to include it,
@@ -67,6 +76,7 @@ If an agent creates a new repo file that ChatGPT must read and it is not yet lis
 **Payload integrity rules (binding)**: See `docs/NOTES_CHATGPT.md` for BEGIN/END markers, chunking, and 1-payload-per-message requirements.
 
 ## FIRST WORK PACKAGE — FULL MASTER DEVELOPMENT PLAN (BINDING)
+
 Before any “first steps”, PR sequencing, or Phase 0 execution planning:
 1) **Antigravity** and **Claude Code** MUST read **ALL** available project materials:
    - every `*.md` in the repo (docs/, quality/, publish/ snapshots, baseline/ where relevant)
@@ -84,17 +94,20 @@ Before any “first steps”, PR sequencing, or Phase 0 execution planning:
 Only after both Master Plans exist and are synthesized/approved do we request PR-by-PR plans.
 
 ## Fresh Session Bootstrap (BINDING)
+
 > **On a fresh session:** DO NOT ask questions. First read the Required Reading Set below. Then open `docs/STATUS_WALKTHROUGH.md` and execute **## NOW**. Ask only if a required link/input is missing.
 >
 > **NOTE (2026-01-29):** The "Request Master Plan" phase is OVER. Master Plan v2 is merged. Do NOT generate new plans. Execute the existing one.
 
 ### Required Reading Set (BINDING)
+
 1) `docs/STATUS_WALKTHROUGH.md` (execute ## NOW after reading)
 2) `docs/IMPLEMENTATION_GATES.md`
 3) `docs/CANONICAL_SOURCES_INDEX.md` (use the “Absolute Raw Links” section if raw-view breaks relative links)
 4) `docs/RELEASE_PLAN.md`
 
 ### Canonical Spec Sources (BINDING)
+
 You MUST read these binding specs from `publish/quality_docs_snapshot_2026-01-14/spec_sources/`:
 - `ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md`
 - `ASTEROBIA_CANONICAL_REFACTOR_PROCESS_2026-01-13.md`
@@ -112,12 +125,14 @@ You MUST read these binding specs from `publish/quality_docs_snapshot_2026-01-14
   - `ASTEROBIA_CANONICAL_FEATURE_UNIT_DESIGNER_2026-01-18.md`
 
 ### Read-only / Write protocol (BINDING)
+
 - **ChatGPT**: GitHub read-only; any file edits must be executed by Antigravity via commit+push, returning commit hash + raw links.
 - **Claude Code**: May commit code; Antigravity may commit docs; all changes must be linked back.
 
 ---
 
 ## Write-access rule (Binding)
+
 - ChatGPT is read-only on GitHub files.
 - If ChatGPT wants to update docs (STATUS_WALKTHROUGH / MAILBOX / NOTES_* / START_HERE), it must:
   1) propose an exact patch (insert/replace lines),
@@ -128,6 +143,7 @@ You MUST read these binding specs from `publish/quality_docs_snapshot_2026-01-14
 ---
 
 ## Workflow (how we work)
+
 1. **Plan Phase**: Claude authors Plan/PR packages. Antigravity audits.
 2. **Implementation**: Claude (default) or Antigravity (if mechanical) executes implementation.
 3. **Integration**: Antigravity enforces quality gates, runs tests, and packages the Commit.
@@ -138,6 +154,7 @@ You MUST read these binding specs from `publish/quality_docs_snapshot_2026-01-14
 - **Mailbox Restriction**: MAILBOX is agent-to-agent output sync only. Never instruct Ádám to read it. Delivery of prompts/info to other agents must happen via Ádám in chat (paste-ready), with rationale.
 
 ## Language Rules (Binding)
+
 - Do NOT add Hungarian translations to coding prompts. English-only for inter-agent coding prompts. Hungarian is only for Ádám-facing summaries and HU test scenarios.
 - **Planning Protocol (Binding)**: [docs/PLANNING_PROTOCOL.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/PLANNING_PROTOCOL.md). All implementation work must follow this.
 - **Fresh session rule (binding)**: Open [docs/STATUS_WALKTHROUGH.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/STATUS_WALKTHROUGH.md) and follow the **## NOW** section before asking any questions.
@@ -145,7 +162,9 @@ You MUST read these binding specs from `publish/quality_docs_snapshot_2026-01-14
 - **Bugbook Rule**: When a recurring issue is discovered/fixed twice: add it to [BUGBOOK](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/BUGBOOK.md).
 
 ---
+
 ## VISIBILITY & PUSH GATE (BINDING)
+
 - **Any EDIT REPO task MUST end with commit+push to GitHub (branch OK)**
 - **“Done” requires commit SHA + commit-SHA RAW links for all changed files**
 - **Local-only changes are not acceptable**; if push fails, STOP and paste exact error.
@@ -153,12 +172,15 @@ You MUST read these binding specs from `publish/quality_docs_snapshot_2026-01-14
 - **No SYNC = ChatGPT must assume the repo is unchanged.**
 
 ---
+
 ## AUTO-SYNC DEFAULT (BINDING)
+
 - If you created/edited any repo file as part of a task, you MUST push to GitHub without being asked:
   - Push a branch (WIP is OK) and provide branch + commit SHA + commit-SHA RAW links for all changed/created files.
 - “SYNC STATUS: LOCAL ONLY” is allowed ONLY if you did NOT modify any repo files.
 
 ## TEST SCENARIO (HU) (BINDING)
+
 Whenever an agent claims `READY FOR REVIEW`, they MUST include a compact Hungarian test scenario:
 
 - Teszt célja (1 sor)
@@ -169,6 +191,7 @@ Whenever an agent claims `READY FOR REVIEW`, they MUST include a compact Hungari
 If no test surface exists: write “N/A (no runtime impact)” + 1-line reason.
 
 ## IDEA INTAKE & TRIAGE (BINDING)
+
 When Ádám proposes a new idea, the receiving agent MUST:
 1) Classify urgency: NOW | SOON | LATER
 2) Assess impact: S | M | L
@@ -179,19 +202,23 @@ When Ádám proposes a new idea, the receiving agent MUST:
 5) If “will definitely be needed later”: add a “Forward-compat constraint” so current work avoids rework.
 
 ## BINDING: NO FORCE PUSH
+
 Direct pushes to `main` are allowed ONLY for document updates by trusted agents.
 **FORCE PUSH TO MAIN IS STRICTLY FORBIDDEN.**
 All significant changes must come via Pull Request merge.
 Recurrence of missing files due to overwrite will result in immediate revocation of direct push privileges.
 
 ## CHANGE BROADCAST (BINDING)
+
 Every agent reply must include a 1–3 bullet broadcast:
 - What changed (files / decisions)
 - What is waiting on whom
 - What to test (if READY FOR REVIEW)
 
 ---
+
 ## Versioning & Rollback (Binding)
+
 - **Policy**: [VERSIONING_ROLLBACK.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/VERSIONING_ROLLBACK.md)
 - **Live UI**: [play.asterobia.com](https://play.asterobia.com)
 - **Mailbox Rule**: The Mailbox is for **agent-to-agent info sync** only. All strategy decisions & instructions flow via Ádám.
@@ -199,6 +226,7 @@ Every agent reply must include a 1–3 bullet broadcast:
 ---
 
 ## Release System (Binding)
+
 - **Rules**: [RELEASE_SYSTEM.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/RELEASE_SYSTEM.md)
 - **Plan**: [RELEASE_PLAN.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/RELEASE_PLAN.md) (10+ Step-by-step milestones)
 - **Registry**: [public/versions.json](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/public/versions.json)
@@ -213,9 +241,11 @@ Every agent reply must include a 1–3 bullet broadcast:
 > Canonical Sources Index includes an "Absolute Raw Links" section for raw-view compatibility.
 
 ### Canonical “stable index”
+
 - https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/baseline/pre-claude-stable/docs/CANONICAL_SOURCES_INDEX.md
 
 ### Live status (what is happening now)
+
 - https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/STATUS_WALKTHROUGH.md
 - **Reality Spec**: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/CURRENT_SYSTEM_SPEC.md
 - **Bugbook**: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/BUGBOOK.md
@@ -223,19 +253,23 @@ Every agent reply must include a 1–3 bullet broadcast:
 - **ChatGPT Opening Pack**: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/CHATGPT_OPENING_PACK.md
 
 ### Cross-agent requests / waiting items
+
 - https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/MAILBOX.md
 
 ### Agent notes
+
 - Claude: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/NOTES_CLAUDE.md
 - Antigravity: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/NOTES_ANTIGRAVITY.md
 - ChatGPT: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/NOTES_CHATGPT.md
 
 ### Verification gates
+
 - https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/IMPLEMENTATION_GATES.md
 
 ---
 
 ## How to resume in a NEW chat window (2 minutes)
+
 1) Open this file (START_HERE).
 2) Open CHATGPT_OPENING_PACK.md and paste the COPY/PASTE block.
 3) Open STATUS_WALKTHROUGH + MAILBOX.
