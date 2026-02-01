@@ -1,4 +1,4 @@
-﻿# MAINTENANCE RULES (BINDING)
+# MAINTENANCE RULES (BINDING)
 **Current Phase:** POST-PLAN EXECUTION (Master Plan v2 Merged)
 
 **Immediate Context:**

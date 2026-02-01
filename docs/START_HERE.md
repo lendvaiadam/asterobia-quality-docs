@@ -1,4 +1,4 @@
-﻿---BEGIN-PAYLOAD---
+---BEGIN-PAYLOAD---
 
 # START HERE — Asterobia Control Entry Point (Stable)
 This file is the single entrypoint link you can give to any AI (ChatGPT, Antigravity Gemini, Claude, Claude Code).

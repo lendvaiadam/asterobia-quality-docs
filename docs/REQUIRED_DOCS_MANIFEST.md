@@ -1,4 +1,4 @@
-﻿---BEGIN-PAYLOAD---
+---BEGIN-PAYLOAD---
 
 # Required Documentation Manifest
 
