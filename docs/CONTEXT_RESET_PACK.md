@@ -11,21 +11,21 @@
     - `R010` (Determinism): DONE
     - `R011` (Persistence): DONE
     - `R012` (Supabase HUD/Config): DONE (Verified `savepoint/r012-hud-fix-verified`)
-    - `R013` (Specs & Schema): DOCS DONE (Merged `savepoint/r013-docs-pack-merged`)
+    - `R013` (Specs & Schema): DOCS DONE (Merged `savepoint/docs-repair`)
 - **NEXT UP**: **Release 013 Implementation** (Host-Authority Handshake + Command Batching).
 
 ---
 
 ## 2. Known-Good Pointers (Source of Truth)
-- **Repo Head**: `main` (Latest SHA: `6893f20`)
+- **Repo Head**: `main` (Use latest SHA)
 - **Safe Savepoints**:
-    1. `savepoint/r013-docs-pack-merged` (`6893f20`): R13 Specs + Wiring.
-    2. `savepoint/r012-hud-fix-verified` (`80b511a`): Working R012 HUD, no syntax error.
+    1. `savepoint/docs-repair` (Latest): Fixed Docs + R13 Specs.
+    2. `savepoint/r012-hud-fix-verified`: Working R012 HUD.
 - **Key Specs (Binding)**:
-    - [R012_SUPABASE_SETUP.md](file:///d:/___AI_PROJECTEK___/AI_GAME/_GAME_3_/docs/specs/R012_SUPABASE_SETUP.md)
-    - [R012_CONFIG_AND_SECRETS_STRATEGY.md](file:///d:/___AI_PROJECTEK___/AI_GAME/_GAME_3_/docs/specs/R012_CONFIG_AND_SECRETS_STRATEGY.md)
-    - [R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md](file:///d:/___AI_PROJECTEK___/AI_GAME/_GAME_3_/docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md)
-    - [PERSISTENT_WORLD_STATE_NOTES.md](file:///d:/___AI_PROJECTEK___/AI_GAME/_GAME_3_/docs/specs/PERSISTENT_WORLD_STATE_NOTES.md)
+    - [R012_SUPABASE_SETUP.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/specs/R012_SUPABASE_SETUP.md)
+    - [R012_CONFIG_AND_SECRETS_STRATEGY.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/specs/R012_CONFIG_AND_SECRETS_STRATEGY.md)
+    - [R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md)
+    - [PERSISTENT_WORLD_STATE_NOTES.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/specs/PERSISTENT_WORLD_STATE_NOTES.md)
 
 ---
 
@@ -50,7 +50,7 @@
 ---
 
 ## 5. Resume in 5 Minutes
-1.  **Open**: [docs/START_HERE.md](file:///d:/___AI_PROJECTEK___/AI_GAME/_GAME_3_/docs/START_HERE.md) & [docs/STATUS_WALKTHROUGH.md](file:///d:/___AI_PROJECTEK___/AI_GAME/_GAME_3_/docs/STATUS_WALKTHROUGH.md).
+1.  **Open**: [docs/START_HERE.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/START_HERE.md) & [docs/STATUS_WALKTHROUGH.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/STATUS_WALKTHROUGH.md).
 2.  **Run Server**: `npx http-server . -c-1 -p 8081`
 3.  **Golden URL**: [http://localhost:8081/game.html?dev=1&net=supabase](http://localhost:8081/game.html?dev=1&net=supabase)
 4.  **HU Checks**:

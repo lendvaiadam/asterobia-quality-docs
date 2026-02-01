@@ -37,7 +37,7 @@ Multiplayer target:
 - **Branch**: `work/r002-command-buffer`
 - **Commits**: `2f3a1d0..9a8b11e` (9 commits)
 - **Head**: `9a8b11e` r002: add CommandDebugOverlay for queue inspection
-- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia/work/r002-command-buffer/src/SimCore/commands/index.js
+- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/work/r002-command-buffer/src/SimCore/commands/index.js
 - **HU Test**: PASS (2026-01-29)
   - Command flow: tick/seq stamping verified (no nulls)
   - Determinism tests: 5/5 PASS
@@ -50,7 +50,7 @@ Multiplayer target:
 - **Branch**: `work/r003-deterministic-ids` (merged to main)
 - **Commits**: `8ed2aba..21750f4`
 - **Head**: `21750f4` r003: implement deterministic entity ID generation
-- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia/work/r003-deterministic-ids/src/SimCore/runtime/IdGenerator.js
+- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/work/r003-deterministic-ids/src/SimCore/runtime/IdGenerator.js
 - **HU Test**: PASS (2026-01-29)
   - `game.units.map(u => u.id)` -> integers confirmed
   - `idGenerator.test.js` -> 5/5 PASS
@@ -61,7 +61,7 @@ Multiplayer target:
 - **Branch**: `work/r004-seeded-rng` (merged to main)
 - **Commits**: `dfb8043..8a2cc60`
 - **Head**: `8a2cc60` r004: implement seeded PRNG (Mulberry32) for determinism
-- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia/work/r004-seeded-rng/src/SimCore/runtime/SeededRNG.js
+- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/work/r004-seeded-rng/src/SimCore/runtime/SeededRNG.js
 - **HU Test**: PASS (2026-01-29)
   - `seededRNG.test.js` -> 8/8 PASS
   - `TypeBlueprint` fallback patched to use SeededRNG (deterministic)
@@ -82,7 +82,7 @@ Multiplayer target:
 - **Branch**: `work/r005-state-surface` (merged to main)
 - **Commits**: `76eb176`
 - **Head**: `76eb176` r005: implement authoritative StateSurface and serialization
-- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia/work/r005-state-surface/src/SimCore/runtime/StateSurface.js
+- **Raw link**: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/work/r005-state-surface/src/SimCore/runtime/StateSurface.js
 - **HU Test**: PASS (2026-01-29)
   - `stateSurface.test.js` -> 8/8 PASS
   - Determinism Audit: PASS (No `Math.random` / `Date.now`, strict `toFixed(6)` precision)
@@ -129,11 +129,6 @@ Multiplayer target:
 - **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
 - **Status**: **Ready for Implementation** (Docs Merged).
 
-### Release 013: Multiplayer Handshake & Host Authority (Specs Ready)
-- **Objective**: Implement the Host-Authority Handshake protocol.
-- **Spec**: `docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md`
-- **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
-- **Status**: **Ready for Implementation** (Docs Merged).
 
 ---
 

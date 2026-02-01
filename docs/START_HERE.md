@@ -211,7 +211,7 @@ Every agent reply must include a 1–3 bullet broadcast:
 > Canonical Sources Index includes an "Absolute Raw Links" section for raw-view compatibility.
 
 ### Canonical “stable index”
-- https://raw.githubusercontent.com/lendvaiadam/asterobia/baseline/pre-claude-stable/docs/CANONICAL_SOURCES_INDEX.md
+- https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/baseline/pre-claude-stable/docs/CANONICAL_SOURCES_INDEX.md
 
 ### Live status (what is happening now)
 - https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/STATUS_WALKTHROUGH.md
