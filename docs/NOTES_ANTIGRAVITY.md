@@ -188,3 +188,7 @@ Default output: MD files under /quality or /docs.
 
 
 
+
+### 2026-02-01: Bootstrap Cleanup
+- **Action**: Deleted temporary `docs/readable-export-ee26077` branch (readable export).
+- **Status**: Not merged to main.
