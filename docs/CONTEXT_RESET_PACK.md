@@ -1,3 +1,5 @@
+---BEGIN-PAYLOAD---
+
 # CONTEXT RESET PACK
 
 **Purpose**: Allows any AI agent (Antigravity, Claude, ChatGPT) to instantly resume work with full context.
@@ -11,7 +13,7 @@
     - `R010` (Determinism): DONE
     - `R011` (Persistence): DONE
     - `R012` (Supabase HUD/Config): DONE (Verified `savepoint/r012-hud-fix-verified`)
-    - `R013` (Specs & Schema): DOCS DONE (Merged `savepoint/docs-repair`)
+    - `R013` (Specs & Schema): DOCS DONE (Merged `savepoint/docs-opening-pack-fixed`)
 - **NEXT UP**: **Release 013 Implementation** (Host-Authority Handshake + Command Batching).
 
 ---
@@ -73,3 +75,5 @@
 
 ---
 **Last Updated**: 2026-02-01
+
+---END-PAYLOAD---

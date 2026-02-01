@@ -1,4 +1,6 @@
-﻿# Required Documentation Manifest
+﻿---BEGIN-PAYLOAD---
+
+# Required Documentation Manifest
 
 > [!IMPORTANT]
 > This file serves as the SOURCE OF TRUTH for document existence. 
@@ -21,3 +23,5 @@
 ## Critical Specs (spec_sources/)
 - [x] [spec_sources/ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md)
 - [x] [spec_sources/ASTEROBIA_CANONICAL_GRFDTRDPU_SYSTEM_2026-01-13.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/spec_sources/ASTEROBIA_CANONICAL_GRFDTRDPU_SYSTEM_2026-01-13.md)
+
+---END-PAYLOAD---

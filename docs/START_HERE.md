@@ -1,4 +1,6 @@
-﻿# START HERE — Asterobia Control Entry Point (Stable)
+﻿---BEGIN-PAYLOAD---
+
+# START HERE — Asterobia Control Entry Point (Stable)
 This file is the single entrypoint link you can give to any AI (ChatGPT, Antigravity Gemini, Claude, Claude Code).
 It contains stable rules, roles, and pointers to where everything lives.
 
@@ -132,7 +134,7 @@ You MUST read these binding specs from `publish/quality_docs_snapshot_2026-01-14
 4. **Approval**: Ádám provides PASS/FAIL.
 - Agents communicate through Ádám (copy/paste relay).
 - Canonical docs are binding. If anything conflicts: Canonical > Audit notes > Chat.
-- Implementation is done as small PR branches (prX-...). Merged to main by Antigravity or the implementing agent AFTER Ádám’s- Implementation is done as small PR branches (prX-...). Merged to main by Antigravity or the implementing agent AFTER Ádám’s explicit PASS/approval in chat. Ádám never performs Git operations.
+- Implementation is done as small PR branches (prX-...). Merged to main by Antigravity or the implementing agent AFTER Ádám’s explicit PASS/approval in chat. Ádám never performs Git operations.
 - **Mailbox Restriction**: MAILBOX is agent-to-agent output sync only. Never instruct Ádám to read it. Delivery of prompts/info to other agents must happen via Ádám in chat (paste-ready), with rationale.
 
 ## Language Rules (Binding)
@@ -239,3 +241,5 @@ Every agent reply must include a 1–3 bullet broadcast:
 3) Open STATUS_WALKTHROUGH + MAILBOX.
 3) Open your agent NOTES file.
 4) Continue from the top “NOW” task and report blockers via Ádám.
+
+---END-PAYLOAD---

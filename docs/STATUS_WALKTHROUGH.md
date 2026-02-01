@@ -1,3 +1,5 @@
+---BEGIN-PAYLOAD---
+
 # STATUS_WALKTHROUGH — Live Project State
 Purpose: This is the living walkthrough of "where we are now", what is next, and who is doing what.
 Stable rules live in docs/START_HERE.md. Canonical specs are indexed elsewhere.
@@ -110,3 +112,5 @@ Multiplayer target:
 ## Release Registry
 - **Manifest**: [public/versions.json](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/public/versions.json)
 - **Release Plan**: [docs/RELEASE_PLAN.md](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/docs/RELEASE_PLAN.md)
+
+---END-PAYLOAD---

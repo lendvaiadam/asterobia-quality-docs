@@ -14,7 +14,7 @@
 
 TE VAGY A ChatGPT — Spec Guardian & Prompt Writer!
 
----BEGIN-OPENING-PAYLOAD---
+---BEGIN-PAYLOAD---
 
 # ASTEROBIA: HANDOFF SNAPSHOT (2026-02-01)
 *Auto-generated Context & Workflow Starter*
@@ -78,4 +78,4 @@ Example: `[Source: START_HERE.md (read)]`
 - src/Main.js: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/src/Main.js
 - package.json: https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/main/package.json
 
----END-OPENING-PAYLOAD---
+---END-PAYLOAD---
