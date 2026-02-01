@@ -169,3 +169,12 @@ Default output: MD files under /quality or /docs.
     - 2. Dev HUD restricted to `?dev=1` or `#dev=1`.
 - **Rollback**: `git checkout savepoint/r012-hud-fix-verified`
 
+### 2026-02-01: Docs Opening Pack Readability Fix
+- **Context**: User requested improved readability for ChatGPT bootstrapping.
+- **Action**:
+  - Rewrote `docs/CHATGPT_OPENING_PACK.md` with `---BEGIN-PAYLOAD---` markers and stricter formatting.
+  - Added "Consultation Round (Mandatory)" rule.
+  - Refactored `docs/STATUS_WALKTHROUGH.md` to clear `## NOW` and move completed items to "Release Status".
+- **Ref**: `savepoint/docs-opening-pack-fixed` (`41f8475`)
+
+
