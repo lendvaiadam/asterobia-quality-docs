@@ -36,7 +36,7 @@
 
 ## 6. Pre-Issue Gate (Orchestrator Check)
 - [ ] **De-Dup**: Checked `docs/STATUS_WALKTHROUGH.md` and `git log`?
-- [ ] **CTO Ping**: Was "Ping #1" approved?
+- [ ] **Double-Check**: Asked 5-8 questions? Received Antigravity ACK?
 
 ## 7. Integration Gate (Post-Work)
 - [ ] **HU Test**: Output `[ROUTING]` with HU Scenario?

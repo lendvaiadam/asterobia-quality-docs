@@ -118,11 +118,18 @@ Workers/Orchestrator MUST pause and summon Antigravity if:
 
 ## 4. The "Work Order" Protocol (Orchestrator -> Worker)
 
-### 4.A Pre-Issue Gate (Mandatory De-Dup)
+### 4.A Pre-Issue Gate (Mandatory Checks)
 **Before issuing ANY Work Order**, Orchestrator MUST:
-1.  **Check Status**: Read `docs/STATUS_WALKTHROUGH.md`. Is this task marked DONE?
-2.  **Check Git**: Fetch and check recent commits. `git log --grep="WO-XXX"`
-3.  **Result**: If evidence of completion exists, do **NOT** re-issue. Skip to Integration/verification.
+1.  **De-Dup Check**: Read `docs/STATUS_WALKTHROUGH.md` & `git log`. If done, SKIP.
+2.  **Double-Check (CTO Ping #1)**:
+    - **Trigger**: Before finalizing the plan.
+    - **Action**: Ask Antigravity **5–8 targeted questions** regarding:
+      - *Best practices / Patterns*
+      - *Performance risks*
+      - *Determinism constraints*
+      - *Documentation alignment*
+    - **Wait**: Do not proceed until Antigravity responds with `[ACK]`.
+3.  **Result**: Proceed only after De-Dup PASS and Antigravity ACK.
 
 ### 4.0 Parallel Execution Policy (Safe-by-Default)
 

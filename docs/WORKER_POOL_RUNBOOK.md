@@ -122,8 +122,8 @@ You are the **Claude Orchestrator** (Terminal 1): Manager, Planner, Integrator.
 2. **GATE: De-Dup Check**: Read `docs/STATUS_WALKTHROUGH.md` & `git log`. If done, SKIP to Gate 7.
 3. **Draft** a Work Order using `docs/templates/WORK_ORDER_TEMPLATE.md` including **Required Skills**.
 4. **Analyze Skills**: Consult `docs/SKILLS_GOVERNANCE.md` and list required Skill IDs (e.g. `skill-input-system`) in the Work Order.
-4. **Perform CTO Ping #1 (Pre-Issue)**: review via `[ROUTING]`.
-5. **Assign** Work Order (Parallel Policy applies).
+5. **Double-Check (CTO Ping #1)**: Ask Antigravity 5-8 questions about risks/patterns via `[ROUTING]`. Wait for ACK.
+6. **Assign** Work Order (Parallel Policy applies).
 6. **Perform CTO Ping #2 (Pre-Integration)**: Before merging worker branches.
 7. **Track** & **Review** (Production-Ready Gate).
 

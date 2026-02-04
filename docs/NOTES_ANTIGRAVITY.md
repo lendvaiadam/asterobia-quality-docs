@@ -6,7 +6,10 @@
 - **HU Test**: Mandatory after Integration Merge.
 - **Skills**: Mandatory `Required Skills` block in WO.
 - **Docs**: Added Supabase "Anon Auth" troubleshooting & refined M04 verification criteria.
-- **Status**: M04 CLOSED (HU-TEST PASS). Verified via `_debugAnnounceTickCount` increment. Code SHA: `df1ff0e`.
+- **Status**: M04 CLOSED (HU-TEST PASS). Verified via `_debugAnnounceTickCount` increment.
+- **Gate**: Added "Pre-WO Double-Check" (5-8 Questions Rule) to Workflow & Runbook. (SHA: 6ec2f4c)
+
+
 
 
 
