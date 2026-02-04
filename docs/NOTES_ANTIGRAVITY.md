@@ -6,7 +6,8 @@
 - **HU Test**: Mandatory after Integration Merge.
 - **Skills**: Mandatory `Required Skills` block in WO.
 - **Docs**: Added Supabase "Anon Auth" troubleshooting & refined M04 verification criteria.
-- **Status**: M04 blocked on "Approved Evidence Method" (Log vs Debug Counter).
+- **Status**: M04 CLOSED (HU-TEST PASS). Verified via `_debugAnnounceTickCount` increment. Code SHA: `df1ff0e`.
+
 
 
 ## Output Discipline (MANDATORY)
