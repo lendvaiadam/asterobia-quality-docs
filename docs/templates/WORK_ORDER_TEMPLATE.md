@@ -5,6 +5,9 @@
 **Status**: [DRAFT / ISSUED / COMPLETE]
 **Parent Branch**: `work/WO-[ID]`
 **Worker Branch**: `work/WO-[ID]-[role_suffix]`
+**ACK Deadline**: [T+30m]
+**Progress Deadline**: [T+2h]
+
 
 ---
 

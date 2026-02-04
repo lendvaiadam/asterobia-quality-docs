@@ -170,6 +170,29 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
 2.  **Worker**: MUST ACK by confirming "Read loadout and [Skill Files]".
 3.  **Reject**: If Worker fails to ACK skills, Orchestrator REJECTS the handoff.
 
+### 4.C Worker Liveness / Progress Gate (Hard Gate)
+**Goal**: No "assumed" work. Explicit progress tracking only.
+
+1.  **Definitions**:
+    - **ASSIGNED**: Orchestrator issued `[ROUTING]`.
+    - **ACKED**: Worker replied with explicit ACK + Branch Name.
+    - **IN-FLIGHT**: Worker produced artifact (Commit SHA or File Path).
+
+2.  **Deadlines (Binding)**:
+    - **ACK Deadline**: 30 minutes after Assignment.
+    - **Progress Deadline**: 2 hours after Assignment (must show SHA or Staged File).
+
+3.  **Enforcement**:
+    - If **ACK missed**: Orchestrator runs "Status Inquiry". Status = `ASSIGNED (NO ACK)`.
+    - If **Progress missed**: Orchestrator runs "Status Inquiry". Re-assign or Block.
+    - **CRITICAL**: Orchestrator MUST NOT integrate or advance without valid Progress Artifacts.
+
+4.  **Status Inquiry Template**:
+    > 1. What are you currently working on?
+    > 2. What concrete output do you already have (commit SHA / file path)?
+    > 3. Are you blocked? If yes, on what?
+    > 4. What is the highest-value next task right now?
+
 ### 4.3 Worker Execution Protocol (BINDING)
 
 1.  **ACK**: Worker reads Header, verifies Role Registry, and confirms.
