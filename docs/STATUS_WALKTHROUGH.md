@@ -7,7 +7,7 @@
 ## 👷 Role Map (Active Workers)
 | Worker | Specialty | Branch | Work Order | Status |
 |---|---|---|---|---|
-| W1 | Backend | work/WO-R013-backend | WO-R013-M03 | **PENDING** |
+| W1 | Backend | work/WO-R013-backend | WO-R013-M04 | **PENDING** |
 | W2 | Frontend/UI | - | - | Idle |
 | W3 | QA/Test | - | - | Idle |
 | W4 | Refactor/Review | - | - | Idle |
@@ -43,9 +43,10 @@
 - **Objective**: Implement the Host-Authority Handshake protocol.
 - **Spec**: `docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md`
 - **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
-- **Completed**: M01 (Message Types), M02 (SessionState) — MERGED
-- **Current Step**: M03 (SessionManager Skeleton) — Worker (BE) pending
+- **Completed**: M01, M02, M03 (MessageTypes, SessionState, SessionManager) — MERGED
+- **Current Step**: M04 (Host Lobby + Announce) — Worker (BE) pending
 - **CTO Ping #1**: APPROVED (2026-02-04)
+- **Note**: Vitest not yet installed; tests written but cannot execute
 
 ---
 
