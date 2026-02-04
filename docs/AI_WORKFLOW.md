@@ -18,6 +18,17 @@ CONTEXT: <1 sentence why>
 [/ROUTING]
 ```
 
+### 0.b Context Threshold Rule (70k Tokens)
+**Trigger**: If Context > 70,000 tokens OR "High Context" warning appears.
+**Action**: Agent MUST output a Routing Block:
+```text
+[ROUTING]
+TO: Current Chat
+PASTE: /compact
+CONTEXT: Context threshold (70k) exceeded. Preventing brain fog.
+[/ROUTING]
+```
+
 ---
 
 ## 1. The Work Cycle
@@ -120,7 +131,8 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
 Every instruction from Orchestrator -> Worker MUST begin with:
 
 > "You are **[Role Name]**. Read `docs/ROLES_AND_AGENTS.md` **Role Registry** and follow it.
-> Your Registry Key is: `ROLES_[KEY]`."
+> Your Registry Key is: `ROLES_[KEY]`.
+> Required Skills: `[List from docs/SKILLS_GOVERNANCE.md]`."
 
 ### 4.3 Worker Execution Protocol (BINDING)
 
@@ -152,7 +164,24 @@ Every instruction from Orchestrator -> Worker MUST begin with:
 
 ---
 
-## 6. Quality Gates
+## 6. Production-Ready Review Gate (MANDATORY)
+
+**When**: Before "Ping #3 (Pre-Merge)".
+**Who**: Orchestrator.
+
+**Checklist**:
+1. **Determinism**: Does the change preserve simulation determinism?
+2. **Tests**: Are unit tests included and passing?
+3. **Observability**: Are errors logged correctly (no silent failures)?
+4. **Docs**: Is `docs/specs/` or `System Overview` updated?
+5. **Edge Cases**: Checked boundary conditions (empty lists, disconnects)?
+6. **Ops**: Any new Environment Variables or DB Migrations?
+
+**Output**: Orchestrator summarizes this checklist in the Handoff Note.
+
+---
+
+## 7. Quality Gates
 
 ---
 

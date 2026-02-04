@@ -50,7 +50,8 @@ CONTEXT: Assigning UI Task.
 
 **Exceptions**:
 - If an Agent seems stuck, ask: "Do you have a Routing Block for me?"
-- If `MAILBOX.md` is updated, the Orchestrator will notice periodically (or you can nudge it). You do NOT need to read Mailbox.
+- If Agent requests `/compact` (Context >70k), execute it immediately.
+- If `MAILBOX.md` is updated, the Orchestrator will notice periodically.
 
 ---
 

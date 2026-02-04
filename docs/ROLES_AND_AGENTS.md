@@ -81,6 +81,7 @@ graph TD
 ## 3. Role Registry (Binding)
 
 **Usage**: Agents MUST explicitly cite these keys when switching contexts.
+**Constraint**: All Roles MUST monitor context usage. If >70k, request `/compact`.
 
 ### Registry Key: `ROLES_ORCHESTRATOR`
 - **Role**: Technical Lead, Integrator, Planner.
