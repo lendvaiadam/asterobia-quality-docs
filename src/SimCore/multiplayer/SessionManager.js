@@ -134,6 +134,10 @@ export class SessionManager {
      */
     this.snapshotInterval = 10;
 
+    // M04 Debug: announce tick evidence (dev-only, no sim mutation)
+    this._debugAnnounceTickCount = 0;
+    this._debugLastAnnounceAt = null;
+
     // Bind methods for callbacks
     this._onTransportMessage = this._onTransportMessage.bind(this);
   }
@@ -203,6 +207,8 @@ export class SessionManager {
 
         // Start periodic announce (every 5 seconds)
         this.announceInterval = setInterval(() => {
+          this._debugAnnounceTickCount++;
+          this._debugLastAnnounceAt = Date.now();
           this.sendAnnounce().catch(err => {
             console.error('[SessionManager] Announce failed:', err);
           });
@@ -600,6 +606,22 @@ export class SessionManager {
    */
   getPlayers() {
     return this.state.players;
+  }
+
+  /**
+   * M04 HU-TEST: Get debug network status for manual verification.
+   * Dev-only, does not mutate sim state.
+   * @returns {Object}
+   */
+  getDebugNetStatus() {
+    return {
+      isHost: this.state.isHost(),
+      sessionName: this.sessionName,
+      transportType: this.transport ? this.transport.constructor.name : null,
+      announceIntervalActive: this.announceInterval !== null,
+      announceTickCount: this._debugAnnounceTickCount,
+      lastAnnounceAt: this._debugLastAnnounceAt
+    };
   }
 
   /**
