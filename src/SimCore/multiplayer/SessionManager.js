@@ -204,11 +204,19 @@ export class SessionManager {
 
         // Send immediate first announce
         await this.sendAnnounce();
+        // M04 debug evidence (dev-only)
+        if (this.game._isDevMode) {
+          this._debugAnnounceTickCount = 1;
+          this._debugLastAnnounceAt = Date.now();
+        }
 
         // Start periodic announce (every 5 seconds)
         this.announceInterval = setInterval(() => {
-          this._debugAnnounceTickCount++;
-          this._debugLastAnnounceAt = Date.now();
+          // M04 debug evidence (dev-only)
+          if (this.game._isDevMode) {
+            this._debugAnnounceTickCount++;
+            this._debugLastAnnounceAt = Date.now();
+          }
           this.sendAnnounce().catch(err => {
             console.error('[SessionManager] Announce failed:', err);
           });
