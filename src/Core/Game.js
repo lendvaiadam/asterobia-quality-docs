@@ -24,6 +24,7 @@ import { globalCommandQueue, CommandType } from '../SimCore/runtime/CommandQueue
 import { initializeTransport, SupabaseTransport } from '../SimCore/transport/index.js';
 import { SaveManager, MemoryStorageAdapter, LocalStorageAdapter, SupabaseStorageAdapter } from '../SimCore/persistence/index.js';
 import { serializeState } from '../SimCore/runtime/StateSurface.js';
+import { SessionManager } from '../SimCore/multiplayer/SessionManager.js';
 
 import { WaypointDebugOverlay } from '../UI/WaypointDebugOverlay.js';
 import { globalCommandDebugOverlay } from '../UI/CommandDebugOverlay.js';
@@ -131,6 +132,9 @@ export class Game {
         this.simLoop.onSimTick = (dt, tick) => this.simTick(dt, tick);
         // R008: Hook render callback for interpolation
         this.simLoop.onRender = (alpha) => this._applyInterpolatedRender(alpha);
+
+        // R013: Multiplayer session manager
+        this.sessionManager = new SessionManager(this);
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();
