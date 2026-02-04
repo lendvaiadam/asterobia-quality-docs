@@ -9,6 +9,10 @@
 - **Status**: M04 CLOSED (HU-TEST PASS). Verified via `_debugAnnounceTickCount` increment. Code SHA: `1d32fd3`.
 
 - **Gate**: Added "Pre-WO Double-Check" (5-8 Questions Rule) to Workflow & Runbook. (SHA: 6ec2f4c)
+- **Consultation**: R013-M05 (Guest Lobby) - Approved with explicit pruning/validation rules.
+- **Gate**: Added "Worker Liveness / Progress Gate" (ACK 30m / Progress 2h) to Workflow.
+
+
 
 
 

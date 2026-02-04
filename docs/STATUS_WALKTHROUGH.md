@@ -1,7 +1,10 @@
 # STATUS_WALKTHROUGH — Live Project State
 
 **Purpose:** This is the live status dashboard.
-**Rules:** Process rules are now in `docs/AI_WORKFLOW.md`.
+**Rules**: Process rules are now in `docs/AI_WORKFLOW.md`.
+**Worker Status Key**: `IDLE` | `READY` | `ASSIGNED` (Wait ACK) | `IN-FLIGHT` (Has Artifact) | `BLOCKED` | `HANDOFF`. 
+**Do NOT assume 'Already Routed' — Require ACK.**
+
 **Last updated:** 2026-02-04 (Europe/Budapest)
 
 ## 👷 Role Map (Active Workers)
