@@ -43,8 +43,9 @@
 - **Objective**: Implement the Host-Authority Handshake protocol.
 - **Spec**: `docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md`
 - **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
-- **Completed**: M01, M02, M03, M04 (MessageTypes, SessionState, SessionManager, Host Lobby) — MERGED
-- **Current Step**: M05 (Guest Lobby Listen) — Pending assignment
+- **Completed**: M01, M02, M03 (MessageTypes, SessionState, SessionManager) — MERGED
+- **Pending verification**: M04 (Host Lobby: `hostGame` works, but "Repeat Announce" evidence is unconfirmed).
+- **Current Step**: M05 (Guest Lobby Listen) — Blocked on M04 Proof
 - **CTO Ping #1**: APPROVED (2026-02-04)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
 - **Note**: Vitest not yet installed; tests written but cannot execute
@@ -96,13 +97,15 @@ To enable Supabase testing locally, you must provide your project credentials.
 
 ### EXPECTED (Elvárt eredmény)
 - A SessionManager állapota: `role = 'HOST'`
-- **Log Bizonyíték**: 5 másodpercenként megjelenik a konzolban: `[SessionManager] Sending HOST_ANNOUNCE`.
-  - *Megjegyzés*: Ha a `transport._messagesSent` 0 marad, az nem baj, amíg a LOG megjelenik (lehet, hogy a transport queue-ban van, vagy csak mockolva fut).
+- **Log Bizonyíték**: 5 másodpercenként megjelenik a konzolban: `[SessionManager] HOST_ANNOUNCE sent`.
+  - *Jelenlegi Állapot*: `announceInterval` létrejön (pl. ID 88), de a log nem mindig jelenik meg.
+  - *Szükséges*: Claude Code implementáljon `debugAnnounceCount` mezőt a biztos méréshez.
 - A `sessionManager.state.sessionName` értéke: `'TestSession'`
 
 ### QUICK PASS/FAIL
-- **PASS**: Konzolban periodikusan látszik az `[SessionManager] Sending HOST_ANNOUNCE` üzenet.
-- **FAIL**: Hibaüzenet (pl. Auth error) VAGY nincs periodikus log.
+- **PASS**: Konzolban periodikusan látszik az `[SessionManager] HOST_ANNOUNCE sent` üzenet.
+- **FAIL**: Hibaüzenet (pl. Auth error) VAGY nincs periodikus log/bizonyíték.
 
 ---
 *For workflow rules, see `docs/AI_WORKFLOW.md`*
+
