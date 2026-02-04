@@ -13,15 +13,17 @@ We use **Git Branch Isolation** to separate workers.
 ### **Command: Spawn Pool (Manual)**
 Run in 5 separate terminal tabs:
 
+**Note**: Branch naming follows `docs/AI_WORKFLOW.md` §3 (canonical).
+
 `# Worker 1`
 `git checkout main`
 `git pull`
-`git checkout -b w1-task-name`
+`git checkout -b work/WO-XXX-backend work/WO-XXX`
 
 `# Worker 2`
 `git checkout main`
 `git pull`
-`git checkout -b w2-task-name`
+`git checkout -b work/WO-XXX-frontend work/WO-XXX`
 
 *(Repeat for W3, W4, W5)*
 
