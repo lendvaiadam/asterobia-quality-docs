@@ -18,9 +18,11 @@
 - **Action**: Create Branch `feature/task-name`.
 - **Output**: Markdown Plan + Branch.
 
-### Step 3: Execution (Claude Workers)
+### Step 3: Execution (Fixed Roster)
+- **Setup**: 5 Fixed Windows (Orchestrator + 4 Workers).
 - **Input**: Single Work Order.
 - **Action**: Implement code + unit tests.
+- **Check**: Trigger "Antigravity Escalation" if risks detected.
 - **Output**: Code Commit on Feature Branch + Test Result.
 
 ### Step 4: Integration (Claude Orchestrator)
@@ -52,6 +54,18 @@
 2.  **Spec Conflict**: Antigravity rules on Canonical constraints.
 3.  **Vision Conflict**: Ádám has final say.
 
+### Mid-flight Antigravity Escalation (MANDATORY)
+Workers/Orchestrator MUST pause and summon Antigravity if:
+- Scope ambiguity / unclear spec interpretation.
+- Potential architecture impact (e.g. adding dependencies).
+- Determinism or authority concerns.
+- Any "unknown unknown" risk flagged.
+
+**Mechanics:**
+1. Post to `docs/MAILBOX.md` with: `[ESCALATION] [WO-XXX] [Reason]`.
+2. Antigravity responds with: `[DECISION] [APPROVE/REJECT/MODIFY]`.
+3. Work resumes only after decision is logged in Work Order.
+
 ### Human Absence Protocol
 - No autonomous merge without explicit human PASS.
 - If Ádám unavailable >4h: Orchestrator + Workers may continue up to “PR Candidate ready”.
@@ -76,14 +90,22 @@
 
 ## 4. The "Work Order" Protocol (Orchestrator -> Worker)
 
-### 4.1 Work Order Template (JSON-compatible Markdown)
+### 4.1 Fixed 5-Window Roster (Binding)
+This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
 
-To assign a task, the Orchestrator MUST generate this block:
+| Role | Window | Specialization |
+| :--- | :--- | :--- |
+| **Orchestrator** | Terminal 1 | Manager, Integrator, Planner. |
+| **Worker (BE)** | Terminal 2 | Backend, Supabase, SQL. |
+| **Worker (FE)** | Terminal 3 | Frontend, UI, Three.js, CSS. |
+| **Worker (QA)** | Terminal 4 | Test Writing, Regression, Verification. |
+| **Worker (RF)** | Terminal 5 | Refactor, Review, Generalist. |
 
+### 4.2 Work Order Mechanics
 See: `docs/templates/WORK_ORDER_TEMPLATE.md` (Copy-Paste this).
 Store actual Work Orders in: `docs/work_orders/WO-XXX-Name.md`.
 
-To assign a task, the Orchestrator MUST generate a file based on the template, referencing Canonical Specs and Branches.
+To assign a task, the Orchestrator MUST generate a file based on the template, referencing Canonical Specs, Branches, and **Escalation Triggers**.
 
 ### 4.2 Worker Execution Protocol (BINDING)
 

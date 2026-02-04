@@ -6,39 +6,53 @@
 
 ---
 
-## 1. Orchestration Setup
-The pool is NOT a single automated script but a **State Protocol**.
-We use **Git Branch Isolation** to separate workers.
+## 1. Orchestration Setup (The 5-Window Roster)
+
+**Operator (Ádám)**: Open exactly **5 Terminal Tabs**.
+Start `claude` (or web instance) in each. Assign roles mentally or via prompt.
+
+| Window | Role | Branch Pattern |
+| :--- | :--- | :--- |
+| **1** | **Orchestrator** | `work/WO-XXX` (Parent) |
+| **2** | **Worker (BE)** | `work/WO-XXX-backend` |
+| **3** | **Worker (FE)** | `work/WO-XXX-frontend` |
+| **4** | **Worker (QA)** | `work/WO-XXX-qa` |
+| **5** | **Worker (RF)** | `work/WO-XXX-refactor` |
 
 ### **Command: Spawn Pool (Manual)**
-Run in 5 separate terminal tabs:
+Run in the respective terminals:
+`# W1 (Orch)`: `git checkout -b work/WO-XXX main`
+`# W2 (BE)`: `git checkout -b work/WO-XXX-backend work/WO-XXX`
+`# ... etc`
 
 **Note**: Branch naming follows `docs/AI_WORKFLOW.md` §3 (canonical).
 
-`# Worker 1`
-`git checkout main`
-`git pull`
-`git checkout -b work/WO-XXX-backend work/WO-XXX`
+---
 
-`# Worker 2`
-`git checkout main`
-`git pull`
-`git checkout -b work/WO-XXX-frontend work/WO-XXX`
+## 2. Operator Copy/Paste Map (How to Run)
 
-*(Repeat for W3, W4, W5)*
+**A. Assigning Work (Orchestrator -> Worker)**
+1. **Orchestrator** generates `docs/work_orders/WO-XXX.md`.
+2. **Operator**: Copy the content of `WO-XXX.md`.
+3. **Operator**: Paste into **Worker Terminal (2-5)**.
+4. **Worker**: ACKs and starts coding.
+
+**B. Escalation (Worker -> Antigravity)**
+1. **Worker**: "I need to Escalate: [Reason]".
+2. **Operator**: Copy reason to `docs/MAILBOX.md` under `[ESCALATION]`.
+3. **Operator**: Show MAILBOX to **Antigravity**.
+4. **Antigravity**: Write decision in MAILBOX.
+5. **Operator**: Paste decision back to Worker.
+
+**C. Handoff (Worker -> Orchestrator)**
+1. **Worker**: "Work Order Complete. Branch: [X]. Tests: [Y]."
+2. **Operator**: Copy this text.
+3. **Operator**: Paste into **Orchestrator Terminal (1)**.
+4. **Orchestrator**: `git merge`, run integration tests.
 
 ---
 
-## 2. Ops Checklist (Start/Stop)
-
-### **START (Spin-up)**
-1. [ ] **Antigravity:** Publish Role Map in `docs/STATUS_WALKTHROUGH.md`.
-2. [ ] **Ádám:** Verify Work Package scope is clear.
-3. [ ] **Ádám:** Open 5 Terminal Tabs (or Claude Windows).
-4. [ ] **Orchestration:** checkout fresh branches for assigned roles.
-1. [ ] **Reference**: `docs/STATUS_WALKTHROUGH.md` > "Role Map (Active Workers)" table.
-
-## 2. Stop Protocol (Shutdown)
+## 3. Stop Protocol (Shutdown)
 
 1. **Check STATUS**: Are all branches pushed?
 2. **Merge**:
