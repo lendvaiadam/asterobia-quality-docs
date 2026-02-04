@@ -18,6 +18,10 @@ import { createHostAnnounce } from './MessageSerializer.js';
 const LOBBY_CHANNEL = 'asterobia:lobby';
 const ANNOUNCE_INTERVAL_MS = 5000;
 
+// M05: Discovery constants
+const STALE_HOST_TIMEOUT_MS = 15000;  // 3 missed announces = stale
+const MAX_AVAILABLE_HOSTS = 50;       // FIFO eviction if exceeded
+
 /**
  * SessionManager - Central multiplayer coordinator
  *
@@ -70,9 +74,16 @@ export class SessionManager {
 
     /**
      * Available hosts map (for Guest discovery)
+     * META-GAME STATE: Do not serialize. Not referenced by SimCore.
      * @type {Map<string, Object>}
      */
     this.availableHosts = new Map();
+
+    /**
+     * M05: Discovery active flag (idempotency guard)
+     * @type {boolean}
+     */
+    this._discoveryActive = false;
 
     /**
      * Input buffer for incoming commands (Host-side)
@@ -330,6 +341,91 @@ export class SessionManager {
   }
 
   // ========================================
+  // M05: DISCOVERY OPERATIONS
+  // ========================================
+
+  /**
+   * Start listening for HOST_ANNOUNCE messages on the lobby channel.
+   * Must be called explicitly - discovery does NOT auto-start.
+   * Idempotent: safe to call multiple times.
+   *
+   * @returns {Promise<void>}
+   */
+  async startDiscovery() {
+    // Idempotency guard
+    if (this._discoveryActive) {
+      console.log('[SessionManager] Discovery already active');
+      return;
+    }
+
+    if (!this.transport || typeof this.transport.joinChannel !== 'function') {
+      console.warn('[SessionManager] No transport for discovery');
+      return;
+    }
+
+    try {
+      await this.transport.joinChannel(LOBBY_CHANNEL, (msg) => this.onMessage(msg));
+      this._discoveryActive = true;
+      console.log('[SessionManager] Discovery started');
+    } catch (err) {
+      console.error('[SessionManager] Failed to start discovery:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Stop listening for HOST_ANNOUNCE messages and clear available hosts.
+   * Idempotent: safe to call when discovery is not running.
+   */
+  stopDiscovery() {
+    // Idempotency guard
+    if (!this._discoveryActive) {
+      return;
+    }
+
+    if (this.transport && typeof this.transport.leaveChannel === 'function') {
+      this.transport.leaveChannel(LOBBY_CHANNEL).catch(err => {
+        console.warn('[SessionManager] Failed to leave lobby channel:', err);
+      });
+    }
+
+    this.availableHosts.clear();
+    this._discoveryActive = false;
+    console.log('[SessionManager] Discovery stopped');
+  }
+
+  /**
+   * Get list of available hosts with lazy stale pruning.
+   * META-GAME STATE: This data is NOT part of SimCore determinism.
+   *
+   * @returns {Array<Object>} Array of HostEntry objects
+   */
+  getAvailableHosts() {
+    const now = Date.now();
+    const result = [];
+
+    // Lazy pruning: remove stale entries as we iterate
+    for (const [hostId, entry] of this.availableHosts) {
+      if (now - entry.lastSeenAt > STALE_HOST_TIMEOUT_MS) {
+        // Stale entry - prune it
+        this.availableHosts.delete(hostId);
+      } else {
+        result.push(entry);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Check if discovery is currently active
+   * @returns {boolean}
+   */
+  isDiscoveryActive() {
+    return this._discoveryActive;
+  }
+
+  // ========================================
   // LEAVE / DISCONNECT
   // ========================================
 
@@ -342,23 +438,18 @@ export class SessionManager {
     // Stop announcing (clears interval)
     this.stopAnnouncing();
 
+    // Stop discovery (clears availableHosts, leaves lobby channel)
+    this.stopDiscovery();
+
     // Clear ping interval
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
     }
 
-    // Leave lobby channel if transport supports it
-    if (this.transport && typeof this.transport.leaveChannel === 'function') {
-      this.transport.leaveChannel(LOBBY_CHANNEL).catch(err => {
-        console.warn('[SessionManager] Failed to leave lobby channel:', err);
-      });
-    }
-
     // Clear buffers
     this.inputBuffer = [];
     this.pendingPings.clear();
-    this.availableHosts.clear();
 
     // Reset pending join
     if (this.pendingJoin) {
@@ -454,8 +545,49 @@ export class SessionManager {
   }
 
   _handleHostAnnounce(msg) {
-    // M05: Guest discovery
-    console.log('[SessionManager] HOST_ANNOUNCE from:', msg.hostId);
+    // M05: Guest discovery - validate and store host entry
+    // META-GAME STATE: availableHosts is NOT part of SimCore determinism
+
+    // Strict protocol version validation
+    if (msg.protocolVersion !== PROTOCOL_VERSION) {
+      console.log(`[SessionManager] HOST_ANNOUNCE rejected: protocol mismatch (${msg.protocolVersion} !== ${PROTOCOL_VERSION})`);
+      return;
+    }
+
+    // Required fields validation
+    if (!msg.hostId || !msg.sessionName) {
+      console.log('[SessionManager] HOST_ANNOUNCE rejected: missing hostId or sessionName');
+      return;
+    }
+
+    // Don't add self to available hosts
+    if (msg.hostId === this.game.clientId) {
+      return;
+    }
+
+    // FIFO eviction if at max capacity and this is a new host
+    if (this.availableHosts.size >= MAX_AVAILABLE_HOSTS && !this.availableHosts.has(msg.hostId)) {
+      const oldestKey = this.availableHosts.keys().next().value;
+      this.availableHosts.delete(oldestKey);
+      console.log(`[SessionManager] Evicted oldest host for FIFO: ${oldestKey}`);
+    }
+
+    // Store normalized HostEntry
+    this.availableHosts.set(msg.hostId, {
+      hostId: msg.hostId,
+      sessionName: msg.sessionName,
+      playerCount: msg.currentPlayers ?? 1,
+      maxPlayers: msg.maxPlayers ?? 4,
+      mapSeed: msg.mapSeed ?? '',
+      lastSeenAt: Date.now()
+    });
+
+    console.log(`[SessionManager] HOST_ANNOUNCE from: ${msg.hostId} (${msg.sessionName})`);
+
+    // Notify UI if callback set
+    if (this.onHostListUpdated) {
+      this.onHostListUpdated();
+    }
   }
 
   _handleJoinReq(msg) {
