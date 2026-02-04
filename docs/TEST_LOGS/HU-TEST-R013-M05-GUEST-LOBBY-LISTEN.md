@@ -111,6 +111,40 @@ game.sessionManager.stopDiscovery()
 
 ---
 
+### STEP 7: Idempotency Verification
+
+#### STEP 7a: startDiscovery() idempotency (Tab B)
+**Művelet**:
+```js
+await game.sessionManager.startDiscovery()
+await game.sessionManager.startDiscovery()  // second call
+```
+
+**Elvárt eredmény**:
+- No error thrown
+- No duplicate channel join (single subscription)
+- `game.sessionManager._discoveryActive` === `true`
+
+**PASS/FAIL**: ____
+
+---
+
+#### STEP 7b: stopDiscovery() idempotency (Tab B)
+**Művelet**:
+```js
+game.sessionManager.stopDiscovery()
+game.sessionManager.stopDiscovery()  // second call
+```
+
+**Elvárt eredmény**:
+- No error thrown
+- Safe no-op on second call
+- `game.sessionManager._discoveryActive` === `false`
+
+**PASS/FAIL**: ____
+
+---
+
 ## 2. Összesített Eredmény
 
 | Step | Leírás | Eredmény |
@@ -121,6 +155,8 @@ game.sessionManager.stopDiscovery()
 | 4 | Host bezárás | ____ |
 | 5 | Stale prune (üres lista) | ____ |
 | 6 | Discovery leállítás | ____ |
+| 7a | startDiscovery() idempotency | ____ |
+| 7b | stopDiscovery() idempotency | ____ |
 
 **VÉGSŐ ÍTÉLET**: ____
 
