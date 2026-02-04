@@ -114,7 +114,27 @@ Workers/Orchestrator MUST pause and summon Antigravity if:
 
 ---
 
+---
+
 ## 4. The "Work Order" Protocol (Orchestrator -> Worker)
+
+### 4.0 Parallel Execution Policy (Safe-by-Default)
+
+**Policy**: Orchestrator MUST decompose suitable Work Orders into **Parallel Tasks** for W1–W4.
+**Default**: Parallel execution is the standard, not the exception.
+
+**Independence Criteria (Must all be true)**:
+1.  **No Shared Files**: Tasks touch disjoint file sets (or Orchestrator explicitly partitions ownership).
+2.  **No Shared API Churn**: Contracts are stable or defined upfront.
+3.  **No Architecture Risk**: No new dependencies or structural changes (otherwise: CTO Ping first).
+4.  **Determinism**: Network/Visuals must not mutually corrupt SimCore state.
+
+**Safety Constraints**:
+- **Integration**: Serialized by Orchestrator (Merge A -> Merge B).
+- **Merge to Main**: Antigravity Only.
+- **Artifact**: Orchestrator MUST publish a "Parallelization Map" in `STATUS_WALKTHROUGH.md` or the Work Order, listing which Worker owns which files.
+
+---
 
 ### 4.1 Fixed 5-Window Roster (Binding)
 This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
@@ -137,12 +157,6 @@ Every instruction from Orchestrator -> Worker MUST begin with:
 ### 4.3 Worker Execution Protocol (BINDING)
 
 1.  **ACK**: Worker reads Header, verifies Role Registry, and confirms.
-2.  **CHECKOUT**: `git checkout -b [Worker Branch] [Parent Branch]`
-3.  **EXECUTE**:
-    - Write Code.
-    - Write/Update Unit Tests (MANDATORY).
-    - Run `npm test`.
-1.  **ACK**: Worker reads Work Order and confirms "I understand".
 2.  **CHECKOUT**: `git checkout -b [Worker Branch] [Parent Branch]`
 3.  **EXECUTE**:
     - Write Code.
@@ -178,6 +192,30 @@ Every instruction from Orchestrator -> Worker MUST begin with:
 6. **Ops**: Any new Environment Variables or DB Migrations?
 
 **Output**: Orchestrator summarizes this checklist in the Handoff Note.
+
+---
+
+## 7. Operator Test Scenario Check-ins (Mandatory)
+
+**Trigger**: Orchestrator MUST report short **HU Test Scenarios** to Ádám:
+1.  After **each integration merge** into parent branch.
+2.  Before **CTO Ping #3 (Pre-Merge)**.
+3.  When a Worker completes a logic-impacting Work Order.
+
+**Format (Copy-Paste Friendly)**:
+```text
+[ROUTING]
+TO: Current Chat
+PASTE:
+**HU-TEST REQUEST**:
+- **Pre**: [e.g. Clean save, 2 clients open]
+- **Step**: [e.g. Move unit A to (10,10)]
+- **Expected**: [e.g. Unit moves on both screens, no lag]
+**DECISION REQUIRED**: PASS / FAIL?
+[/ROUTING]
+```
+
+---
 
 ---
 
