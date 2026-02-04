@@ -1,7 +1,22 @@
 # AI WORKFLOW & PROTOCOLS
 
 **Purpose:** Defines HOW the hierarchy executes tasks, ensuring strict authority and quality control.
+**Operator Model:** Human acts as Router. Mailbox is AI-only.
 **Replaces:** `PLANNING_PROTOCOL.md`
+
+---
+
+## 0. Operator Communication Standard (BINDING)
+
+Humans do NOT read `docs/MAILBOX.md`. Agents must output this block to trigger action:
+
+```text
+[ROUTING]
+TO: <Agent/Terminal Name>
+PASTE: <exact text to paste or file path to copy>
+CONTEXT: <1 sentence why>
+[/ROUTING]
+```
 
 ---
 
@@ -101,15 +116,15 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
 | **Worker (QA)** | Terminal 4 | Test Writing, Regression, Verification. |
 | **Worker (RF)** | Terminal 5 | Refactor, Review, Generalist. |
 
-### 4.2 Work Order Mechanics
-See: `docs/templates/WORK_ORDER_TEMPLATE.md` (Copy-Paste this).
-Store actual Work Orders in: `docs/work_orders/WO-XXX-Name.md`.
+### 4.2 Role Header Requirement (No Starter Prompts)
+Every instruction from Orchestrator -> Worker MUST begin with:
 
-To assign a task, the Orchestrator MUST generate a file based on the template, referencing Canonical Specs, Branches, and **Escalation Triggers**.
+> "You are **[Role Name]**. Read `docs/ROLES_AND_AGENTS.md` **Role Registry** and follow it.
+> Your Registry Key is: `ROLES_[KEY]`."
 
-### 4.2 Worker Execution Protocol (BINDING)
+### 4.3 Worker Execution Protocol (BINDING)
 
-1.  **ACK**: Worker reads Work Order and confirms "I understand".
+1.  **ACK**: Worker reads Header, verifies Role Registry, and confirms.
 2.  **CHECKOUT**: `git checkout -b [Worker Branch] [Parent Branch]`
 3.  **EXECUTE**:
     - Write Code.

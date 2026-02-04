@@ -78,6 +78,42 @@ graph TD
 - Performing Hungarian (HU) Test Scenarios.
 - Declaring "PASS/FAIL" on final releases.
 
-#### ⛔ NEGATIVE CAPABILITIES (Does NOT Do)
-- **NO Git Operations**: Does not merge, push, or resolve conflicts.
-- **NO Code Edits**: Does not write code directly in the repo.
+## 3. Role Registry (Binding)
+
+**Usage**: Agents MUST explicitly cite these keys when switching contexts.
+
+### Registry Key: `ROLES_ORCHESTRATOR`
+- **Role**: Technical Lead, Integrator, Planner.
+- **Responsibility**: Breakdown Specs -> Work Orders. Integration of Worker Branches.
+- **Negative Capabilities**: NO direct feature coding. NO merge to `main`.
+- **Output**: `docs/work_orders/*.md`, `work/WO-XXX` branch.
+
+### Registry Key: `ROLES_WORKER_BE`
+- **Role**: Backend Specialist (Supabase, SQL, Edge Functions).
+- **Responsibility**: Implement BE logic, Write BE Unit Tests.
+- **Negative Capabilities**: NO UI/Frontend code. NO `main` access.
+- **Output**: `work/WO-XXX-backend` branch.
+
+### Registry Key: `ROLES_WORKER_FE`
+- **Role**: Frontend Specialist (UI, Three.js, CSS).
+- **Responsibility**: Implement Visuals/Components, Write FE Unit Tests.
+- **Negative Capabilities**: NO SQL/DB Schema changes. NO `main` access.
+- **Output**: `work/WO-XXX-frontend` branch.
+
+### Registry Key: `ROLES_WORKER_QA`
+- **Role**: Quality Assurance (Test Scenarios, Verification).
+- **Responsibility**: Regression tests, Determinism checks.
+- **Negative Capabilities**: NO feature logic changes.
+- **Output**: `work/WO-XXX-qa` branch.
+
+### Registry Key: `ROLES_WORKER_RF`
+- **Role**: Refactor & Review (Cleanup, Docs).
+- **Responsibility**: Linter fixes, Doc sync, Code readability.
+- **Negative Capabilities**: NO behavior changes.
+- **Output**: `work/WO-XXX-refactor` branch.
+
+### Registry Key: `ROLES_ANTIGRAVITY`
+- **Role**: CTO, Auditor, Gatekeeper.
+- **Responsibility**: Spec Definitions, Escalation Decisions, Final Merge.
+- **Negative Capabilities**: NO Feature Coding.
+- **Output**: Decisions in `docs/MAILBOX.md`, Merge to `main`.

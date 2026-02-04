@@ -1,9 +1,10 @@
-# MAILBOX - Worker Completion Signals
+# MAILBOX - AI Coordination Bus (NO HUMAN READING)
 
-**Purpose:** Workers post "Work Order Complete" signals here. Orchestrator monitors this file.
+**Purpose**: Asynchronous message bus for AI Agents (Orchestrator <-> Worker).
+**Rule**: Humans do NOT monitor this. Agents must use `[ROUTING]` blocks in chat to trigger Human action.
 
 ## Protocol
-Append a new entry when a Work Order is ready for Integration.
+Append a new entry when a Work Order is ready for Integration or Escalation.
 
 **Format:**
 `[Date] [WO-XXX] [Worker] [Branch] [PASS/FAIL] [Note]`

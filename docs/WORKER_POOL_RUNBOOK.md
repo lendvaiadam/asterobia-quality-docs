@@ -29,26 +29,28 @@ Run in the respective terminals:
 
 ---
 
-## 2. Operator Copy/Paste Map (How to Run)
+## 2. Operator Copy/Paste Map (The Routing Protocol)
 
-**A. Assigning Work (Orchestrator -> Worker)**
-1. **Orchestrator** generates `docs/work_orders/WO-XXX.md`.
-2. **Operator**: Copy the content of `WO-XXX.md`.
-3. **Operator**: Paste into **Worker Terminal (2-5)**.
-4. **Worker**: ACKs and starts coding.
+**Core Rule**: You do NOT need to guess. Wait for an agent to output a `[ROUTING]` block.
 
-**B. Escalation (Worker -> Antigravity)**
-1. **Worker**: "I need to Escalate: [Reason]".
-2. **Operator**: Copy reason to `docs/MAILBOX.md` under `[ESCALATION]`.
-3. **Operator**: Show MAILBOX to **Antigravity**.
-4. **Antigravity**: Write decision in MAILBOX.
-5. **Operator**: Paste decision back to Worker.
+### Standard Routing Block
+```text
+[ROUTING]
+TO: Worker (FE) - Terminal 3
+PASTE: (Content of Work Order or Code)
+CONTEXT: Assigning UI Task.
+[/ROUTING]
+```
 
-**C. Handoff (Worker -> Orchestrator)**
-1. **Worker**: "Work Order Complete. Branch: [X]. Tests: [Y]."
-2. **Operator**: Copy this text.
-3. **Operator**: Paste into **Orchestrator Terminal (1)**.
-4. **Orchestrator**: `git merge`, run integration tests.
+**Operator Actions**:
+1. **Read**: Look for `TO:` destination.
+2. **Copy**: Copy content in `PASTE:` section (or file content if path is given).
+3. **Paste**: Paste into the target Terminal.
+4. **Loop**: Wait for next `[ROUTING]` block.
+
+**Exceptions**:
+- If an Agent seems stuck, ask: "Do you have a Routing Block for me?"
+- If `MAILBOX.md` is updated, the Orchestrator will notice periodically (or you can nudge it). You do NOT need to read Mailbox.
 
 ---
 
