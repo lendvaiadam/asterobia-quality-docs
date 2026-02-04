@@ -9,7 +9,14 @@
 
 import { SessionState, PlayerStatus } from './SessionState.js';
 import { NetworkRole, canStep, sendsInputsToNetwork, broadcastsState } from './NetworkRole.js';
-import { MSG } from './MessageTypes.js';
+import { MSG, PROTOCOL_VERSION } from './MessageTypes.js';
+import { createHostAnnounce } from './MessageSerializer.js';
+
+/**
+ * R013 Constants
+ */
+const LOBBY_CHANNEL = 'asterobia:lobby';
+const ANNOUNCE_INTERVAL_MS = 5000;
 
 /**
  * SessionManager - Central multiplayer coordinator
@@ -184,13 +191,86 @@ export class SessionManager {
     this.state.setAsHost(clientId, sessionName);
     this.sessionName = sessionName;
 
+    // R013-M04: Join lobby channel and start announcing
+    if (this.transport && typeof this.transport.joinChannel === 'function') {
+      try {
+        // Join the lobby channel
+        await this.transport.joinChannel(LOBBY_CHANNEL, (msg) => this.onMessage(msg));
+        console.log(`[SessionManager] Joined lobby channel: ${LOBBY_CHANNEL}`);
+
+        // Send immediate first announce
+        await this.sendAnnounce();
+
+        // Start periodic announce (every 5 seconds)
+        this.announceInterval = setInterval(() => {
+          this.sendAnnounce().catch(err => {
+            console.error('[SessionManager] Announce failed:', err);
+          });
+        }, ANNOUNCE_INTERVAL_MS);
+
+        console.log(`[SessionManager] Announce interval started (${ANNOUNCE_INTERVAL_MS}ms)`);
+
+      } catch (err) {
+        console.error('[SessionManager] Failed to join lobby:', err);
+        // Reset state on failure
+        this.state.reset();
+        this.sessionName = null;
+        throw err;
+      }
+    } else {
+      console.warn('[SessionManager] No transport or transport does not support channels. Hosting locally only.');
+    }
+
     // Notify UI
     this._notifyConnectionStateChanged('HOSTING');
 
     console.log(`[SessionManager] Now hosting as "${sessionName}" (slot 0)`);
 
-    // Note: Actual lobby channel join and announce will be implemented in M04
     return true;
+  }
+
+  /**
+   * Send HOST_ANNOUNCE message to lobby channel
+   * @returns {Promise<void>}
+   */
+  async sendAnnounce() {
+    if (!this.state.isHost()) {
+      console.warn('[SessionManager] sendAnnounce called but not HOST');
+      return;
+    }
+
+    if (!this.transport || typeof this.transport.broadcastToChannel !== 'function') {
+      console.warn('[SessionManager] Cannot announce: no transport or broadcastToChannel');
+      return;
+    }
+
+    const msg = createHostAnnounce({
+      hostId: this.state.hostId,
+      sessionName: this.sessionName,
+      mapSeed: this.game.mapSeed || 'default-seed',
+      simTick: this.game.simLoop?.tickCount || 0,
+      currentPlayers: this.state.players.length,
+      maxPlayers: this.state.maxPlayers
+    });
+
+    try {
+      await this.transport.broadcastToChannel(LOBBY_CHANNEL, msg);
+      console.log(`[SessionManager] HOST_ANNOUNCE sent (tick: ${msg.simTick}, players: ${msg.currentPlayers}/${msg.maxPlayers})`);
+    } catch (err) {
+      console.error('[SessionManager] Failed to send announce:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Stop the announce interval (called on leave or disconnect)
+   */
+  stopAnnouncing() {
+    if (this.announceInterval) {
+      clearInterval(this.announceInterval);
+      this.announceInterval = null;
+      console.log('[SessionManager] Announce interval stopped');
+    }
   }
 
   // ========================================
@@ -245,14 +325,20 @@ export class SessionManager {
   leaveGame() {
     console.log('[SessionManager] Leaving game...');
 
-    // Clear intervals
-    if (this.announceInterval) {
-      clearInterval(this.announceInterval);
-      this.announceInterval = null;
-    }
+    // Stop announcing (clears interval)
+    this.stopAnnouncing();
+
+    // Clear ping interval
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
+    }
+
+    // Leave lobby channel if transport supports it
+    if (this.transport && typeof this.transport.leaveChannel === 'function') {
+      this.transport.leaveChannel(LOBBY_CHANNEL).catch(err => {
+        console.warn('[SessionManager] Failed to leave lobby channel:', err);
+      });
     }
 
     // Clear buffers

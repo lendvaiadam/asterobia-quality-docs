@@ -89,6 +89,13 @@ export class SupabaseTransport extends TransportBase {
 
         /** @type {number|null} Reconnect timer ID */
         this._reconnectTimer = null;
+
+        /**
+         * R013: Map of additional channels for multiplayer (lobby, session)
+         * Key: channelName, Value: { channel, callback }
+         * @type {Map<string, Object>}
+         */
+        this._channels = new Map();
     }
 
     /**
@@ -345,5 +352,148 @@ export class SupabaseTransport extends TransportBase {
             this._throttleTimer = null;
         }
         await this._flushOutbound();
+    }
+
+    // ========================================
+    // R013: MULTIPLAYER CHANNEL METHODS
+    // ========================================
+
+    /**
+     * Join an arbitrary Realtime channel for multiplayer messaging.
+     * Used for lobby discovery and session communication.
+     *
+     * @param {string} channelName - Channel name (e.g., 'asterobia:lobby')
+     * @param {Function} [callback] - Optional callback for incoming messages
+     * @returns {Promise<void>}
+     */
+    async joinChannel(channelName, callback = null) {
+        if (!channelName) {
+            throw new Error('Channel name is required');
+        }
+
+        // Check if already joined
+        if (this._channels.has(channelName)) {
+            console.log(`[SupabaseTransport] Already joined channel: ${channelName}`);
+            return;
+        }
+
+        console.log(`[SupabaseTransport] Joining channel: ${channelName}`);
+
+        try {
+            // Create channel with broadcast config
+            const channel = this._supabase.channel(channelName, {
+                config: {
+                    broadcast: {
+                        ack: false,
+                        self: true // Receive own broadcasts for debugging
+                    }
+                }
+            });
+
+            // Set up message handler for 'message' event
+            channel.on('broadcast', { event: 'message' }, (payload) => {
+                const msg = payload.payload;
+                if (msg && callback) {
+                    callback(msg);
+                }
+            });
+
+            // Subscribe and wait for connection
+            await new Promise((resolve, reject) => {
+                channel.subscribe((status) => {
+                    if (status === 'SUBSCRIBED') {
+                        resolve();
+                    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                        reject(new Error(`Channel subscription failed: ${status}`));
+                    }
+                });
+            });
+
+            // Store channel reference
+            this._channels.set(channelName, { channel, callback });
+
+            console.log(`[SupabaseTransport] Joined channel: ${channelName}`);
+
+        } catch (err) {
+            console.error(`[SupabaseTransport] Failed to join channel ${channelName}:`, err);
+            throw err;
+        }
+    }
+
+    /**
+     * Broadcast a message to a specific channel.
+     * Used for HOST_ANNOUNCE, JOIN_REQ, etc.
+     *
+     * @param {string} channelName - Channel name
+     * @param {Object} msg - Message object to broadcast
+     * @returns {Promise<void>}
+     */
+    async broadcastToChannel(channelName, msg) {
+        if (!channelName) {
+            throw new Error('Channel name is required');
+        }
+
+        const channelEntry = this._channels.get(channelName);
+        if (!channelEntry) {
+            throw new Error(`Not joined to channel: ${channelName}. Call joinChannel() first.`);
+        }
+
+        try {
+            await channelEntry.channel.send({
+                type: 'broadcast',
+                event: 'message',
+                payload: msg
+            });
+
+            console.log(`[SupabaseTransport] Broadcast to ${channelName}:`, msg.type || 'unknown');
+
+        } catch (err) {
+            console.error(`[SupabaseTransport] Broadcast to ${channelName} failed:`, err);
+            throw err;
+        }
+    }
+
+    /**
+     * Leave a specific channel.
+     *
+     * @param {string} channelName - Channel name to leave
+     * @returns {Promise<void>}
+     */
+    async leaveChannel(channelName) {
+        const channelEntry = this._channels.get(channelName);
+        if (!channelEntry) {
+            return; // Not joined
+        }
+
+        try {
+            await this._supabase.removeChannel(channelEntry.channel);
+            this._channels.delete(channelName);
+            console.log(`[SupabaseTransport] Left channel: ${channelName}`);
+        } catch (err) {
+            console.error(`[SupabaseTransport] Failed to leave channel ${channelName}:`, err);
+        }
+    }
+
+    /**
+     * Leave all joined channels.
+     * Called during disconnect cleanup.
+     *
+     * @returns {Promise<void>}
+     */
+    async leaveAllChannels() {
+        const channelNames = Array.from(this._channels.keys());
+        for (const name of channelNames) {
+            await this.leaveChannel(name);
+        }
+    }
+
+    /**
+     * Check if joined to a specific channel.
+     *
+     * @param {string} channelName - Channel name
+     * @returns {boolean}
+     */
+    isJoinedToChannel(channelName) {
+        return this._channels.has(channelName);
     }
 }
