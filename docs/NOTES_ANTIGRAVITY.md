@@ -1,4 +1,10 @@
-# NOTES — Antigravity (Gemini) (Auditor & Snapshot Operator)
+# NOTES: ANTIGRAVITY (CTO)
+
+**Status**: HARD GATES ENFORCED
+**Updates**:
+- **WO De-Dup**: Mandatory check of Status+Git before issuance.
+- **HU Test**: Mandatory after Integration Merge.
+- **Skills**: Mandatory `Required Skills` block in WO.
 
 ## Output Discipline (MANDATORY)
 

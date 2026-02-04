@@ -1,30 +1,43 @@
-# WORK ORDER: [Task Name]
+# WORK ORDER: WO-[ID]-[NAME]
 
-**Target Worker**: [Backend / Frontend / QA / Refactor]
-**Parent Branch**: `work/[parent-task]`
-**Worker Branch**: `work/[parent-task]-[worker-type]`
+**Target**: [R0XX / Feature Name]
+**Role**: [Worker Role, e.g. Worker (BE)]
+**Status**: [DRAFT / ISSUED / COMPLETE]
+**Parent Branch**: `work/WO-[ID]`
+**Worker Branch**: `work/WO-[ID]-[role_suffix]`
 
-**CTO Escalation**: [Required / Not Required]
-**Escalation Triggers**:
-- [ ] Spec Ambiguity
-- [ ] Architecture Change
-- [ ] Determinism Risk
+---
 
-## 1. Context
-[1-2 sentences explaining WHY this tasks exists and what it solves.]
+## 1. Required Skills (Binding)
+*Worker MUST Read these Skill Files before starting.*
 
-## 2. In-Scope Files (Whitelist)
-- `src/SimCore/...`
-- `docs/specs/...`
+- [ ] [skill-name](docs/skills/skill-name.md)
+- [ ] [skill-qa-unit-jest](docs/skills/skill-qa-unit-jest.md) (Standard)
 
-## 3. Strict Out-of-Scope (Blacklist)
-- `src/Main.js` (Never touch entry point)
-- `package.json` (No dependency changes)
+---
 
-## 4. Acceptance Criteria ("Done When")
-- [ ] Unit tests pass for new module.
-- [ ] Linter is green.
-- [ ] No regression in determinism test.
+## 2. Objective
+*Concise description of the task.*
 
-## 5. Antigravity Decision Log
-(Paste any Escalation Decisions here from MAILBOX)
+## 3. Files to Touch (Whitelist)
+*Only these files may be modified.*
+- `src/...`
+- `docs/...`
+
+## 4. Requirement Steps
+1.  [ ] Step 1...
+2.  [ ] Step 2...
+
+## 5. Verification Plan
+- [ ] **Unit Tests**: [Describe new tests]
+- [ ] **Manual Check**: [Describe what to check]
+
+---
+
+## 6. Pre-Issue Gate (Orchestrator Check)
+- [ ] **De-Dup**: Checked `docs/STATUS_WALKTHROUGH.md` and `git log`?
+- [ ] **CTO Ping**: Was "Ping #1" approved?
+
+## 7. Integration Gate (Post-Work)
+- [ ] **HU Test**: Output `[ROUTING]` with HU Scenario?
+- [ ] **Merge**: Merged to Parent?

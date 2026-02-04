@@ -118,6 +118,12 @@ Workers/Orchestrator MUST pause and summon Antigravity if:
 
 ## 4. The "Work Order" Protocol (Orchestrator -> Worker)
 
+### 4.A Pre-Issue Gate (Mandatory De-Dup)
+**Before issuing ANY Work Order**, Orchestrator MUST:
+1.  **Check Status**: Read `docs/STATUS_WALKTHROUGH.md`. Is this task marked DONE?
+2.  **Check Git**: Fetch and check recent commits. `git log --grep="WO-XXX"`
+3.  **Result**: If evidence of completion exists, do **NOT** re-issue. Skip to Integration/verification.
+
 ### 4.0 Parallel Execution Policy (Safe-by-Default)
 
 **Policy**: Orchestrator MUST decompose suitable Work Orders into **Parallel Tasks** for W1–W4.
@@ -148,11 +154,14 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
 | **Worker (RF)** | Terminal 5 | Refactor, Review, Generalist. |
 
 ### 4.2 Role Header Requirement (No Starter Prompts)
-Every instruction from Orchestrator -> Worker MUST begin with:
-
 > "You are **[Role Name]**. Read `docs/ROLES_AND_AGENTS.md` **Role Registry** and follow it.
 > Your Registry Key is: `ROLES_[KEY]`.
 > Required Skills: `[List from docs/SKILLS_GOVERNANCE.md]`."
+
+### 4.B Skill Loading Enforcement (Binding)
+1.  **Orchestrator**: MUST list specific `docs/skills/skill-*.md` files in the "Required Skills" section of every WO.
+2.  **Worker**: MUST ACK by confirming "Read loadout and [Skill Files]".
+3.  **Reject**: If Worker fails to ACK skills, Orchestrator REJECTS the handoff.
 
 ### 4.3 Worker Execution Protocol (BINDING)
 
@@ -201,6 +210,8 @@ Every instruction from Orchestrator -> Worker MUST begin with:
 1.  After **each integration merge** into parent branch.
 2.  Before **CTO Ping #3 (Pre-Merge)**.
 3.  When a Worker completes a logic-impacting Work Order.
+
+**Gate Rule**: If this block is missing after integration, the process enters **STOP** state. The next output MUST be the HU block.
 
 **Format (Copy-Paste Friendly)**:
 ```text
