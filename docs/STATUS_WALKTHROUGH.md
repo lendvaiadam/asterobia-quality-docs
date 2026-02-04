@@ -60,6 +60,16 @@
 ## 📝 Open Decisions / Blockers
 *(None currently active)*
 
+## 🔧 Local Supabase Setup (Required for HU-TEST)
+
+**For Operator (Ádám):**
+To enable Supabase testing locally, you must provide your project credentials.
+
+1.  **Copy**: Duplicate `public/config.local.example.js` and rename it to `public/config.js`.
+2.  **Edit**: Open `public/config.js`.
+3.  **Fill**: Paste your **Project URL** and **Anon Key** (from Supabase Dashboard -> Settings -> API).
+4.  **Save**: The file is ignored by git. Your secrets are safe.
+
 ---
 
 ## 🧪 HU-TEST: R013 M04 Verification (Ádám)
@@ -67,16 +77,18 @@
 **Teszt célja:** Ellenőrizni, hogy az M04 (Host Lobby + Announce) kód helyesen került integrálásra.
 
 ### PRE (Előfeltételek)
+- **Supabase Config**: A `public/config.js` fájl létrehozva és kitöltve (lásd fent).
 - A repo fel van húzva a `work/WO-R013` branchre
 - `npm install` lefutott (ha még nem)
-- A böngészőben megnyitható: `game.html`
+- `npm start` fut (`http://127.0.0.1:8081`)
 
 ### STEPS (Lépések)
 1. Nyisd meg a DevTools konzolt (F12)
-2. Töltsd be a játékot (`game.html`)
-3. Keresd meg a "Host Game" gombot (ha van UI) VAGY
-4. Ha nincs UI, a konzolban hívd meg: `game.sessionManager.hostGame('TestSession')`
-5. Figyeld a konzol kimenetét
+2. Nyisd meg a játékot Supabase módban: `http://127.0.0.1:8081/game.html?dev=1&net=supabase`
+3. Ellenőrizd a HUD-ot: "Net: SUPABASE" és "Auth: ANON OK"?
+4. Keresd meg a "Host Game" gombot (ha van UI) VAGY
+5. Ha nincs UI, a konzolban hívd meg: `game.sessionManager.hostGame('TestSession')`
+6. Figyeld a konzol kimenetét
 
 ### EXPECTED (Elvárt eredmény)
 - A SessionManager állapota: `role = 'HOST'`
