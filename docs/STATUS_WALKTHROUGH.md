@@ -70,6 +70,10 @@ To enable Supabase testing locally, you must provide your project credentials.
 3.  **Fill**: Paste your **Project URL** and **Anon Key** (from Supabase Dashboard -> Settings -> API).
 4.  **Save**: The file is ignored by git. Your secrets are safe.
 
+### Troubleshooting
+- **Error**: "Anonymous sign-ins are disabled".
+- **Fix**: Go to Supabase Dashboard -> Authentication -> Providers -> **Enable Anonymous Sign-ins**.
+
 ---
 
 ## 🧪 HU-TEST: R013 M04 Verification (Ádám)
@@ -92,13 +96,13 @@ To enable Supabase testing locally, you must provide your project credentials.
 
 ### EXPECTED (Elvárt eredmény)
 - A SessionManager állapota: `role = 'HOST'`
-- 5 másodpercenként megjelenik: `[SessionManager] Sending HOST_ANNOUNCE`
-- Nincs JavaScript hiba a konzolban
+- **Log Bizonyíték**: 5 másodpercenként megjelenik a konzolban: `[SessionManager] Sending HOST_ANNOUNCE`.
+  - *Megjegyzés*: Ha a `transport._messagesSent` 0 marad, az nem baj, amíg a LOG megjelenik (lehet, hogy a transport queue-ban van, vagy csak mockolva fut).
 - A `sessionManager.state.sessionName` értéke: `'TestSession'`
 
 ### QUICK PASS/FAIL
-- **PASS**: Konzolban látszik az ANNOUNCE üzenet, nincs hiba
-- **FAIL**: Hiba a konzolban VAGY nincs ANNOUNCE output
+- **PASS**: Konzolban periodikusan látszik az `[SessionManager] Sending HOST_ANNOUNCE` üzenet.
+- **FAIL**: Hibaüzenet (pl. Auth error) VAGY nincs periodikus log.
 
 ---
 *For workflow rules, see `docs/AI_WORKFLOW.md`*

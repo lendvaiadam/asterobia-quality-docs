@@ -5,6 +5,7 @@
 - **WO De-Dup**: Mandatory check of Status+Git before issuance.
 - **HU Test**: Mandatory after Integration Merge.
 - **Skills**: Mandatory `Required Skills` block in WO.
+- **Docs**: Added Supabase "Anon Auth" troubleshooting & refined M04 verification criteria.
 
 ## Output Discipline (MANDATORY)
 
