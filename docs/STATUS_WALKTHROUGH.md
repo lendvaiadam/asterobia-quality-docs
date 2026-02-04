@@ -7,7 +7,7 @@
 ## 👷 Role Map (Active Workers)
 | Worker | Specialty | Branch | Work Order | Status |
 |---|---|---|---|---|
-| W1 | Backend | work/WO-R013-backend | WO-R013-M04 | ✅ MERGED |
+| W1 | Backend | work/WO-R013-backend | WO-R013-M05 | **READY** |
 | W2 | Frontend/UI | - | - | Idle |
 | W3 | QA/Test | - | - | Idle |
 | W4 | Refactor/Review | - | - | Idle |
