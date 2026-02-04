@@ -7,7 +7,7 @@
 ## 👷 Role Map (Active Workers)
 | Worker | Specialty | Branch | Work Order | Status |
 |---|---|---|---|---|
-| W1 | Backend | work/WO-R013-backend | WO-R013-M04 | **PENDING** |
+| W1 | Backend | work/WO-R013-backend | WO-R013-M04 | ✅ MERGED |
 | W2 | Frontend/UI | - | - | Idle |
 | W3 | QA/Test | - | - | Idle |
 | W4 | Refactor/Review | - | - | Idle |
@@ -43,9 +43,10 @@
 - **Objective**: Implement the Host-Authority Handshake protocol.
 - **Spec**: `docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md`
 - **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
-- **Completed**: M01, M02, M03 (MessageTypes, SessionState, SessionManager) — MERGED
-- **Current Step**: M04 (Host Lobby + Announce) — Worker (BE) pending
+- **Completed**: M01, M02, M03, M04 (MessageTypes, SessionState, SessionManager, Host Lobby) — MERGED
+- **Current Step**: M05 (Guest Lobby Listen) — Pending assignment
 - **CTO Ping #1**: APPROVED (2026-02-04)
+- **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
 - **Note**: Vitest not yet installed; tests written but cannot execute
 
 ---
@@ -58,6 +59,34 @@
 
 ## 📝 Open Decisions / Blockers
 *(None currently active)*
+
+---
+
+## 🧪 HU-TEST: R013 M04 Verification (Ádám)
+
+**Teszt célja:** Ellenőrizni, hogy az M04 (Host Lobby + Announce) kód helyesen került integrálásra.
+
+### PRE (Előfeltételek)
+- A repo fel van húzva a `work/WO-R013` branchre
+- `npm install` lefutott (ha még nem)
+- A böngészőben megnyitható: `game.html`
+
+### STEPS (Lépések)
+1. Nyisd meg a DevTools konzolt (F12)
+2. Töltsd be a játékot (`game.html`)
+3. Keresd meg a "Host Game" gombot (ha van UI) VAGY
+4. Ha nincs UI, a konzolban hívd meg: `game.sessionManager.hostGame('TestSession')`
+5. Figyeld a konzol kimenetét
+
+### EXPECTED (Elvárt eredmény)
+- A SessionManager állapota: `role = 'HOST'`
+- 5 másodpercenként megjelenik: `[SessionManager] Sending HOST_ANNOUNCE`
+- Nincs JavaScript hiba a konzolban
+- A `sessionManager.state.sessionName` értéke: `'TestSession'`
+
+### QUICK PASS/FAIL
+- **PASS**: Konzolban látszik az ANNOUNCE üzenet, nincs hiba
+- **FAIL**: Hiba a konzolban VAGY nincs ANNOUNCE output
 
 ---
 *For workflow rules, see `docs/AI_WORKFLOW.md`*
