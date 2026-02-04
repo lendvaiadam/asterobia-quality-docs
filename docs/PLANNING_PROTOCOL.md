@@ -1,4 +1,7 @@
-# Planning Protocol (Binding)
+> ⚠️ DEPRECATED (NON-BINDING). This document is superseded by docs/AI_WORKFLOW.md.
+> If any conflict exists, AI_WORKFLOW.md wins.
+
+# PLANNING PROTOCOL (Deprecated)
 
 ## A. Purpose (Binding)
 - **Prevent build-then-teardown**: All changes must align with long-term goals.

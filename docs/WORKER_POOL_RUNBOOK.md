@@ -34,12 +34,16 @@ Run in 5 separate terminal tabs:
 2. [ ] **Ádám:** Verify Work Package scope is clear.
 3. [ ] **Ádám:** Open 5 Terminal Tabs (or Claude Windows).
 4. [ ] **Orchestration:** checkout fresh branches for assigned roles.
+1. [ ] **Reference**: `docs/STATUS_WALKTHROUGH.md` > "Role Map (Active Workers)" table.
 
-### **STOP (Merge & Teardown)**
-1. [ ] **Worker:** Push Branch + verify CI (if any).
-2. [ ] **Antigravity:** Approve Merge (PASS).
-3. [ ] **Worker/Antigravity:** Merge to main.
-4. [ ] **Orchestration:** `git checkout main`, `git branch -d wX-task-name`.
+## 2. Stop Protocol (Shutdown)
+
+1. **Check STATUS**: Are all branches pushed?
+2. **Merge**:
+   - Orchestrator: Merge Worker -> Parent (if PASS).
+   - Antigravity: Merge to main (after explicit human PASS).
+3. **Completion Signal**:
+   - Posting to `docs/MAILBOX.md` with: `[WO-XXX] [Worker] [Complete]`.
 
 ---
 

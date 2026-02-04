@@ -4,6 +4,15 @@
 **Rules:** Process rules are now in `docs/AI_WORKFLOW.md`.
 **Last updated:** 2026-02-04 (Europe/Budapest)
 
+## 👷 Role Map (Active Workers)
+| Worker | Specialty | Branch | Work Order | Status |
+|---|---|---|---|---|
+| W1 | Backend | - | - | Idle |
+| W2 | Frontend/UI | - | - | Idle |
+| W3 | QA/Test | - | - | Idle |
+| W4 | Refactor/Review | - | - | Idle |
+| Orchestrator | Coordination | - | - | Active |
+
 ---
 
 ## 🚀 Release Status (Completed/In-Flight)
