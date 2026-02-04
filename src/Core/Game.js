@@ -135,6 +135,10 @@ export class Game {
 
         // R013: Multiplayer session manager
         this.sessionManager = new SessionManager(this);
+        // R013: Wire up transport for multiplayer channels
+        if (this._supabaseTransport) {
+            this.sessionManager.setTransport(this._supabaseTransport);
+        }
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();
