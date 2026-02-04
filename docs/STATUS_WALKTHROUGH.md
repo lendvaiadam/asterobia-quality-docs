@@ -7,7 +7,7 @@
 ## 👷 Role Map (Active Workers)
 | Worker | Specialty | Branch | Work Order | Status |
 |---|---|---|---|---|
-| W1 | Backend | work/WO-R013-backend | WO-R013-M01, WO-R013-M02 | **ASSIGNED** |
+| W1 | Backend | work/WO-R013-backend | WO-R013-M03 | **PENDING** |
 | W2 | Frontend/UI | - | - | Idle |
 | W3 | QA/Test | - | - | Idle |
 | W4 | Refactor/Review | - | - | Idle |
@@ -43,7 +43,8 @@
 - **Objective**: Implement the Host-Authority Handshake protocol.
 - **Spec**: `docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md`
 - **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
-- **Current Step**: M01+M02 (Message Types + SessionState) — Worker (BE) assigned.
+- **Completed**: M01 (Message Types), M02 (SessionState) — MERGED
+- **Current Step**: M03 (SessionManager Skeleton) — Worker (BE) pending
 - **CTO Ping #1**: APPROVED (2026-02-04)
 
 ---
