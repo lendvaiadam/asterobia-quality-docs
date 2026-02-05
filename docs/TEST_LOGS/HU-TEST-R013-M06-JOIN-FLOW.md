@@ -29,9 +29,15 @@ console.log('StateSurface:', typeof game.stateSurface?.serialize);
 console.log('Sim:', typeof game.sim?.toJSON);
 console.log('Game:', typeof game.toJSON);
 ```
-**Elvárt**: Legalább egy `function`. Ha mind `undefined`, a SNAPSHOT_ERROR garantált.
+console.log('Game:', typeof game.toJSON);
+```
+**Elvárt**: Legalább egy `function`.
+**EVIDENCE DUMP (REQUIRED)**:
+- Tényleges kimenet Tab A-ból: `_____________` (Operator fills: e.g. "all undefined")
+- Ha "all undefined": A Fallback Snapshot mechanizmusnak KELL aktiválódnia.
 
 **Elvárt eredmény**:
+
 - Konzol: `[SessionManager] Now hosting as "M06-JoinTest"`
 
 

@@ -779,9 +779,11 @@ export class SessionManager {
       });
 
       // M06-R02: Try primary serialization, fall back to minimal snapshot
+      let snapshotSource = 'fallback';
       if (this.game.stateSurface && typeof this.game.stateSurface.serialize === 'function') {
         try {
           fullSnapshot = this.game.stateSurface.serialize();
+          snapshotSource = 'stateSurface';
         } catch (serializeErr) {
           console.error('[SessionManager] stateSurface.serialize() threw:', serializeErr.name, serializeErr.message);
           if (serializeErr.stack) console.error('[SessionManager] Stack:', serializeErr.stack);
@@ -792,7 +794,6 @@ export class SessionManager {
 
       // M06-R02: Fallback to minimal snapshot if serialize failed or unavailable
       if (!fullSnapshot) {
-        console.warn('[SessionManager] Using minimal fallback snapshot');
         fullSnapshot = {
           version: 1,
           tickCount: simTick,
@@ -801,7 +802,10 @@ export class SessionManager {
           selectedUnitId: null,
           _fallback: true
         };
+        snapshotSource = 'fallback';
       }
+
+      console.log(`[SessionManager] Snapshot source: ${snapshotSource}`);
 
       // M06-R02: Verify snapshot is JSON-serializable
       let snapshotJson;

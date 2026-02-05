@@ -48,8 +48,9 @@
 - **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
 - **Completed**: M01, M02, M03, M04, M05 (Guest Lobby Discovery) — MERGED
 - **Verified**: M05 HU-TEST PASS (Host appears in list, disappears after 15s prune).
-- **Current Step**: M06 (Join Request Handshake) — BLOCKED (Waiting for JOIN Proof; Transport Ready)
-- **Fallback Policy**: M06 (Handshake) closure ACCEPTABLE with Fallback Snapshot. M07 (Game Loop) BLOCKED until Full Snapshot works.
+- **Current Step**: M06 (Join Request Handshake) — BLOCKED (Waiting for Fallback Proof)
+- **Fallback Policy**: **GOVERNANCE DECISION (Option A)**: Fallback Snapshot is ACCEPTED for M06 closure. Full Snapshot is MANDATORY for M07.
+- **CTO Ping #1**: APPROVED (2026-02-04)
 - **CTO Ping #1**: APPROVED (2026-02-04)
 - **CTO Ping #1**: APPROVED (2026-02-04)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
