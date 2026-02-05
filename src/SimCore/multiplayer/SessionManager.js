@@ -10,13 +10,17 @@
 import { SessionState, PlayerStatus } from './SessionState.js';
 import { NetworkRole, canStep, sendsInputsToNetwork, broadcastsState } from './NetworkRole.js';
 import { MSG, PROTOCOL_VERSION } from './MessageTypes.js';
-import { createHostAnnounce } from './MessageSerializer.js';
+import { createHostAnnounce, createJoinAckAccepted, createJoinAckRejected } from './MessageSerializer.js';
 
 /**
  * R013 Constants
  */
 const LOBBY_CHANNEL = 'asterobia:lobby';
 const ANNOUNCE_INTERVAL_MS = 5000;
+
+// M06: Join handling constants
+const SNAPSHOT_WARN_SIZE = 80000;   // 80KB warning threshold
+const SNAPSHOT_MAX_SIZE = 100000;   // 100KB hard limit
 
 /**
  * SessionManager - Central multiplayer coordinator
@@ -134,6 +138,24 @@ export class SessionManager {
      */
     this.snapshotInterval = 10;
 
+    /**
+     * M06: Session channel name (asterobia:session:{hostId})
+     * @type {string|null}
+     */
+    this._sessionChannel = null;
+
+    /**
+     * M06: Join request queue for sequential processing (M06-R01 mitigation)
+     * @type {Array}
+     */
+    this._joinQueue = [];
+
+    /**
+     * M06: Flag to prevent concurrent join processing
+     * @type {boolean}
+     */
+    this._processingJoin = false;
+
     // M04 Debug: announce tick evidence (dev-only, no sim mutation)
     this._debugAnnounceTickCount = 0;
     this._debugLastAnnounceAt = null;
@@ -201,6 +223,11 @@ export class SessionManager {
         // Join the lobby channel
         await this.transport.joinChannel(LOBBY_CHANNEL, (msg) => this.onMessage(msg));
         console.log(`[SessionManager] Joined lobby channel: ${LOBBY_CHANNEL}`);
+
+        // M06: Join session channel for JOIN_REQ messages
+        this._sessionChannel = `asterobia:session:${clientId}`;
+        await this.transport.joinChannel(this._sessionChannel, (msg) => this.onMessage(msg));
+        console.log(`[SessionManager] Joined session channel: ${this._sessionChannel}`);
 
         // Send immediate first announce
         await this.sendAnnounce();
@@ -353,7 +380,19 @@ export class SessionManager {
       this.transport.leaveChannel(LOBBY_CHANNEL).catch(err => {
         console.warn('[SessionManager] Failed to leave lobby channel:', err);
       });
+
+      // M06: Leave session channel
+      if (this._sessionChannel) {
+        this.transport.leaveChannel(this._sessionChannel).catch(err => {
+          console.warn('[SessionManager] Failed to leave session channel:', err);
+        });
+      }
     }
+
+    // M06: Clear session channel and join queue
+    this._sessionChannel = null;
+    this._joinQueue = [];
+    this._processingJoin = false;
 
     // Clear buffers
     this.inputBuffer = [];
@@ -458,9 +497,159 @@ export class SessionManager {
     console.log('[SessionManager] HOST_ANNOUNCE from:', msg.hostId);
   }
 
+  /**
+   * M06: Handle JOIN_REQ message (Host-side)
+   * Queues requests for sequential processing to prevent race conditions (M06-R01)
+   * @param {Object} msg - JOIN_REQ message
+   */
   _handleJoinReq(msg) {
-    // M06: Host handles join requests
+    // Only Host processes JOIN_REQ
+    if (!this.state.isHost()) {
+      return;
+    }
+
     console.log('[SessionManager] JOIN_REQ from:', msg.guestId);
+
+    // Queue the request for sequential processing
+    this._joinQueue.push(msg);
+    this._processJoinQueue();
+  }
+
+  /**
+   * M06: Process join queue sequentially (M06-R01 mitigation)
+   * Prevents race conditions when multiple guests join simultaneously
+   * @private
+   */
+  async _processJoinQueue() {
+    if (this._processingJoin || this._joinQueue.length === 0) {
+      return;
+    }
+
+    this._processingJoin = true;
+
+    const msg = this._joinQueue.shift();
+    await this._doHandleJoinReq(msg);
+
+    this._processingJoin = false;
+
+    // Process next request if any
+    if (this._joinQueue.length > 0) {
+      this._processJoinQueue();
+    }
+  }
+
+  /**
+   * M06: Actual JOIN_REQ processing logic
+   * @private
+   * @param {Object} msg - JOIN_REQ message
+   */
+  async _doHandleJoinReq(msg) {
+    // 1. Protocol version validation
+    if (msg.protocolVersion !== PROTOCOL_VERSION) {
+      console.log(`[SessionManager] JOIN_REQ rejected: version mismatch (${msg.protocolVersion} !== ${PROTOCOL_VERSION})`);
+      await this._sendJoinAck(msg.guestId, false, null, 'VERSION_MISMATCH');
+      return;
+    }
+
+    // 2. Required fields validation
+    if (!msg.guestId) {
+      console.log('[SessionManager] JOIN_REQ rejected: missing guestId');
+      return;
+    }
+    if (!msg.displayName) {
+      console.log('[SessionManager] JOIN_REQ rejected: missing displayName');
+      return;
+    }
+
+    // 3. Duplicate check (idempotency) - ignore if already joined
+    if (this.state.getPlayerByUserId(msg.guestId)) {
+      console.log(`[SessionManager] JOIN_REQ ignored: ${msg.guestId} already joined`);
+      return;
+    }
+
+    // 4. Session full check
+    const slot = this.state.findNextSlot();
+    if (slot === null) {
+      console.log('[SessionManager] JOIN_REQ rejected: session full');
+      await this._sendJoinAck(msg.guestId, false, null, 'SESSION_FULL');
+      return;
+    }
+
+    // 5. Serialize snapshot with error handling (M06-R02)
+    let fullSnapshot;
+    let simTick;
+    try {
+      fullSnapshot = this.game.stateSurface.serialize();
+      simTick = this.game.simLoop?.tickCount || 0;
+
+      // Size check (M06-R04)
+      const snapshotSize = JSON.stringify(fullSnapshot).length;
+      if (snapshotSize > SNAPSHOT_WARN_SIZE) {
+        console.warn(`[SessionManager] Snapshot large: ${snapshotSize} bytes`);
+      }
+      if (snapshotSize > SNAPSHOT_MAX_SIZE) {
+        console.error(`[SessionManager] Snapshot too large: ${snapshotSize} bytes (max: ${SNAPSHOT_MAX_SIZE})`);
+        await this._sendJoinAck(msg.guestId, false, null, 'STATE_TOO_LARGE');
+        return;
+      }
+    } catch (err) {
+      console.error('[SessionManager] Snapshot serialization failed:', err);
+      await this._sendJoinAck(msg.guestId, false, null, 'SNAPSHOT_ERROR');
+      return;
+    }
+
+    // 6. Add player to session
+    this.state.addPlayer({
+      slot,
+      userId: msg.guestId,
+      displayName: msg.displayName,
+      status: PlayerStatus.ACTIVE
+    });
+
+    // 7. Send JOIN_ACK with snapshot
+    await this._sendJoinAck(msg.guestId, true, slot, null, simTick, fullSnapshot);
+
+    console.log(`[SessionManager] Guest ${msg.displayName} joined as slot ${slot}`);
+  }
+
+  /**
+   * M06: Send JOIN_ACK message to session channel
+   * @private
+   * @param {string} guestId - Target guest ID
+   * @param {boolean} accepted - Whether join was accepted
+   * @param {number|null} slot - Assigned slot (if accepted)
+   * @param {string|null} reason - Rejection reason (if rejected)
+   * @param {number|null} simTick - Current sim tick (if accepted)
+   * @param {Object|null} fullSnapshot - Game state snapshot (if accepted)
+   */
+  async _sendJoinAck(guestId, accepted, slot = null, reason = null, simTick = null, fullSnapshot = null) {
+    if (!this.transport || typeof this.transport.broadcastToChannel !== 'function') {
+      console.warn('[SessionManager] Cannot send JOIN_ACK: no transport');
+      return;
+    }
+
+    if (!this._sessionChannel) {
+      console.warn('[SessionManager] Cannot send JOIN_ACK: no session channel');
+      return;
+    }
+
+    let msg;
+    if (accepted) {
+      msg = createJoinAckAccepted({
+        assignedSlot: slot,
+        simTick,
+        fullSnapshot
+      });
+    } else {
+      msg = createJoinAckRejected(reason);
+    }
+
+    try {
+      await this.transport.broadcastToChannel(this._sessionChannel, msg);
+      console.log(`[SessionManager] JOIN_ACK sent to ${guestId}: ${accepted ? `ACCEPTED (slot ${slot})` : `REJECTED (${reason})`}`);
+    } catch (err) {
+      console.error('[SessionManager] Failed to send JOIN_ACK:', err);
+    }
   }
 
   _handleJoinAck(msg) {
