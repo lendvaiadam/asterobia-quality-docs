@@ -23,6 +23,18 @@
 await game.sessionManager.hostGame('M06-JoinTest')
 ```
 
+**Capability Check (Tab A Console)**:
+```js
+console.log('StateSurface:', typeof game.stateSurface?.serialize);
+console.log('Sim:', typeof game.sim?.toJSON);
+console.log('Game:', typeof game.toJSON);
+```
+**Elvárt**: Legalább egy `function`. Ha mind `undefined`, a SNAPSHOT_ERROR garantált.
+
+**Elvárt eredmény**:
+- Konzol: `[SessionManager] Now hosting as "M06-JoinTest"`
+
+
 **Elvárt eredmény**:
 - Konzol: `[SessionManager] Now hosting as "M06-JoinTest"`
 - Konzol: `[SessionManager] Session channel joined: asterobia:session:<hostId>`
@@ -49,9 +61,14 @@ await game.sessionManager.joinGame(hostId)
 - Tab A konzol: `[SessionManager] Sending JOIN_ACK (accepted=true, slot=1)`
 - Tab B konzol: `[SessionManager] JOIN_ACK received, slot=1`
 - `game.sessionManager.state.role` (Tab B) === `'GUEST'`
-- `game.sessionManager.state.mySlot` (Tab B) === `1`
+
+**HIBA ESETÉN (SNAPSHOT_ERROR)**:
+- Tab A Konzolban keress ilyet: `[SessionManager] Snapshot serialization failed: ...`
+- **INVALID**: "Csak" a `rejectReason` (Tab B).
+- **REQUIRED**: A Host oldali Error Stack Trace másolása ide.
 
 **PASS/FAIL**: ____
+
 
 ---
 
