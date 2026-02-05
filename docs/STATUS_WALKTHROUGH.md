@@ -63,6 +63,13 @@
 - **Release 014**: Matera Transport
 - **Release 015**: Weapon System
 
+### M07 (Game Loop) GATES (BLOCKED)
+- **Snapshot Provider**: Must implement `game.stateSurface.serialize()` producing valid JSON.
+- **API Spec**:
+  - `serialize()` -> `{ units: [...], map: {...} }`
+  - `deserialize(json)` -> Restores state deterministically.
+  - Runtime availability: accessible via `game` object in console.
+
 ---
 
 ## 📝 Open Decisions / Blockers
