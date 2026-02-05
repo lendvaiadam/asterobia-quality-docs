@@ -13,6 +13,9 @@
 - **Gate**: Added "Worker Liveness / Progress Gate" (ACK 30m / Progress 2h) to Workflow.
 - **Status**: M05 CLOSED (HU-TEST PASS). Verified Host List population + 15s Pruning Logic.
 - **State Update**: M05 unit tests exist but NOT RUNNABLE (Test Runner Missing). HU-TEST used as primary gate.
+- **Merge**: R013 M06 (Joined `infra-vitest` + `frontend` to `WO-R013`).
+- **Test Note**: Vitest runs. 101 passed. 14 files "No test suite found". HU-TEST is the binding gate for M06.
+
 
 - **Gate**: Added "Closure Receipt Gate" (Mandatory In-Chat Receipt) to Workflow.
 - **Gate**: Added "Worker Utilization Gate" (Mandatory Table + Parallel Pack) to Workflow.

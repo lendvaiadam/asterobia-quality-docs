@@ -48,12 +48,10 @@
 - **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
 - **Completed**: M01, M02, M03, M04, M05 (Guest Lobby Discovery) — MERGED
 - **Verified**: M05 HU-TEST PASS (Host appears in list, disappears after 15s prune).
-- **Current Step**: M06 (Join Request Handshake) — Ready to Start
+- **Current Step**: M06 (Join Request Handshake) — MERGED (Waiting for HU-TEST)
 - **CTO Ping #1**: APPROVED (2026-02-04)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
-- **Note**: Vitest not yet installed; tests written but cannot execute.
-- **State**: M05 unit tests authored (Vitest) but NOT EXECUTABLE — Test Runner missing.
-- **Verification**: QA verification currently: HU-TEST only until runner is installed.
+- **Test State**: Vitest installed. 101 tests passed. 14 empty suites. M06 relying on HU-TEST.
 
 
 ---

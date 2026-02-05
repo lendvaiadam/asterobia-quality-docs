@@ -241,4 +241,6 @@ const after = game.simLoop.tickCount;
 ---
 
 **Készítette**: Worker (QA)
+**Végrehajtó**: Operátor (Ádám)
 **Dátum**: 2026-02-05
+
