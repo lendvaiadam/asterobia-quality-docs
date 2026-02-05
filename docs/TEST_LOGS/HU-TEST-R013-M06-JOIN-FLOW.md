@@ -68,7 +68,21 @@ await game.sessionManager.joinGame(hostId)
 - **INVALID**: "Csak" a `rejectReason` (Tab B).
 - **REQUIRED**: A Host oldali Error Stack Trace másolása ide.
 
-**PASS/FAIL**: ____
+**Elvárt eredmény**:
+- Tab B konzol: `[SessionManager] Sending JOIN_REQ to <hostId>`
+- Tab A konzol: `[SessionManager] JOIN_REQ received from <guestId>`
+- Tab A konzol: `[SessionManager] JOIN_ACK sent to <guestId>: ACCEPTED` (Proof of Send)
+- Tab B konzol: `[SessionManager] JOIN_ACK received, slot=1` (Proof of Recv)
+- Tab B konzol: `[SessionManager] Applying snapshot...` VAGY `Snapshot fallback...` (Proof of State)
+- `game.sessionManager.state.role` (Tab B) === `'GUEST'`
+
+**EVIDENCE DUMP (REQUIRED)**:
+Másold ide a `game.debug.getNetStatus()` kimenetét mindkét tabról a csatlakozás után:
+- **Host**: `JOIN_REQ_RECV`: _, `JOIN_ACK_SENT`: _
+- **Guest**: `JOIN_REQ_SENT`: _, `JOIN_ACK_RECV`: _
+
+**HIBA ESETÉN (SNAPSHOT_ERROR)**:
+
 
 
 
