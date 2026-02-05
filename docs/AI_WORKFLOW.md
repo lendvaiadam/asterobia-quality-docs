@@ -301,6 +301,28 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
     - Mark Status: `BLOCKED (No ACK)`.
     - **Reassign** or **Cancel** payload.
 
+### 4.K Public API Surface Regression Check (Hard Gate)
+**Goal**: Prevent "Disappearing API" bugs.
+
+1.  **Rule**: ANY Milestone closure MUST verify public API methods exist at runtime.
+2.  **Implementation**: HU-TEST scenario MUST include `typeof` checks for key methods.
+    - *Example*: `if (typeof game.sessionManager.startDiscovery === 'undefined') FAIL("Regression")`
+3.  **Enforcement**:
+    - If a method disappears: **STOP**.
+    - **MANDATORY HOTFIX** required before proceeding.
+    - Do NOT close the milestone.
+
+### 4.L Handshake "No-Stub" Evidence (Hard Gate)
+**Goal**: Prove real network traffic, not just internal state changes.
+
+1.  **Rule**: Verify Handshake using Traffic Evidence, not just Role State.
+2.  **Requirement**: `getDebugNetStatus()` (or equivalent) MUST show:
+    - **JOIN_REQ**: Sent/Received count > 0.
+    - **JOIN_ACK**: Sent/Received count > 0.
+3.  **Forbidden Closure**:
+    - "Role is GUEST" is **NOT ENOUGH**.
+    - If traffic counts are 0, the handshake is a **STUB** and fail.
+
 ### 4.3 Worker Execution Protocol (BINDING)
 
 1.  **ACK**: Worker reads Header, verifies Role Registry, and confirms.

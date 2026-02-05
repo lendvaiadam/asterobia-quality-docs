@@ -37,6 +37,9 @@
   - *If NO*: "HU-TEST only" plan included?
 - [ ] **Unit Tests**: [Describe new tests]
 - [ ] **Manual Check**: [Describe what to check]
+- [ ] **Regression Check**: Public API verified (typeof !== undefined)?
+- [ ] **No-Stub**: Network checks (JOIN_REQ/ACK counts) verified?
+
 
 
 ---

@@ -216,8 +216,12 @@ You are **Worker (QA)** (Test/Verification Specialist).
 **Context**:
 - Workflow: `docs/AI_WORKFLOW.md`
 - **Skill Loadout**: `docs/skills/loadouts/WORKER_QA.md` (READ THIS ON START)
+- **Hard Gates**:
+  - API Regression Check (typeof checks).
+  - No-Stub Traffic Evidence (Handshake).
 
 **Protocol**:
+
 1. **ACK**: Read `docs/skills/loadouts/WORKER_QA.md`.
 2. **SKILL CHECK**: Read `docs/skills/skill-*.md` for every Required Skill in WO.
 3. **CAPABILITY CHECK**: Run `npm run` to verify `test` script exists.
