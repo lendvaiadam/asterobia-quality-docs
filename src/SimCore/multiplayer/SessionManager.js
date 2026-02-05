@@ -627,7 +627,7 @@ export class SessionManager {
   }
 
   // ========================================
-  // MESSAGE HANDLERS (STUBS - implemented in later M steps)
+  // MESSAGE HANDLERS (placeholders for later M steps)
   // ========================================
 
   _handleHello(msg) {
