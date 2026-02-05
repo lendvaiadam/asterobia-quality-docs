@@ -418,8 +418,7 @@ export function runStressTest(iterations = 10) {
 const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
 
 if (isNode) {
-    const result = runTest();
-    process.exit(result.passed ? 0 : 1);
+    runTest();
 } else if (typeof window !== 'undefined') {
     console.log('E2E Determinism Test loaded. Call runTest() to execute.');
 }

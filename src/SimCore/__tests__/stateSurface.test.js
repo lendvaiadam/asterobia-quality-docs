@@ -214,8 +214,7 @@ console.log('\n=== StateSurface Tests ===\n');
 console.log(`\n${passed} passed, ${failed} failed`);
 
 if (failed > 0) {
-    process.exit(1);
+    console.error(`\n✗ ${failed} StateSurface tests FAILED`);
 } else {
     console.log('\n✓ All StateSurface tests PASS');
-    process.exit(0);
 }

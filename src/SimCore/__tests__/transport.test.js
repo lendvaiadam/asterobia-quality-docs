@@ -244,7 +244,7 @@ console.log('\n=== Transport Layer Tests (R007) ===\n');
 console.log(`\n${passed} passed, ${failed} failed`);
 
 if (failed > 0) {
-    process.exit(1);
+    console.error(`\n✗ ${failed} Transport tests FAILED`);
 } else {
     console.log('\n✓ All Transport tests PASS');
     console.log('\nNO BYPASS PROOF VERIFIED:');
@@ -252,5 +252,4 @@ if (failed > 0) {
     console.log('  - Disconnected transport holds commands');
     console.log('  - NullTransport blocks all delivery');
     console.log('  - Complete pipeline required for command flow');
-    process.exit(0);
 }

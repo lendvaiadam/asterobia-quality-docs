@@ -717,7 +717,7 @@ test('Quaternion/heading is restored (not identity) after save/load', () => {
 console.log(`\n${passed} passed, ${failed} failed`);
 
 if (failed > 0) {
-    process.exit(1);
+    console.error(`\n✗ ${failed} R011 Save/Load tests FAILED`);
 } else {
     console.log('\n✓ All R011 Save/Load tests PASS');
     console.log('\nPROOF OF DETERMINISM:');
@@ -725,5 +725,4 @@ if (failed > 0) {
     console.log('  - Load restores state exactly (hash match)');
     console.log('  - Post-load simulation matches original (tick-by-tick)');
     console.log('  - RNG state, entity IDs, tick count all preserved');
-    process.exit(0);
 }

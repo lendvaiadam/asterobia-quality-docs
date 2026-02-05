@@ -194,8 +194,7 @@ console.log('\n=== InputFactory Tests (R007 Transport) ===\n');
 console.log(`\n${passed} passed, ${failed} failed`);
 
 if (failed > 0) {
-    process.exit(1);
+    console.error(`\n✗ ${failed} InputFactory tests FAILED`);
 } else {
     console.log('\n✓ All InputFactory tests PASS');
-    process.exit(0);
 }

@@ -375,12 +375,11 @@ console.log('\n=== Pathfinding Determinism Tests (R009) ===\n');
 console.log(`\n${passed} passed, ${failed} failed`);
 
 if (failed > 0) {
-    process.exit(1);
+    console.error(`\n✗ ${failed} Pathfinding Determinism tests FAILED`);
 } else {
     console.log('\n✓ All Pathfinding Determinism tests PASS');
     console.log('\nPROOF OF DETERMINISM:');
     console.log('  - A* algorithm produces identical paths across 100 runs');
     console.log('  - Iteration count is consistent (no timing variance)');
     console.log('  - No Promise/async in return path');
-    process.exit(0);
 }

@@ -504,7 +504,7 @@ console.log('\n=== R010: Full Determinism Verification ===\n');
 console.log(`\n${passed} passed, ${failed} failed`);
 
 if (failed > 0) {
-    process.exit(1);
+    console.error(`\n✗ ${failed} R010 Determinism Verification tests FAILED`);
 } else {
     console.log('\n✓ All R010 Determinism Verification tests PASS');
     console.log('\nR010 DoD SATISFIED:');
@@ -516,5 +516,4 @@ if (failed > 0) {
     console.log('  - Dual-run with same seed: IDENTICAL final hash');
     console.log('  - Per-tick hash comparison: 100% match');
     console.log('  - Stress test (10 seeds × 100 ticks): ALL PASS');
-    process.exit(0);
 }

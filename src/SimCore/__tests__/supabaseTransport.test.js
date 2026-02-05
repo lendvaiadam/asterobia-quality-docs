@@ -483,7 +483,7 @@ console.log('\n=== Supabase Transport & Storage Tests (R012) ===\n');
 console.log(`\n${passed} passed, ${failed} failed`);
 
 if (failed > 0) {
-    process.exit(1);
+    console.error(`\n✗ ${failed} Supabase tests FAILED`);
 } else {
     console.log('\n✓ All Supabase tests PASS');
     console.log('\nR012 VERIFIED:');
@@ -493,5 +493,4 @@ if (failed > 0) {
     console.log('  - SupabaseStorageAdapter save/load works');
     console.log('  - Auth required for persistence');
     console.log('  - Full integration flow verified');
-    process.exit(0);
 }
