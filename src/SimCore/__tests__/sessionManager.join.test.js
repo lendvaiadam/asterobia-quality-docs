@@ -187,7 +187,7 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          reason: 'VERSION_MISMATCH'
+          rejectReason: 'VERSION_MISMATCH'
         })
       );
     });
@@ -204,7 +204,7 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          reason: 'INVALID_REQUEST'
+          rejectReason: 'INVALID_REQUEST'
         })
       );
     });
@@ -228,7 +228,7 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          reason: 'INVALID_REQUEST'
+          rejectReason: 'INVALID_REQUEST'
         })
       );
     });
@@ -272,7 +272,7 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          reason: 'SESSION_FULL'
+          rejectReason: 'SESSION_FULL'
         })
       );
     });
@@ -367,7 +367,7 @@ describe('SessionManager Join Flow (M06)', () => {
         c => c[1].type === MSG.JOIN_ACK
       );
       expect(call[1].accepted).toBe(false);
-      expect(call[1].reason).toBe('SESSION_FULL');
+      expect(call[1].rejectReason).toBe('SESSION_FULL');
     });
   });
 
@@ -460,7 +460,7 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          reason: 'STATE_TOO_LARGE'
+          rejectReason: 'STATE_TOO_LARGE'
         })
       );
     });
@@ -478,7 +478,7 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          reason: 'SNAPSHOT_ERROR'
+          rejectReason: 'SNAPSHOT_ERROR'
         })
       );
     });
@@ -588,8 +588,8 @@ describe('SessionManager Join Flow (M06)', () => {
 
       expect(ackCall).toBeDefined();
       expect(ackCall[1].accepted).toBe(false);
-      expect(ackCall[1].reason).toBe('VERSION_MISMATCH');
-      expect(ackCall[1].reason).not.toBeUndefined();
+      expect(ackCall[1].rejectReason).toBe('VERSION_MISMATCH');
+      expect(ackCall[1].rejectReason).not.toBeUndefined();
     });
 
     it('reject reason is never undefined for SESSION_FULL', async () => {
@@ -609,8 +609,8 @@ describe('SessionManager Join Flow (M06)', () => {
       const ackCall = calls.find(c => c[1]?.type === MSG.JOIN_ACK && !c[1]?.accepted);
 
       expect(ackCall).toBeDefined();
-      expect(ackCall[1].reason).toBe('SESSION_FULL');
-      expect(ackCall[1].reason).not.toBeUndefined();
+      expect(ackCall[1].rejectReason).toBe('SESSION_FULL');
+      expect(ackCall[1].rejectReason).not.toBeUndefined();
     });
 
     it('reject reason is never undefined for INVALID_REQUEST', async () => {
@@ -630,8 +630,8 @@ describe('SessionManager Join Flow (M06)', () => {
 
       expect(ackCall).toBeDefined();
       expect(ackCall[1].accepted).toBe(false);
-      expect(ackCall[1].reason).toBe('INVALID_REQUEST');
-      expect(ackCall[1].reason).not.toBeUndefined();
+      expect(ackCall[1].rejectReason).toBe('INVALID_REQUEST');
+      expect(ackCall[1].rejectReason).not.toBeUndefined();
     });
 
     it('all rejection paths have explicit reason strings', async () => {
@@ -650,8 +650,8 @@ describe('SessionManager Join Flow (M06)', () => {
         const ackCall = calls.find(c => c[1]?.type === MSG.JOIN_ACK && !c[1]?.accepted);
 
         if (ackCall) {
-          expect(typeof ackCall[1].reason).toBe('string');
-          expect(ackCall[1].reason.length).toBeGreaterThan(0);
+          expect(typeof ackCall[1].rejectReason).toBe('string');
+          expect(ackCall[1].rejectReason.length).toBeGreaterThan(0);
         }
       }
     });
