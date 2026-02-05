@@ -4,13 +4,15 @@
     "description": "A spherical planet RTS game",
     "main": "src/Main.js",
     "scripts": {
-        "start": "npx http-server . -c-1 -p 8081"
+        "start": "npx http-server . -c-1 -p 8081",
+        "test": "vitest"
     },
     "keywords": [],
     "author": "",
     "license": "ISC",
     "devDependencies": {
-        "http-server": "^14.1.1"
+        "http-server": "^14.1.1",
+        "vitest": "^4.0.18"
     },
     "dependencies": {
         "@supabase/supabase-js": "^2.93.3"
