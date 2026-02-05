@@ -13,7 +13,9 @@
 - [ ] **Protocol**: Implement `INPUT_CMD` (Sanitization) & `CMD_BATCH` (Creation) <!-- id: 4 -->
 - [ ] **Validation**: Host-side Slot/Schema verification (Anti-Cheat/Bug) <!-- id: 5 -->
 - [ ] **Transport**: Host Broadcast (`sentCount++`) -> Guest Recv (`_handleCmdBatch`) <!-- id: 6 -->
-- [ ] **Queue**: Guest `enqueue(cmd, scheduledTick)` (No execute) <!-- id: 7 -->
+- [ ] **Queue Logic**: Update `CommandQueue` to accept Host IDs (don't overwrite) <!-- id: 21 -->
+- [ ] **Safety Gate**: Add `Game.ENABLE_COMMAND_EXECUTION` flag (Disable for Slice 1) <!-- id: 22 -->
+- [ ] **Queue**: Guest `enqueue(cmd, scheduledTick)` (Accumulate ONLY) <!-- id: 7 -->
 - [ ] **Policies**: Dedup (Ignore), Gap (Warn), Stale (Drop - Slice 1 Mode) <!-- id: 8 -->
 - [ ] **Debug**: `getDebugNetStatus` (Counters), RingBuffer Logger (No Spam) <!-- id: 9 -->
 

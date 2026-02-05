@@ -28,9 +28,16 @@ Split into two distinct verifiable slices to isolate networking bugs from simula
     - `_debugCounters`: For HU-TEST.
 
 ### src/SimCore/runtime
-- `CommandQueue.js`: Add scheduling support (`tick` parameter).
+- `CommandQueue.js`: 
+  - Update `enqueue` to accept `id` from Host (don't overwrite with `icmd_`).
+  - Add `scheduledTick` support.
+- `SimLoop.js`: No changes needed (Generic).
 
-### src/utils
+### src/Core
+- `Game.js`:
+  - Add `this.ENABLE_COMMAND_EXECUTION = false` (Default for Slice 1).
+  - Update `_processInputCommands`: Check flag. If false, DO NOT FLUSH (allow queue to fill for HU-TEST).
+
 - `Logger.js`: Add RingBuffer capability (optional, or inline in SessionManager).
 
 ## Verification
