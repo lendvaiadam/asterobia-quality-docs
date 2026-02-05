@@ -158,13 +158,14 @@ game.sessionManager.state.players.map(p => p.slot)
 
 | Step | Leírás | Eredmény |
 |------|--------|----------|
-| 1 | Host indítás + session channel | ____ |
+| 1 | Host indítás + session channel | ____ (Wait for SUBSCRIBED before Announce) |
 | 2 | Guest join request | ____ |
 | 3 | Host player list update | ____ |
 | 4 | Guest snapshot receive | ____ |
-| 5 | Version mismatch rejection | ____ |
-| 6 | Session full rejection | ____ |
+| 5 | Version mismatch rejection | ____ (Check: `rejectReason` !== undefined) |
+| 6 | Session full rejection | ____ (Check: `rejectReason` === 'SESSION_FULL') |
 | 7 | Slot assignment sequential | ____ |
+
 
 **VÉGSŐ ÍTÉLET**: ____
 
