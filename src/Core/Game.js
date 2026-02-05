@@ -133,6 +133,38 @@ export class Game {
         // R008: Hook render callback for interpolation
         this.simLoop.onRender = (alpha) => this._applyInterpolatedRender(alpha);
 
+        // R013: State surface for multiplayer snapshot serialization
+        // Wraps StateSurface functions with Game context for SessionManager
+        this.stateSurface = {
+            /**
+             * Serialize current game state for multiplayer snapshot.
+             * Returns plain JSON-safe object (no circular refs, no Three.js objects).
+             * @returns {Object} Serialized state
+             */
+            serialize: () => {
+                return serializeState(this);
+            },
+
+            /**
+             * Apply a received snapshot to restore game state.
+             * Used by guests when joining a session.
+             * @param {Object} snapshot - Serialized state from host
+             */
+            deserialize: (snapshot) => {
+                if (!snapshot) return;
+
+                // Restore tick count
+                if (typeof snapshot.tickCount === 'number' && this.simLoop) {
+                    this.simLoop.tickCount = snapshot.tickCount;
+                }
+
+                // Restore unit states
+                if (snapshot.units && Array.isArray(snapshot.units)) {
+                    this._restoreUnitsFromSave(snapshot.units);
+                }
+            }
+        };
+
         // R013: Multiplayer session manager
         this.sessionManager = new SessionManager(this);
         // R013: Wire up transport for multiplayer channels
