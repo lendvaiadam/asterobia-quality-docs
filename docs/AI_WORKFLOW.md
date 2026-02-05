@@ -207,7 +207,11 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
        - [STATUS_WALKTHROUGH](raw-link)
        - [NOTES_ANTIGRAVITY](raw-link)
     ```
-3.  **Constraint**: NO PLACEHOLDERS. NO "See git log". Raw links MUST be to specific SHA.
+3.  **Constraint/Format**: 
+    - NO PLACEHOLDERS. NO "See git log".
+    - Evidence Links MUST be `raw.githubusercontent.com` URLs (SHA-pinned).
+    - **Example**:
+      `[STATUS_WALKTHROUGH](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/[SHA]/docs/STATUS_WALKTHROUGH.md)`
 
 ### 4.E Worker Utilization Gate (Hard Gate)
 **Goal**: Maximize parallelism. Idle workers must be justified.

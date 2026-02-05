@@ -14,6 +14,8 @@
 - **Status**: M05 CLOSED (HU-TEST PASS). Verified Host List population + 15s Pruning Logic.
 - **Gate**: Added "Closure Receipt Gate" (Mandatory In-Chat Receipt) to Workflow.
 - **Gate**: Added "Worker Utilization Gate" (Mandatory Table + Parallel Pack) to Workflow.
+- **Refinement**: "Closure Receipt Gate" now mandates full `raw.githubusercontent.com` URLs.
+
 
 
 
