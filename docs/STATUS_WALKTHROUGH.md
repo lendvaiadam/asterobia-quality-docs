@@ -53,7 +53,9 @@
 - **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
 - **Completed**: M01, M02, M03, M04, M05 (Guest Lobby Discovery) — MERGED
 - **Verified**: M05 HU-TEST PASS (Host appears in list, disappears after 15s prune).
-- **Current Step**: M06 (Join Request Handshake) — **CLOSED** (HU-TEST PASS)
+- **Previous Step**: M06 (Join Request Handshake) — **CLOSED** (HU-TEST PASS)
+- **Current Step**: M07-Slice1 (Transport → Queue) — **IN PROGRESS**
+- **Focus**: Verify `CMD_BATCH` integrity, sequencing, and queuing (No Execution).
 - **Fallback Policy**: M06 (Handshake) closure ACCEPTABLE with Fallback Snapshot. M07 (Game Loop) BLOCKED until Full Snapshot works.
 - **CTO Ping #1**: APPROVED (2026-02-04)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
