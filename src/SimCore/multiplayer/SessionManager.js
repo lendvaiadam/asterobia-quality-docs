@@ -18,6 +18,10 @@ import { createHostAnnounce, createJoinAckAccepted, createJoinAckRejected } from
 const LOBBY_CHANNEL = 'asterobia:lobby';
 const ANNOUNCE_INTERVAL_MS = 5000;
 
+// M05: Discovery constants
+const STALE_HOST_TIMEOUT_MS = 15000;  // 3 missed announces = stale
+const MAX_AVAILABLE_HOSTS = 50;
+
 // M06: Join handling constants
 const SNAPSHOT_WARN_SIZE = 80000;   // 80KB warning threshold
 const SNAPSHOT_MAX_SIZE = 100000;   // 100KB hard limit
@@ -74,9 +78,16 @@ export class SessionManager {
 
     /**
      * Available hosts map (for Guest discovery)
+     * META-GAME STATE: Do not serialize
      * @type {Map<string, Object>}
      */
     this.availableHosts = new Map();
+
+    /**
+     * M05: Discovery active flag
+     * @type {boolean}
+     */
+    this._discoveryActive = false;
 
     /**
      * Input buffer for incoming commands (Host-side)
@@ -315,6 +326,88 @@ export class SessionManager {
   }
 
   // ========================================
+  // GUEST DISCOVERY (M05)
+  // ========================================
+
+  /**
+   * M05: Start listening for HOST_ANNOUNCE messages.
+   * Idempotent: safe to call when already active.
+   * @returns {Promise<void>}
+   */
+  async startDiscovery() {
+    // Idempotency guard
+    if (this._discoveryActive) {
+      console.log('[SessionManager] Discovery already active');
+      return;
+    }
+
+    if (!this.transport || typeof this.transport.joinChannel !== 'function') {
+      console.warn('[SessionManager] No transport for discovery');
+      return;
+    }
+
+    try {
+      await this.transport.joinChannel(LOBBY_CHANNEL, (msg) => this.onMessage(msg));
+      this._discoveryActive = true;
+      console.log('[SessionManager] Discovery started');
+    } catch (err) {
+      console.error('[SessionManager] Failed to start discovery:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * M05: Stop listening for HOST_ANNOUNCE messages.
+   * Idempotent: safe to call when not active.
+   */
+  stopDiscovery() {
+    // Idempotency guard
+    if (!this._discoveryActive) {
+      return;
+    }
+
+    if (this.transport && typeof this.transport.leaveChannel === 'function') {
+      this.transport.leaveChannel(LOBBY_CHANNEL).catch(err => {
+        console.warn('[SessionManager] Failed to leave lobby channel:', err);
+      });
+    }
+
+    this.availableHosts.clear();
+    this._discoveryActive = false;
+    console.log('[SessionManager] Discovery stopped');
+  }
+
+  /**
+   * M05: Get available hosts with lazy stale pruning.
+   * META-GAME STATE: Do not serialize.
+   * @returns {Array<Object>} Array of HostEntry objects
+   */
+  getAvailableHosts() {
+    const now = Date.now();
+    const result = [];
+
+    // Lazy pruning: remove stale entries as we iterate
+    for (const [hostId, entry] of this.availableHosts) {
+      if (now - entry.lastSeenAt > STALE_HOST_TIMEOUT_MS) {
+        // Stale entry - prune it
+        this.availableHosts.delete(hostId);
+      } else {
+        result.push(entry);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * M05: Check if discovery is currently active
+   * @returns {boolean}
+   */
+  isDiscoveryActive() {
+    return this._discoveryActive;
+  }
+
+  // ========================================
   // GUEST OPERATIONS
   // ========================================
 
@@ -369,24 +462,27 @@ export class SessionManager {
     // Stop announcing (clears interval)
     this.stopAnnouncing();
 
+    // M05: Stop discovery if active
+    this.stopDiscovery();
+
     // Clear ping interval
     if (this.pingInterval) {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
     }
 
-    // Leave lobby channel if transport supports it
-    if (this.transport && typeof this.transport.leaveChannel === 'function') {
+    // Leave lobby channel if transport supports it (Host was on lobby)
+    if (this.state.isHost() && this.transport && typeof this.transport.leaveChannel === 'function') {
       this.transport.leaveChannel(LOBBY_CHANNEL).catch(err => {
         console.warn('[SessionManager] Failed to leave lobby channel:', err);
       });
+    }
 
-      // M06: Leave session channel
-      if (this._sessionChannel) {
-        this.transport.leaveChannel(this._sessionChannel).catch(err => {
-          console.warn('[SessionManager] Failed to leave session channel:', err);
-        });
-      }
+    // M06: Leave session channel
+    if (this._sessionChannel && this.transport && typeof this.transport.leaveChannel === 'function') {
+      this.transport.leaveChannel(this._sessionChannel).catch(err => {
+        console.warn('[SessionManager] Failed to leave session channel:', err);
+      });
     }
 
     // M06: Clear session channel and join queue
@@ -492,9 +588,53 @@ export class SessionManager {
     console.log('[SessionManager] HELLO from:', msg.clientId);
   }
 
+  /**
+   * M05: Handle HOST_ANNOUNCE message for guest discovery
+   * @param {Object} msg - HOST_ANNOUNCE message
+   */
   _handleHostAnnounce(msg) {
-    // M05: Guest discovery
-    console.log('[SessionManager] HOST_ANNOUNCE from:', msg.hostId);
+    // Only process if discovery is active
+    if (!this._discoveryActive) {
+      return;
+    }
+
+    // Strict protocol version match
+    if (msg.protocolVersion !== PROTOCOL_VERSION) {
+      return;
+    }
+
+    // Required fields validation
+    if (!msg.hostId || !msg.sessionName) {
+      return;
+    }
+
+    // Don't add self
+    if (msg.hostId === this.game.clientId) {
+      return;
+    }
+
+    // FIFO eviction if at max
+    if (this.availableHosts.size >= MAX_AVAILABLE_HOSTS && !this.availableHosts.has(msg.hostId)) {
+      const oldestKey = this.availableHosts.keys().next().value;
+      this.availableHosts.delete(oldestKey);
+    }
+
+    // Store normalized HostEntry
+    this.availableHosts.set(msg.hostId, {
+      hostId: msg.hostId,
+      sessionName: msg.sessionName,
+      playerCount: msg.currentPlayers ?? 1,
+      maxPlayers: msg.maxPlayers ?? 4,
+      mapSeed: msg.mapSeed ?? '',
+      lastSeenAt: Date.now()
+    });
+
+    console.log(`[SessionManager] HOST_ANNOUNCE from: ${msg.hostId} (${msg.sessionName})`);
+
+    // Notify UI if callback registered
+    if (this.onHostListUpdated) {
+      this.onHostListUpdated(this.getAvailableHosts());
+    }
   }
 
   /**
