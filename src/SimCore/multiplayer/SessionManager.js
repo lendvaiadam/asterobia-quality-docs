@@ -767,11 +767,29 @@ export class SessionManager {
     let fullSnapshot;
     let simTick;
     try {
+      // M06-R02: Verify stateSurface exists
+      if (!this.game.stateSurface || typeof this.game.stateSurface.serialize !== 'function') {
+        console.error('[SessionManager] game.stateSurface.serialize not available');
+        await this._sendJoinAck(msg.guestId, false, null, 'SNAPSHOT_ERROR');
+        return;
+      }
+
       fullSnapshot = this.game.stateSurface.serialize();
       simTick = this.game.simLoop?.tickCount || 0;
 
+      // M06-R02: Verify snapshot is JSON-serializable
+      let snapshotJson;
+      try {
+        snapshotJson = JSON.stringify(fullSnapshot);
+      } catch (jsonErr) {
+        console.error('[SessionManager] Snapshot not JSON-serializable:', jsonErr.name, jsonErr.message);
+        console.error('[SessionManager] Snapshot keys:', Object.keys(fullSnapshot || {}));
+        await this._sendJoinAck(msg.guestId, false, null, 'SNAPSHOT_ERROR');
+        return;
+      }
+
       // Size check (M06-R04)
-      const snapshotSize = JSON.stringify(fullSnapshot).length;
+      const snapshotSize = snapshotJson.length;
       if (snapshotSize > SNAPSHOT_WARN_SIZE) {
         console.warn(`[SessionManager] Snapshot large: ${snapshotSize} bytes`);
       }
@@ -780,8 +798,11 @@ export class SessionManager {
         await this._sendJoinAck(msg.guestId, false, null, 'STATE_TOO_LARGE');
         return;
       }
+
+      console.log(`[SessionManager] Snapshot ready: ${snapshotSize} bytes, tick ${simTick}`);
     } catch (err) {
-      console.error('[SessionManager] Snapshot serialization failed:', err);
+      console.error('[SessionManager] Snapshot serialization failed:', err.name, err.message);
+      if (err.stack) console.error('[SessionManager] Stack:', err.stack);
       await this._sendJoinAck(msg.guestId, false, null, 'SNAPSHOT_ERROR');
       return;
     }
