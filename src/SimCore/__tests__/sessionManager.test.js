@@ -25,14 +25,40 @@ function createMockGame() {
 
 /**
  * Mock Transport for testing
+ * M06: Updated to support async channel operations
  */
 function createMockTransport() {
   return {
     send: vi.fn(),
     onMessage: vi.fn(),
-    joinChannel: vi.fn(),
-    broadcastToChannel: vi.fn()
+    joinChannel: vi.fn().mockResolvedValue(undefined),
+    leaveChannel: vi.fn().mockResolvedValue(undefined),
+    broadcastToChannel: vi.fn().mockResolvedValue(undefined)
   };
+}
+
+/**
+ * M06: Helper to create a mock transport that simulates JOIN_ACK response
+ * @param {SessionManager} sm - SessionManager to wire up
+ * @param {Object} ackResponse - JOIN_ACK payload to return
+ */
+function createMockTransportWithJoinAck(sm, ackResponse = { accepted: true, assignedSlot: 1 }) {
+  const transport = createMockTransport();
+
+  // When broadcastToChannel is called with JOIN_REQ, simulate ACK response
+  transport.broadcastToChannel.mockImplementation(async (channel, msg) => {
+    if (msg.type === 'JOIN_REQ') {
+      // Simulate async ACK from host
+      setTimeout(() => {
+        sm.onMessage({
+          type: 'JOIN_ACK',
+          ...ackResponse
+        });
+      }, 10);
+    }
+  });
+
+  return transport;
 }
 
 describe('SessionManager', () => {
@@ -160,26 +186,75 @@ describe('SessionManager', () => {
       await expect(sessionManager.joinGame('host-123')).rejects.toThrow('Already in a session');
     });
 
-    it('sets role to GUEST', async () => {
+    it('throws if no transport available', async () => {
+      await expect(sessionManager.joinGame('host-123')).rejects.toThrow('No transport available for join');
+    });
+
+    it('sets role to GUEST after JOIN_ACK', async () => {
+      const transport = createMockTransportWithJoinAck(sessionManager);
+      sessionManager.setTransport(transport);
+
       await sessionManager.joinGame('host-123');
+
       expect(sessionManager.getRole()).toBe(NetworkRole.GUEST);
       expect(sessionManager.isGuest()).toBe(true);
     });
 
-    it('stores host ID in state', async () => {
+    it('stores host ID in state after JOIN_ACK', async () => {
+      const transport = createMockTransportWithJoinAck(sessionManager);
+      sessionManager.setTransport(transport);
+
       await sessionManager.joinGame('host-123');
+
       expect(sessionManager.state.hostId).toBe('host-123');
     });
 
     it('generates client ID if not set', async () => {
+      const transport = createMockTransportWithJoinAck(sessionManager);
+      sessionManager.setTransport(transport);
+
       expect(mockGame.clientId).toBeNull();
       await sessionManager.joinGame('host-123');
       expect(mockGame.clientId).toBeDefined();
     });
 
-    it('returns true on success (stub)', async () => {
+    it('returns true on successful JOIN_ACK', async () => {
+      const transport = createMockTransportWithJoinAck(sessionManager);
+      sessionManager.setTransport(transport);
+
       const result = await sessionManager.joinGame('host-123');
+
       expect(result).toBe(true);
+    });
+
+    it('increments joinReqSentCount in dev mode', async () => {
+      mockGame._isDevMode = true;
+      const transport = createMockTransportWithJoinAck(sessionManager);
+      sessionManager.setTransport(transport);
+
+      await sessionManager.joinGame('host-123');
+
+      expect(sessionManager.getDebugNetStatus().joinReqSentCount).toBe(1);
+    });
+
+    it('increments joinAckRecvCount after ACK in dev mode', async () => {
+      mockGame._isDevMode = true;
+      const transport = createMockTransportWithJoinAck(sessionManager);
+      sessionManager.setTransport(transport);
+
+      await sessionManager.joinGame('host-123');
+
+      expect(sessionManager.getDebugNetStatus().joinAckRecvCount).toBe(1);
+    });
+
+    it('rejects with reason when JOIN_ACK rejected', async () => {
+      const transport = createMockTransportWithJoinAck(sessionManager, {
+        accepted: false,
+        reason: 'SESSION_FULL'
+      });
+      sessionManager.setTransport(transport);
+
+      await expect(sessionManager.joinGame('host-123')).rejects.toThrow('Join rejected: SESSION_FULL');
     });
   });
 
@@ -316,7 +391,11 @@ describe('SessionManager', () => {
     });
 
     it('returns false when GUEST', async () => {
+      const transport = createMockTransportWithJoinAck(sessionManager);
+      sessionManager.setTransport(transport);
+
       await sessionManager.joinGame('host-123');
+
       expect(sessionManager.canStep()).toBe(false);
     });
   });
@@ -366,6 +445,9 @@ describe('SessionManager', () => {
     });
 
     it('calls onConnectionStateChanged when joining', async () => {
+      const transport = createMockTransportWithJoinAck(sessionManager);
+      sessionManager.setTransport(transport);
+
       const callback = vi.fn();
       sessionManager.onConnectionStateChanged = callback;
 
