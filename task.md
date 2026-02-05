@@ -2,9 +2,9 @@
 
 ## Phase 1: Specifications & Baseline (NOW)
 - [x] **Spec**: `docs/specs/R013_M07_GAME_LOOP.md` (Strict Policies Locked) <!-- id: 0 -->
-- [ ] **Repo**: Ensure `task.md`, `implementation_plan.md` exist in repo root <!-- id: 1 -->
-- [ ] **Docs**: Set `STATUS_WALKTHROUGH` to M07 Slice 1 <!-- id: 2 -->
-- [ ] **Test**: Create `docs/TEST_LOGS/HU-TEST-R013-M07-LOOP.md` <!-- id: 3 -->
+- [x] **Repo**: Ensure `task.md`, `implementation_plan.md` exist in repo root <!-- id: 1 -->
+- [x] **Docs**: Set `STATUS_WALKTHROUGH` to M07 Slice 1 <!-- id: 2 -->
+- [x] **Test**: Create `docs/TEST_LOGS/HU-TEST-R013-M07-LOOP.md` <!-- id: 3 -->
 
 ## Phase 2: Slice 1 (Transport Pipeline)
 **Goal**: `CMD_BATCH` integrity, sequencing, queuing. **NO EXECUTION.**

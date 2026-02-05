@@ -262,7 +262,9 @@ Host broadcasts confirmed commands for a tick:
 ```json
 {
   "type": "CMD_BATCH",
-  "simTick": 1043,
+  "batchSeq": 105,          // Monotonic batch sequence (Gap Detection)
+  "simTick": 1043,          // Created at tick
+  "scheduledTick": 1045,    // Execute at tick (Fixed Buffer)
   "commands": [
     {
       "slot": 0,
@@ -275,8 +277,10 @@ Host broadcasts confirmed commands for a tick:
       "command": { "action": "MOVE", "entityId": 42, "target": { "x": 150.5, "y": 200.3 } }
     }
   ],
+  "stateHash": "0xFE32...", // Optional state checksum
   "timestamp": 1706700010050
 }
+
 ```
 
 ### 4.7 SNAPSHOT
