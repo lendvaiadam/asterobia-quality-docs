@@ -627,7 +627,9 @@ export class SessionManager {
   }
 
   // ========================================
-  // MESSAGE HANDLERS (placeholders for later M steps)
+  // MESSAGE HANDLERS
+  // M05/M06: HOST_ANNOUNCE, JOIN_REQ, JOIN_ACK fully implemented
+  // M07+: INPUT_CMD, CMD_BATCH, SNAPSHOT, RESYNC, PING/PONG are minimal stubs
   // ========================================
 
   _handleHello(msg) {
