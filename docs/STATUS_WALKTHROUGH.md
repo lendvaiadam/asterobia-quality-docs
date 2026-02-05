@@ -51,7 +51,10 @@
 - **Current Step**: M06 (Join Request Handshake) — Ready to Start
 - **CTO Ping #1**: APPROVED (2026-02-04)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
-- **Note**: Vitest not yet installed; tests written but cannot execute
+- **Note**: Vitest not yet installed; tests written but cannot execute.
+- **State**: M05 unit tests authored (Vitest) but NOT EXECUTABLE — Test Runner missing.
+- **Verification**: QA verification currently: HU-TEST only until runner is installed.
+
 
 ---
 

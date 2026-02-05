@@ -245,7 +245,6 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
 3.  **Protocol**:
     - **FORBIDDEN**: Direct edits by Workers.
     - **REQUIRED**: Submit `[ROUTING]` proposal to Antigravity.
-    - **REQUIRED**: Submit `[ROUTING]` proposal to Antigravity.
     - **EXCEPTION**: Status updates *explicitly* delegated (e.g. updating Role Map), but preferred via Routing.
 
 ### 4.H Test Runner Capability Gate (Hard Gate)
@@ -256,8 +255,8 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
     - **IF EXISTS**: Proceed with `npm test`.
     - **IF MISSING**: 
         - **STOP** trying to run unit tests.
-        - **FALLBACK**: Use **HU-TEST** (Manual Verification) as the only gate.
-        - **LOG**: Notice "TEST_RUNNER: NOT CONFIGURED" in Handoff/Receipt.
+        - **FALLBACK**: "HU-TEST only" MUST be stated. No worker may claim "tests run".
+        - **LOG**: Receipt MUST include line `TEST_RUNNER: NOT CONFIGURED (Evidence: No test script)`.
 
 ### 4.3 Worker Execution Protocol (BINDING)
 
