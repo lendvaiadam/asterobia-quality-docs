@@ -888,8 +888,8 @@ export class SessionManager {
       this.pendingJoin = null;
       resolve(true);
     } else {
-      // M06: Join rejected - coerce undefined reason to UNKNOWN_ERROR
-      const reason = msg.reason || 'UNKNOWN_ERROR';
+      // M06: Join rejected - accept both field names for compatibility, coerce to UNKNOWN_ERROR if missing
+      const reason = msg.rejectReason ?? msg.reason ?? 'UNKNOWN_ERROR';
       console.log(`[SessionManager] Join rejected: ${reason}`);
 
       // Cleanup session channel

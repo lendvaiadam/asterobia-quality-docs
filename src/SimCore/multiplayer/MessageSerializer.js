@@ -266,10 +266,12 @@ export function createJoinAckAccepted({ assignedSlot, simTick, fullSnapshot }) {
  * @returns {Object}
  */
 export function createJoinAckRejected(reason) {
+  const normalizedReason = reason || 'UNKNOWN_ERROR';
   return {
     type: MSG.JOIN_ACK,
     accepted: false,
-    reason: reason || 'UNKNOWN_ERROR',
+    reason: normalizedReason,
+    rejectReason: normalizedReason,  // Alias for backwards compatibility
     assignedSlot: null,
     simTick: null,
     fullSnapshot: null,
