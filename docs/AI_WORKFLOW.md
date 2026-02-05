@@ -245,7 +245,30 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
 3.  **Protocol**:
     - **FORBIDDEN**: Direct edits by Workers.
     - **REQUIRED**: Submit `[ROUTING]` proposal to Antigravity.
+    - **REQUIRED**: Submit `[ROUTING]` proposal to Antigravity.
     - **EXCEPTION**: Status updates *explicitly* delegated (e.g. updating Role Map), but preferred via Routing.
+
+4.  **Canonical File Ownership Matrix**:
+
+| File/Folder | Owner | Edit Policy | Propose Policy | Merge Authority |
+|---|---|---|---|---|
+| `docs/STATUS_WALKTHROUGH.md` | **Antigravity** | **Antigravity** | Orchestrator/Workers via `[ROUTING]` | Antigravity |
+| `docs/NOTES_ANTIGRAVITY.md` | **Antigravity** | **Antigravity** | **NOBODY** | Antigravity |
+| `docs/AI_WORKFLOW.md` | **Antigravity** | **Antigravity** | Orchestrator via `[ROUTING]` | Antigravity |
+| `docs/WORKER_POOL_RUNBOOK.md`| **Antigravity** | **Antigravity** | Orchestrator via `[ROUTING]` | Antigravity |
+| `docs/work_orders/*` | **Orchestrator** | Orchestrator (Draft) | Workers (Feedback) | Antigravity (Audit) |
+| `docs/TEST_LOGS/*` | **QA Worker** | QA (Draft) | Orchestrator (Append) | Antigravity (Audit) |
+
+5.  **Violation & Recovery**:
+    - **Trigger**: Orchestrator edits an Antigravity file.
+    - **Status**: GOVERNANCE VIOLATION.
+    - **Recovery**:
+      ```bash
+      git checkout -- docs/STATUS_WALKTHROUGH.md
+      # or
+      git reset --hard HEAD
+      ```
+   - **Action**: STOP. Route proposal instead.
 
 ### 4.H Test Runner Capability Gate (Hard Gate)
 **Goal**: No blind test commands. Verify `npm test` exists first.

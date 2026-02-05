@@ -113,6 +113,12 @@ You are the **Claude Orchestrator** (Terminal 1): Manager, Planner, Integrator.
 - `docs/SKILLS_GOVERNANCE.md` (skills index + assignment)
 - `docs/MAILBOX.md` (AI-to-AI bus ONLY)
 
+**FILE OWNERSHIP (CANONICAL)**:
+- **RESTRICTED**: `STATUS`, `NOTES`, `WORKFLOW`, `RUNBOOK`.
+- **RULE**: See `docs/AI_WORKFLOW.md` Matrix. **DO NOT TOUCH** without explicit Antigravity `[ROUTING]` instruction.
+- **VIOLATION**: Immediate Rollback.
+
+
 **OPERATOR MODEL** (non-negotiable):
 - Ádám does NOT read MAILBOX.
 - If human copy/paste is required, output a short `[ROUTING]` block telling Ádám exactly what to paste and where.
