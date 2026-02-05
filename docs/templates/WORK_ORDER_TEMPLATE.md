@@ -39,6 +39,7 @@
 
 ## 6. Pre-Issue Gate (Orchestrator Check)
 - [ ] **De-Dup**: Checked `docs/STATUS_WALKTHROUGH.md` and `git log`?
+- [ ] **Utilization**: Published Table? Justified Idle? (Max 1 idle without reason).
 - [ ] **Double-Check**: Asked 5-8 questions? Received Antigravity ACK?
 
 ## 7. Integration Gate (Post-Work)

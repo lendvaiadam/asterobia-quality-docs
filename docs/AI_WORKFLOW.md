@@ -209,6 +209,30 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
     ```
 3.  **Constraint**: NO PLACEHOLDERS. NO "See git log". Raw links MUST be to specific SHA.
 
+### 4.E Worker Utilization Gate (Hard Gate)
+**Goal**: Maximize parallelism. Idle workers must be justified.
+
+1.  **Trigger**: Before issuing any Milestone Work Order (e.g. M06).
+2.  **Requirement**: Orchestrator MUST publish a **Utilization Table**:
+    ```
+    | Worker | Task | Status | Justification if IDLE |
+    | W1 (BE)| ...  | ...    | ... |
+    | W2 (FE)| ...  | ...    | ... |
+    | W3 (QA)| ...  | ...    | ... |
+    | W4 (RF)| ...  | ...    | ... |
+    ```
+3.  **Constraint**: If ≥2 Workers are IDLE, Orchestrator MUST explain why no parallel tasks (docs, review, edge-cases) are possible.
+4.  **No Implicit Status**: "Already Routed" is INVALID without ACK evidence.
+
+### 4.F Parallel Pack Rule (Binding)
+**Goal**: Never waste a cycle.
+
+- **Rule**: For every Milestone WO, Orchestrator MUST attach at least one **Parallel-Safe Doc-Only Task**:
+  - **QA**: HU-TEST scenario expansion (docs only).
+  - **RF**: Risk-Audit or Refactor Plan (docs only).
+  - **FE**: UI Contract / Mockup specs (docs only).
+- **Constraint**: These tasks MUST NOT share code files with the critical path to avoid merge conflicts.
+
 ### 4.3 Worker Execution Protocol (BINDING)
 
 1.  **ACK**: Worker reads Header, verifies Role Registry, and confirms.

@@ -13,6 +13,8 @@
 - **Gate**: Added "Worker Liveness / Progress Gate" (ACK 30m / Progress 2h) to Workflow.
 - **Status**: M05 CLOSED (HU-TEST PASS). Verified Host List population + 15s Pruning Logic.
 - **Gate**: Added "Closure Receipt Gate" (Mandatory In-Chat Receipt) to Workflow.
+- **Gate**: Added "Worker Utilization Gate" (Mandatory Table + Parallel Pack) to Workflow.
+
 
 
 
