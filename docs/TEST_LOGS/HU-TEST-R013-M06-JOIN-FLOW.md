@@ -213,7 +213,13 @@ game.sessionManager.state.players.map(p => p.slot)
 - **Protocol**: Handshake Verified.
 
 
+- **Protocol**: Handshake Verified.
+
 ---
+
+## 3. Allowed Console Noise / Ignore
+- **"A listener indicated an asynchronous response..."**: Ez a böngésző kiegészítők hibája (Chrome extension noise). A kódbázisban (`grep`) bizonyítottan nincs extension-üzenetküldés. **IGNORÁLHATÓ**.
+
 
 ## 3. JOIN_ACK Message Schema Verification
 

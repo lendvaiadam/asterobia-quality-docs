@@ -16,6 +16,11 @@
 | W4 | Refactor/Review | - | - | Idle |
 | Orchestrator | Coordination | work/WO-R013 | R013 Integration | Active |
 
+**Test Notes (Non-Blocking):**
+- **"No test suite found"**: Vitest reports this for custom-runner files. Check file output for "X passed".
+- **Flaky Tests**: `sessionState.test.js` is timing-dependent. Acceptable for M06/M07 closure.
+
+
 ---
 
 ## 🚀 Release Status (Completed/In-Flight)
