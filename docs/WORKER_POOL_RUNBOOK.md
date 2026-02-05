@@ -68,6 +68,7 @@ CONTEXT: Assigning UI Task.
    - Antigravity: Merge to main (after explicit human PASS).
 3. **Completion Signal**:
    - Posting to `docs/MAILBOX.md` with: `[WO-XXX] [Worker] [Complete]`.
+   - **Antigravity**: MUST post "Closure Receipt" in Main Chat (See `AI_WORKFLOW` §4.D).
 
 ---
 

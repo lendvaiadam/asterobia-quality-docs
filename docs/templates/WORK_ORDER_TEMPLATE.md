@@ -44,3 +44,4 @@
 ## 7. Integration Gate (Post-Work)
 - [ ] **HU Test**: Output `[ROUTING]` with HU Scenario?
 - [ ] **Merge**: Merged to Parent?
+- [ ] **Receipt**: Closure Receipt posted? (SHA + Tags + RAW Links)

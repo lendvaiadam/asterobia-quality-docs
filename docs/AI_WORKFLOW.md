@@ -193,6 +193,22 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
     > 3. Are you blocked? If yes, on what?
     > 4. What is the highest-value next task right now?
 
+### 4.D Closure Receipt Gate (Hard Gate)
+**Goal**: User never hunts for SHAs. Auditable receipt in-chat is MANDATORY.
+
+1.  **Trigger**: Milestone marked as `CLOSED` or `VERIFIED` in `STATUS_WALKTHROUGH.md`.
+2.  **Action**: Antigravity/Orchestrator MUST output a "Closure Receipt" Block:
+    ```
+    === CLOSURE RECEIPT: [RXX MXX] ===
+    1. Branch: [Name] (Pushed to Origin)
+    2. Commit SHA: [Exact SHA]
+    3. Tag: [Tag Name] -> [Tag SHA]
+    4. Evidence Links:
+       - [STATUS_WALKTHROUGH](raw-link)
+       - [NOTES_ANTIGRAVITY](raw-link)
+    ```
+3.  **Constraint**: NO PLACEHOLDERS. NO "See git log". Raw links MUST be to specific SHA.
+
 ### 4.3 Worker Execution Protocol (BINDING)
 
 1.  **ACK**: Worker reads Header, verifies Role Registry, and confirms.
