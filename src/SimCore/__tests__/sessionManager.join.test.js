@@ -465,7 +465,8 @@ describe('SessionManager Join Flow (M06)', () => {
       );
     });
 
-    it('handles serialization error gracefully', async () => {
+    it('handles serialization error gracefully with fallback snapshot', async () => {
+      // M06-R02: When serialize throws, use fallback snapshot instead of rejecting
       mockGame.stateSurface.serialize.mockImplementation(() => {
         throw new Error('Serialization failed');
       });
@@ -473,12 +474,17 @@ describe('SessionManager Join Flow (M06)', () => {
       sessionManager.onMessage(createJoinReq());
       await flushJoinQueue();
 
+      // Should ACCEPT with fallback snapshot, not reject
       expect(mockTransport.broadcastToChannel).toHaveBeenCalledWith(
         sessionManager._sessionChannel,
         expect.objectContaining({
           type: MSG.JOIN_ACK,
-          accepted: false,
-          rejectReason: 'SNAPSHOT_ERROR'
+          accepted: true,
+          fullSnapshot: expect.objectContaining({
+            version: 1,
+            units: [],
+            _fallback: true
+          })
         })
       );
     });

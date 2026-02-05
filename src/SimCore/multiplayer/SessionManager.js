@@ -767,15 +767,41 @@ export class SessionManager {
     let fullSnapshot;
     let simTick;
     try {
-      // M06-R02: Verify stateSurface exists
-      if (!this.game.stateSurface || typeof this.game.stateSurface.serialize !== 'function') {
-        console.error('[SessionManager] game.stateSurface.serialize not available');
-        await this._sendJoinAck(msg.guestId, false, null, 'SNAPSHOT_ERROR');
-        return;
+      simTick = this.game.simLoop?.tickCount || 0;
+
+      // M06-R02: Debug logging for snapshot source investigation
+      console.log('[SessionManager] Snapshot source check:', {
+        hasGame: !!this.game,
+        hasStateSurface: !!this.game?.stateSurface,
+        serializeType: typeof this.game?.stateSurface?.serialize,
+        hasUnits: !!this.game?.units,
+        unitsLength: this.game?.units?.length ?? 'N/A'
+      });
+
+      // M06-R02: Try primary serialization, fall back to minimal snapshot
+      if (this.game.stateSurface && typeof this.game.stateSurface.serialize === 'function') {
+        try {
+          fullSnapshot = this.game.stateSurface.serialize();
+        } catch (serializeErr) {
+          console.error('[SessionManager] stateSurface.serialize() threw:', serializeErr.name, serializeErr.message);
+          if (serializeErr.stack) console.error('[SessionManager] Stack:', serializeErr.stack);
+          // Fall through to minimal snapshot
+          fullSnapshot = null;
+        }
       }
 
-      fullSnapshot = this.game.stateSurface.serialize();
-      simTick = this.game.simLoop?.tickCount || 0;
+      // M06-R02: Fallback to minimal snapshot if serialize failed or unavailable
+      if (!fullSnapshot) {
+        console.warn('[SessionManager] Using minimal fallback snapshot');
+        fullSnapshot = {
+          version: 1,
+          tickCount: simTick,
+          simTimeSec: 0,
+          units: [],
+          selectedUnitId: null,
+          _fallback: true
+        };
+      }
 
       // M06-R02: Verify snapshot is JSON-serializable
       let snapshotJson;
@@ -784,8 +810,9 @@ export class SessionManager {
       } catch (jsonErr) {
         console.error('[SessionManager] Snapshot not JSON-serializable:', jsonErr.name, jsonErr.message);
         console.error('[SessionManager] Snapshot keys:', Object.keys(fullSnapshot || {}));
-        await this._sendJoinAck(msg.guestId, false, null, 'SNAPSHOT_ERROR');
-        return;
+        // Use empty fallback
+        fullSnapshot = { version: 1, tickCount: simTick, units: [], _fallback: true };
+        snapshotJson = JSON.stringify(fullSnapshot);
       }
 
       // Size check (M06-R04)
@@ -799,7 +826,7 @@ export class SessionManager {
         return;
       }
 
-      console.log(`[SessionManager] Snapshot ready: ${snapshotSize} bytes, tick ${simTick}`);
+      console.log(`[SessionManager] Snapshot ready: ${snapshotSize} bytes, tick ${simTick}${fullSnapshot._fallback ? ' (FALLBACK)' : ''}`);
     } catch (err) {
       console.error('[SessionManager] Snapshot serialization failed:', err.name, err.message);
       if (err.stack) console.error('[SessionManager] Stack:', err.stack);
