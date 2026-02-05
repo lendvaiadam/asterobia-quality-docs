@@ -11,6 +11,7 @@
 - **Gate**: Added "Pre-WO Double-Check" (5-8 Questions Rule) to Workflow & Runbook. (SHA: 6ec2f4c)
 - **Consultation**: R013-M05 (Guest Lobby) - Approved with explicit pruning/validation rules.
 - **Gate**: Added "Worker Liveness / Progress Gate" (ACK 30m / Progress 2h) to Workflow.
+- **Status**: M05 CLOSED (HU-TEST PASS). Verified Host List population + 15s Pruning Logic.
 
 
 
