@@ -10,7 +10,7 @@
 import { SessionState, PlayerStatus } from './SessionState.js';
 import { NetworkRole, canStep, sendsInputsToNetwork, broadcastsState } from './NetworkRole.js';
 import { MSG, PROTOCOL_VERSION } from './MessageTypes.js';
-import { createHostAnnounce, createJoinAckAccepted, createJoinAckRejected } from './MessageSerializer.js';
+import { createHostAnnounce, createJoinReq, createJoinAckAccepted, createJoinAckRejected } from './MessageSerializer.js';
 
 /**
  * R013 Constants
@@ -412,9 +412,9 @@ export class SessionManager {
   // ========================================
 
   /**
-   * Join an existing game session
+   * M06: Join an existing game session via transport handshake
    * @param {string} hostId - The host's client ID
-   * @returns {Promise<boolean>} Success status
+   * @returns {Promise<boolean>} Success status (resolves on JOIN_ACK)
    */
   async joinGame(hostId) {
     if (!hostId) {
@@ -425,27 +425,73 @@ export class SessionManager {
       throw new Error('Already in a session. Call leaveGame() first.');
     }
 
-    console.log(`[SessionManager] Joining host: ${hostId}`);
-
     // Generate client ID if not set
     const clientId = this.game.clientId || this._generateClientId();
     if (!this.game.clientId) {
       this.game.clientId = clientId;
     }
 
-    // Note: Full join flow will be implemented in M06-M07
-    // For now, just set the role to GUEST as a stub
+    // M06: Verify transport is available
+    if (!this.transport || typeof this.transport.joinChannel !== 'function') {
+      throw new Error('No transport available for join');
+    }
 
-    // Create promise for join completion (will be resolved in M06)
+    console.log(`[SessionManager] Joining host: ${hostId}`);
+
+    // M06: Join host's session channel
+    const sessionChannel = `asterobia:session:${hostId}`;
+    try {
+      await this.transport.joinChannel(sessionChannel, (msg) => this.onMessage(msg));
+      this._sessionChannel = sessionChannel;
+      console.log(`[SessionManager] Joined session channel: ${sessionChannel}`);
+    } catch (err) {
+      console.error('[SessionManager] Failed to join session channel:', err);
+      throw err;
+    }
+
+    // M06: Create and send JOIN_REQ
+    const joinReq = createJoinReq({
+      guestId: clientId,
+      displayName: this.game.playerName || 'Guest'
+    });
+
+    // M06: Debug evidence (dev-only)
+    if (this.game._isDevMode) {
+      this._debugJoinReqSentCount = (this._debugJoinReqSentCount || 0) + 1;
+      this._debugLastJoinReqAt = Date.now();
+    }
+
+    try {
+      await this.transport.broadcastToChannel(sessionChannel, joinReq);
+      console.log(`[SessionManager] JOIN_REQ sent to ${hostId}`);
+    } catch (err) {
+      console.error('[SessionManager] Failed to send JOIN_REQ:', err);
+      // Leave session channel on failure
+      this.transport.leaveChannel(sessionChannel).catch(() => {});
+      this._sessionChannel = null;
+      throw err;
+    }
+
+    // M06: Wait for JOIN_ACK with timeout
     return new Promise((resolve, reject) => {
-      // Stub: immediately transition to GUEST for testing
-      // In M06+, this will wait for JOIN_ACK from host
-      this.state.setAsGuest(hostId, 1, clientId, 'Guest');
+      this.pendingJoin = { resolve, reject, hostId, clientId };
 
-      this._notifyConnectionStateChanged('CONNECTED');
+      // Timeout after 10s
+      const timeoutId = setTimeout(() => {
+        if (this.pendingJoin) {
+          console.log('[SessionManager] Join timeout - no response from host');
+          this.pendingJoin = null;
+          // Cleanup session channel
+          if (this._sessionChannel) {
+            this.transport.leaveChannel(this._sessionChannel).catch(() => {});
+            this._sessionChannel = null;
+          }
+          reject(new Error('Join timeout - no response from host'));
+        }
+      }, 10000);
 
-      console.log(`[SessionManager] Joined as Guest (slot 1) - STUB`);
-      resolve(true);
+      // Store timeout ID so _handleJoinAck can clear it
+      this.pendingJoin.timeoutId = timeoutId;
     });
   }
 
@@ -792,9 +838,66 @@ export class SessionManager {
     }
   }
 
+  /**
+   * M06: Handle JOIN_ACK response from host
+   * Resolves or rejects the pending join promise
+   * @param {Object} msg - JOIN_ACK message
+   */
   _handleJoinAck(msg) {
-    // M07: Guest handles join response
-    console.log('[SessionManager] JOIN_ACK:', msg.accepted ? 'ACCEPTED' : 'REJECTED');
+    // Only process if we have a pending join
+    if (!this.pendingJoin) {
+      console.log('[SessionManager] JOIN_ACK received but no pending join');
+      return;
+    }
+
+    // M06: Debug evidence (dev-only)
+    if (this.game._isDevMode) {
+      this._debugJoinAckRecvCount = (this._debugJoinAckRecvCount || 0) + 1;
+      this._debugLastJoinAckAt = Date.now();
+    }
+
+    // Clear timeout
+    if (this.pendingJoin.timeoutId) {
+      clearTimeout(this.pendingJoin.timeoutId);
+    }
+
+    const { resolve, reject, hostId, clientId } = this.pendingJoin;
+
+    if (msg.accepted) {
+      // M06: Transition to GUEST state
+      this.state.setAsGuest(hostId, msg.assignedSlot, clientId, this.game.playerName || 'Guest');
+
+      // M06: Apply snapshot if provided
+      if (msg.fullSnapshot && this.game.stateSurface) {
+        console.log(`[SessionManager] Applying snapshot at tick ${msg.simTick}`);
+        try {
+          this.game.stateSurface.deserialize(msg.fullSnapshot);
+          if (this.game.simLoop) {
+            this.game.simLoop.tickCount = msg.simTick;
+          }
+        } catch (err) {
+          console.error('[SessionManager] Failed to apply snapshot:', err);
+        }
+      }
+
+      this._notifyConnectionStateChanged('CONNECTED');
+      console.log(`[SessionManager] Joined as Guest (slot ${msg.assignedSlot})`);
+
+      this.pendingJoin = null;
+      resolve(true);
+    } else {
+      // M06: Join rejected
+      console.log(`[SessionManager] Join rejected: ${msg.reason}`);
+
+      // Cleanup session channel
+      if (this._sessionChannel) {
+        this.transport?.leaveChannel?.(this._sessionChannel).catch(() => {});
+        this._sessionChannel = null;
+      }
+
+      this.pendingJoin = null;
+      reject(new Error(`Join rejected: ${msg.reason}`));
+    }
   }
 
   _handleInputCmd(msg) {
@@ -953,11 +1056,22 @@ export class SessionManager {
   getDebugNetStatus() {
     return {
       isHost: this.state.isHost(),
+      isGuest: this.state.isGuest(),
       sessionName: this.sessionName,
       transportType: this.transport ? this.transport.constructor.name : null,
+      // M04: Host announce evidence
       announceIntervalActive: this.announceInterval !== null,
       announceTickCount: this._debugAnnounceTickCount,
-      lastAnnounceAt: this._debugLastAnnounceAt
+      lastAnnounceAt: this._debugLastAnnounceAt,
+      // M05: Discovery evidence
+      discoveryActive: this._discoveryActive,
+      availableHostsCount: this.availableHosts.size,
+      // M06: Join handshake evidence
+      joinReqSentCount: this._debugJoinReqSentCount || 0,
+      joinAckRecvCount: this._debugJoinAckRecvCount || 0,
+      lastJoinReqAt: this._debugLastJoinReqAt || null,
+      lastJoinAckAt: this._debugLastJoinAckAt || null,
+      pendingJoin: this.pendingJoin !== null
     };
   }
 
