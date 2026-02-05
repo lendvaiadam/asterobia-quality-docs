@@ -270,8 +270,8 @@ export function createJoinAckRejected(reason) {
   return {
     type: MSG.JOIN_ACK,
     accepted: false,
-    reason: normalizedReason,
-    rejectReason: normalizedReason,  // Alias for backwards compatibility
+    rejectReason: normalizedReason,  // CANONICAL field per Antigravity
+    reason: normalizedReason,        // Alias for backwards compatibility
     assignedSlot: null,
     simTick: null,
     fullSnapshot: null,
