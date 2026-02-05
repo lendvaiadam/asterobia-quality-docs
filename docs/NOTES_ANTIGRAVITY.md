@@ -21,6 +21,8 @@
 - **Gate**: Added "Worker Utilization Gate" (Mandatory Table + Parallel Pack) to Workflow.
 - **Refinement**: "Closure Receipt Gate" now mandates full `raw.githubusercontent.com` URLs.
 - **Violation Log**: Receipt (`60cf319`) marked NON-COMPLIANT (Placeholders used).
+- **Status**: M06 CLOSED (HU-TEST PASS). Verified Handshake (JoinReq/Ack/Role) + Snapshot Application (`serialize` exists).
+
 
 
 

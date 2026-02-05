@@ -207,7 +207,11 @@ game.sessionManager.state.players.map(p => p.slot)
 
 
 
-**VÉGSŐ ÍTÉLET**: ____
+**VÉGSŐ ÍTÉLET**: **PASS** (2026-02-05).
+- **Host**: `serialize` exists.
+- **Guest**: `mySlot: 2`, `joinAckRecv: 1`, "Applying snapshot" log present.
+- **Protocol**: Handshake Verified.
+
 
 ---
 

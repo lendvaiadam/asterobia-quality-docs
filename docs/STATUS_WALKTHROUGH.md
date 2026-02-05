@@ -48,10 +48,8 @@
 - **Schema**: `docs/specs/R013_DB_SCHEMA_OPTIONAL.md`
 - **Completed**: M01, M02, M03, M04, M05 (Guest Lobby Discovery) — MERGED
 - **Verified**: M05 HU-TEST PASS (Host appears in list, disappears after 15s prune).
-- **Current Step**: M06 (Join Request Handshake) — BLOCKED (Waiting for Fallback Proof)
-- **Fallback Policy**: **GOVERNANCE DECISION (Option A)**: Fallback Snapshot is ACCEPTED for M06 closure. Full Snapshot is MANDATORY for M07.
-- **CTO Ping #1**: APPROVED (2026-02-04)
-- **CTO Ping #1**: APPROVED (2026-02-04)
+- **Current Step**: M06 (Join Request Handshake) — **CLOSED** (HU-TEST PASS)
+- **Fallback Policy**: M06 (Handshake) closure ACCEPTABLE with Fallback Snapshot. M07 (Game Loop) BLOCKED until Full Snapshot works.
 - **CTO Ping #1**: APPROVED (2026-02-04)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
 - **Test State**: Vitest installed. 101 tests passed. 14 empty suites. M06 relying on HU-TEST.
@@ -63,8 +61,10 @@
 - **Release 014**: Matera Transport
 - **Release 015**: Weapon System
 
-### M07 (Game Loop) GATES (BLOCKED)
-- **Snapshot Provider**: Must implement `game.stateSurface.serialize()` producing valid JSON.
+### M07 (Game Loop) GATES (READY)
+- **Status**: **READY**. M06 Handshake verified.
+- **Requirement**: `game.stateSurface.serialize()` exists and works (Verified in M06).
+- **Next Step**: Implement Game Loop tick synchronization (Resync/Interpolation).
 - **API Spec**:
   - `serialize()` -> `{ units: [...], map: {...} }`
   - `deserialize(json)` -> Restores state deterministically.
