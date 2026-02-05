@@ -187,34 +187,49 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          rejectReason: 'VERSION_MISMATCH'
+          reason: 'VERSION_MISMATCH'
         })
       );
     });
 
-    it('rejects missing guestId', async () => {
+    it('rejects missing guestId with INVALID_REQUEST', async () => {
       const msg = createJoinReq({ guestId: null });
 
       sessionManager.onMessage(msg);
       await flushJoinQueue();
 
-      // Should not send any response (silently drop)
-      expect(mockTransport.broadcastToChannel).not.toHaveBeenCalledWith(
+      // Should send JOIN_ACK rejected with INVALID_REQUEST
+      expect(mockTransport.broadcastToChannel).toHaveBeenCalledWith(
         sessionManager._sessionChannel,
-        expect.objectContaining({ type: MSG.JOIN_ACK })
+        expect.objectContaining({
+          type: MSG.JOIN_ACK,
+          accepted: false,
+          reason: 'INVALID_REQUEST'
+        })
       );
     });
 
-    it('rejects missing displayName', async () => {
-      const msg = createJoinReq({ displayName: null });
+    it('rejects missing displayName with INVALID_REQUEST', async () => {
+      // Force displayName to be empty (bypass createJoinReq default)
+      const msg = {
+        type: MSG.JOIN_REQ,
+        guestId: 'guest-no-name',
+        displayName: '',
+        protocolVersion: PROTOCOL_VERSION,
+        timestamp: Date.now()
+      };
 
       sessionManager.onMessage(msg);
       await flushJoinQueue();
 
-      // Should not send any response (silently drop)
-      expect(mockTransport.broadcastToChannel).not.toHaveBeenCalledWith(
+      // Should send JOIN_ACK rejected with INVALID_REQUEST
+      expect(mockTransport.broadcastToChannel).toHaveBeenCalledWith(
         sessionManager._sessionChannel,
-        expect.objectContaining({ type: MSG.JOIN_ACK })
+        expect.objectContaining({
+          type: MSG.JOIN_ACK,
+          accepted: false,
+          reason: 'INVALID_REQUEST'
+        })
       );
     });
 
@@ -257,7 +272,7 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          rejectReason: 'SESSION_FULL'
+          reason: 'SESSION_FULL'
         })
       );
     });
@@ -352,7 +367,7 @@ describe('SessionManager Join Flow (M06)', () => {
         c => c[1].type === MSG.JOIN_ACK
       );
       expect(call[1].accepted).toBe(false);
-      expect(call[1].rejectReason).toBe('SESSION_FULL');
+      expect(call[1].reason).toBe('SESSION_FULL');
     });
   });
 
@@ -445,7 +460,7 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          rejectReason: 'STATE_TOO_LARGE'
+          reason: 'STATE_TOO_LARGE'
         })
       );
     });
@@ -463,7 +478,7 @@ describe('SessionManager Join Flow (M06)', () => {
         expect.objectContaining({
           type: MSG.JOIN_ACK,
           accepted: false,
-          rejectReason: 'SNAPSHOT_ERROR'
+          reason: 'SNAPSHOT_ERROR'
         })
       );
     });
@@ -543,6 +558,102 @@ describe('SessionManager Join Flow (M06)', () => {
       expect(json.players).toBeDefined();
       // But this is meta-game state, not sim state
       expect(json.players.length).toBe(2);
+    });
+  });
+
+  // ========================================
+  // Rejection reason validation (no undefined)
+  // ========================================
+
+  describe('Rejection reason validation', () => {
+    beforeEach(async () => {
+      await sessionManager.hostGame('Test Session');
+      mockTransport.broadcastToChannel.mockClear();
+    });
+
+    it('reject reason is never undefined for VERSION_MISMATCH', async () => {
+      const msg = {
+        type: MSG.JOIN_REQ,
+        guestId: 'guest-wrong-version',
+        displayName: 'WrongVersion',
+        protocolVersion: '0.0.0-invalid',
+        timestamp: Date.now()
+      };
+
+      sessionManager.onMessage(msg);
+      await flushJoinQueue();
+
+      const calls = mockTransport.broadcastToChannel.mock.calls;
+      const ackCall = calls.find(c => c[1]?.type === MSG.JOIN_ACK);
+
+      expect(ackCall).toBeDefined();
+      expect(ackCall[1].accepted).toBe(false);
+      expect(ackCall[1].reason).toBe('VERSION_MISMATCH');
+      expect(ackCall[1].reason).not.toBeUndefined();
+    });
+
+    it('reject reason is never undefined for SESSION_FULL', async () => {
+      // Fill session (host + 3 guests = max 4)
+      sessionManager.onMessage(createJoinReq({ guestId: 'g1', displayName: 'G1' }));
+      sessionManager.onMessage(createJoinReq({ guestId: 'g2', displayName: 'G2' }));
+      sessionManager.onMessage(createJoinReq({ guestId: 'g3', displayName: 'G3' }));
+      await flushJoinQueue();
+
+      mockTransport.broadcastToChannel.mockClear();
+
+      // Try to join when full
+      sessionManager.onMessage(createJoinReq({ guestId: 'g4', displayName: 'G4' }));
+      await flushJoinQueue();
+
+      const calls = mockTransport.broadcastToChannel.mock.calls;
+      const ackCall = calls.find(c => c[1]?.type === MSG.JOIN_ACK && !c[1]?.accepted);
+
+      expect(ackCall).toBeDefined();
+      expect(ackCall[1].reason).toBe('SESSION_FULL');
+      expect(ackCall[1].reason).not.toBeUndefined();
+    });
+
+    it('reject reason is never undefined for INVALID_REQUEST', async () => {
+      const msg = {
+        type: MSG.JOIN_REQ,
+        guestId: 'guest-no-name',
+        displayName: '',  // Empty displayName
+        protocolVersion: PROTOCOL_VERSION,
+        timestamp: Date.now()
+      };
+
+      sessionManager.onMessage(msg);
+      await flushJoinQueue();
+
+      const calls = mockTransport.broadcastToChannel.mock.calls;
+      const ackCall = calls.find(c => c[1]?.type === MSG.JOIN_ACK);
+
+      expect(ackCall).toBeDefined();
+      expect(ackCall[1].accepted).toBe(false);
+      expect(ackCall[1].reason).toBe('INVALID_REQUEST');
+      expect(ackCall[1].reason).not.toBeUndefined();
+    });
+
+    it('all rejection paths have explicit reason strings', async () => {
+      // This test ensures createJoinAckRejected always sets a reason
+      const rejectionScenarios = [
+        { name: 'VERSION_MISMATCH', msg: { ...createJoinReq(), protocolVersion: 'bad' } },
+        { name: 'INVALID_REQUEST', msg: { type: MSG.JOIN_REQ, guestId: 'x', displayName: '', protocolVersion: PROTOCOL_VERSION } }
+      ];
+
+      for (const scenario of rejectionScenarios) {
+        mockTransport.broadcastToChannel.mockClear();
+        sessionManager.onMessage(scenario.msg);
+        await flushJoinQueue();
+
+        const calls = mockTransport.broadcastToChannel.mock.calls;
+        const ackCall = calls.find(c => c[1]?.type === MSG.JOIN_ACK && !c[1]?.accepted);
+
+        if (ackCall) {
+          expect(typeof ackCall[1].reason).toBe('string');
+          expect(ackCall[1].reason.length).toBeGreaterThan(0);
+        }
+      }
     });
   });
 });

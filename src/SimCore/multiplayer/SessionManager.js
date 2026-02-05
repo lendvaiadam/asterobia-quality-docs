@@ -740,10 +740,12 @@ export class SessionManager {
     // 2. Required fields validation
     if (!msg.guestId) {
       console.log('[SessionManager] JOIN_REQ rejected: missing guestId');
+      await this._sendJoinAck(null, false, null, 'INVALID_REQUEST');
       return;
     }
     if (!msg.displayName) {
       console.log('[SessionManager] JOIN_REQ rejected: missing displayName');
+      await this._sendJoinAck(msg.guestId, false, null, 'INVALID_REQUEST');
       return;
     }
 
@@ -886,8 +888,9 @@ export class SessionManager {
       this.pendingJoin = null;
       resolve(true);
     } else {
-      // M06: Join rejected
-      console.log(`[SessionManager] Join rejected: ${msg.reason}`);
+      // M06: Join rejected - coerce undefined reason to UNKNOWN_ERROR
+      const reason = msg.reason || 'UNKNOWN_ERROR';
+      console.log(`[SessionManager] Join rejected: ${reason}`);
 
       // Cleanup session channel
       if (this._sessionChannel) {
@@ -896,7 +899,7 @@ export class SessionManager {
       }
 
       this.pendingJoin = null;
-      reject(new Error(`Join rejected: ${msg.reason}`));
+      reject(new Error(`Join rejected: ${reason}`));
     }
   }
 

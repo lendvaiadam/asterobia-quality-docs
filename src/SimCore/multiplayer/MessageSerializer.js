@@ -5,7 +5,7 @@
  * Reference: docs/specs/R013_MULTIPLAYER_HANDSHAKE_HOST_AUTHORITY.md Section 4
  */
 
-import { MSG, MESSAGE_SCHEMAS, VALID_MESSAGE_TYPES } from './MessageTypes.js';
+import { MSG, MESSAGE_SCHEMAS, VALID_MESSAGE_TYPES, PROTOCOL_VERSION } from './MessageTypes.js';
 
 /**
  * Error thrown when message validation fails
@@ -237,8 +237,8 @@ export function createJoinReq({ guestId, displayName }) {
   return {
     type: MSG.JOIN_REQ,
     guestId,
-    displayName,
-    protocolVersion: '0.13.0',
+    displayName: displayName || `Guest-${(guestId || '').slice(0, 4)}`,
+    protocolVersion: PROTOCOL_VERSION,
     timestamp: Date.now()
   };
 }
@@ -269,7 +269,7 @@ export function createJoinAckRejected(reason) {
   return {
     type: MSG.JOIN_ACK,
     accepted: false,
-    rejectReason: reason,
+    reason: reason || 'UNKNOWN_ERROR',
     assignedSlot: null,
     simTick: null,
     fullSnapshot: null,
