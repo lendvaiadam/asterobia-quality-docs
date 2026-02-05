@@ -258,6 +258,26 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
         - **FALLBACK**: "HU-TEST only" MUST be stated. No worker may claim "tests run".
         - **LOG**: Receipt MUST include line `TEST_RUNNER: NOT CONFIGURED (Evidence: No test script)`.
 
+### 4.I No Self-Routing Rule (Hard Gate)
+**Goal**: No fake actions or loops.
+
+1.  **Rule**: A `[ROUTING]` block addressed to **Terminal 1** is **NOT** a valid action.
+2.  **Definition**: Orchestrator Actions must be:
+    - **A**: Routing to a Worker (External).
+    - **B**: Updating Antigravity Governance Docs (Internal/Governance).
+3.  **Enforcement**: If Orchestrator routes to self, Operator intercepts and demands real action.
+
+### 4.J Ping SLA & ACK Enforcement (Hard Gate)
+**Goal**: No zombie tasks.
+
+1.  **Tracking**: Orchestrator MUST track Pings in `NOTES_ORCHESTRATOR.md` (or scratchpad).
+2.  **SLA**: 
+    - **Ping #1**: At Assignment (Start).
+    - **Ping #2**: At T+30m (if no ACK).
+3.  **Termination**: If no ACK after Ping #2, Orchestrator **MUST**:
+    - Mark Status: `BLOCKED (No ACK)`.
+    - **Reassign** or **Cancel** payload.
+
 ### 4.3 Worker Execution Protocol (BINDING)
 
 1.  **ACK**: Worker reads Header, verifies Role Registry, and confirms.

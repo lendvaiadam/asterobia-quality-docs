@@ -33,14 +33,11 @@
 2.  [ ] Step 2...
 
 ## 5. Verification Plan
-## 5. Verification Plan
 - [ ] **Capability**: Test Runner recorded? (YES/NO).
   - *If NO*: "HU-TEST only" plan included?
 - [ ] **Unit Tests**: [Describe new tests]
-
-- [ ] **Unit Tests**: [Describe new tests]
-
 - [ ] **Manual Check**: [Describe what to check]
+
 
 ---
 
