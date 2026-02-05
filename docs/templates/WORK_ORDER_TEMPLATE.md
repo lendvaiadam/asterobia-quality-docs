@@ -33,7 +33,9 @@
 2.  [ ] Step 2...
 
 ## 5. Verification Plan
+- [ ] **Capability**: Test Runner recorded? (YES/NO) -> if NO, fallback to HU-TEST only.
 - [ ] **Unit Tests**: [Describe new tests]
+
 - [ ] **Manual Check**: [Describe what to check]
 
 ---

@@ -214,7 +214,10 @@ You are **Worker (QA)** (Test/Verification Specialist).
 **Protocol**:
 1. **ACK**: Read `docs/skills/loadouts/WORKER_QA.md`.
 2. **SKILL CHECK**: Read `docs/skills/skill-*.md` for every Required Skill in WO.
-3. **CHECKOUT**: `git checkout -b work/WO-XXX-qa work/WO-XXX`
+3. **CAPABILITY CHECK**: Run `npm run` to verify `test` script exists.
+   - *If missing*: Mark "HU-TEST only" plan. Do NOT run `npm test`.
+4. **CHECKOUT**: `git checkout -b work/WO-XXX-qa work/WO-XXX`
+
 4. **EXECUTE**: Write/Run tests. Verify Determinism.
 5. **HANDOFF**: `[ROUTING]` completion signal.
 
