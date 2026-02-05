@@ -49,6 +49,7 @@
 - **Completed**: M01, M02, M03, M04, M05 (Guest Lobby Discovery) — MERGED
 - **Verified**: M05 HU-TEST PASS (Host appears in list, disappears after 15s prune).
 - **Current Step**: M06 (Join Request Handshake) — BLOCKED (Fixing SNAPSHOT_ERROR; Transport Race FIXED)
+- **Fallback Policy**: M06 closure ACCEPTABLE with partial/fallback snapshot (if logged). M07 (Game Loop) requires FULL Snapshot.
 - **CTO Ping #1**: APPROVED (2026-02-04)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
 - **Test State**: Vitest installed. 101 tests passed. 14 empty suites. M06 relying on HU-TEST.

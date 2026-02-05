@@ -20,6 +20,8 @@
 - **Gate**: Added "Closure Receipt Gate" (Mandatory In-Chat Receipt) to Workflow.
 - **Gate**: Added "Worker Utilization Gate" (Mandatory Table + Parallel Pack) to Workflow.
 - **Refinement**: "Closure Receipt Gate" now mandates full `raw.githubusercontent.com` URLs.
+- **Violation Log**: Receipt (`60cf319`) marked NON-COMPLIANT (Placeholders used).
+
 
 
 

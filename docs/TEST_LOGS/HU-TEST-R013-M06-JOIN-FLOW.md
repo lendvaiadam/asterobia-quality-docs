@@ -58,8 +58,9 @@ await game.sessionManager.joinGame(hostId)
 **Elvárt eredmény**:
 - Tab B konzol: `[SessionManager] Sending JOIN_REQ to <hostId>`
 - Tab A konzol: `[SessionManager] JOIN_REQ received from <guestId>`
-- Tab A konzol: `[SessionManager] Sending JOIN_ACK (accepted=true, slot=1)`
-- Tab B konzol: `[SessionManager] JOIN_ACK received, slot=1`
+- Tab A konzol: `[SessionManager] JOIN_ACK sent to <guestId>: ACCEPTED` (Proof of Send)
+- Tab B konzol: `[SessionManager] JOIN_ACK received, slot=1` (Proof of Recv)
+- Tab B konzol: `[SessionManager] Applying snapshot...` VAGY `Snapshot fallback...` (Proof of State)
 - `game.sessionManager.state.role` (Tab B) === `'GUEST'`
 
 **HIBA ESETÉN (SNAPSHOT_ERROR)**:
@@ -68,6 +69,7 @@ await game.sessionManager.joinGame(hostId)
 - **REQUIRED**: A Host oldali Error Stack Trace másolása ide.
 
 **PASS/FAIL**: ____
+
 
 
 ---
