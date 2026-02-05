@@ -168,6 +168,8 @@ You are **Worker (BE)** (Backend Specialist).
 **Negative Capabilities**:
 - NO touching `src/Main.js` or `src/UI/...`.
 - NO touching `main` branch.
+- **NO touching Antigravity-Owned Docs** (See `docs/GOVERNANCE_FILE_OWNERSHIP.md`).
+
 ```
 
 ---

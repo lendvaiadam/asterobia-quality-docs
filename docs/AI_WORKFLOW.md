@@ -237,6 +237,16 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
   - **FE**: UI Contract / Mockup specs (docs only).
 - **Constraint**: These tasks MUST NOT share code files with the critical path to avoid merge conflicts.
 
+### 4.G File Ownership Gate (Hard Gate)
+**Goal**: Protect Canonical Governance from Accidental Drift.
+
+1.  **Rule**: **Antigravity-Owned Files** are READ-ONLY for Orchestrator/Workers.
+2.  **List**: See `docs/GOVERNANCE_FILE_OWNERSHIP.md` (STATUS, NOTES, WORKFLOW, RUNBOOK, TEMPLATE).
+3.  **Protocol**:
+    - **FORBIDDEN**: Direct edits by Workers.
+    - **REQUIRED**: Submit `[ROUTING]` proposal to Antigravity.
+    - **EXCEPTION**: Status updates *explicitly* delegated (e.g. updating Role Map), but preferred via Routing.
+
 ### 4.3 Worker Execution Protocol (BINDING)
 
 1.  **ACK**: Worker reads Header, verifies Role Registry, and confirms.

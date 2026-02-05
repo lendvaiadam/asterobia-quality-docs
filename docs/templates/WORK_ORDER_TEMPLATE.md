@@ -25,7 +25,8 @@
 ## 3. Files to Touch (Whitelist)
 *Only these files may be modified.*
 - `src/...`
-- `docs/...`
+- `docs/...` (WARNING: Check `docs/GOVERNANCE_FILE_OWNERSHIP.md` — Do not touch Restricted Docs)
+
 
 ## 4. Requirement Steps
 1.  [ ] Step 1...
