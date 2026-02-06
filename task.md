@@ -31,11 +31,11 @@
 ### ❌ GAPS (Must Fix Before HU-TEST)
 
 #### GAP-0: Unit Authority & Seating (Spec Update) - P0
-*Ref: `docs/specs/R013_M07_GAME_LOOP.md` Section 4*
-- [ ] **W1 BE**: `SEAT_REQ`/`ACK` logic, `controllerSlot` on Unit, Auth check in `_handleInputCmd`.
-- [ ] **W2 UI**: Minimal UI to click-to-seat, auto-select controlled unit.
-- [ ] **W3 QA**: Test `seat.test.js` (Unit takeover flow).
-- [ ] **W4 REV**: Verify no sim mutation in UI layer.
+*Ref: `docs/specs/R013_M07_GAME_LOOP.md` Section 4 & 4.3 (PIN)*
+- [ ] **W1 BE**: `SEAT_REQ` (PIN check, Cooldown), `controllerSlot`, Auth check.
+- [ ] **W2 UI**: Click-to-seat, Keypad Overlay (1-9), Lock Indicator.
+- [ ] **W3 QA**: Test `seat.test.js` (Takeover, BAD_PIN, COOLDOWN).
+- [ ] **W4 REV**: PID digit privacy check.
 
 #### GAP-1: INPUT_CMD Path (Guest → Host) - P0
 ```

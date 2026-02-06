@@ -94,9 +94,10 @@ To support future takeover/hacking while maintaining strict authority:
 - **`ownerSlot`**: Who "possesses" the unit (Color, Scoring).
 - **`controllerSlot`**: Who currently "drives" the unit (Input Authority).
 - **`lockState`**: `OPEN` (Anyone can sit), `LOCKED` (Only owner/assigned), `HACKED` (Forced).
+- **`seatPolicy`**: `'OPEN'` | `'PIN_1DIGIT'`
 
 **Initial State**:
-- All units: `ownerSlot: 0` (Host), `controllerSlot: null` (AI/Idle), `lockState: OPEN`.
+- All units: `ownerSlot: 0` (Host), `controllerSlot: null` (AI/Idle), `lockState: OPEN`, `seatPolicy: OPEN`.
 
 ### 4.2 Seating Flow (Host Authoritative)
 1.  **Request**: Guest clicks unit -> Sends `SEAT_REQ { targetUnitId, requesterSlot }`.
@@ -106,29 +107,58 @@ To support future takeover/hacking while maintaining strict authority:
     - Broadcasts: `SEAT_ACK { targetUnitId, controllerSlot }`.
 4.  **Rejection**: Host sends `SEAT_REJECT { reason }` (Private or Broadcast).
 
-### 4.3 Command Authority Rule
+### 4.3 Seat Challenge (PIN)
+To add gameplay depth ("enemy units are locked"), we introduce a minimal challenge:
+- **`seatPolicy`**: `'OPEN'` | `'PIN_1DIGIT'`
+- **`seatPinDigit`**: `1..9` (Host-only authoritative, NOT in guest snapshot)
+- **`seatLockout`**: Timestamp until retry allowed (Anti-spam)
+
+**Challenge Flow**:
+1. Guest clicks unit → UI sees `seatPolicy: 'PIN_1DIGIT'`.
+2. Guest enters digit (1-9) → Sends `SEAT_REQ { ..., auth: { method: 'PIN_1DIGIT', guess: 5 } }`.
+3. Host validates:
+   - If Correct: Grant seat (`SEAT_ACK`).
+   - If Wrong: Reject (`SEAT_REJECT { reason: 'BAD_PIN', retryAfterMs: 250 }`).
+   - If Spamming: Reject (`SEAT_REJECT { reason: 'COOLDOWN', retryAfterMs: 1000 }`).
+
+### 4.4 Command Authority Rule
 Host **MUST** reject `INPUT_CMD` if:
 `msg.slot !== unit.controllerSlot`
 (Exception: Admin/Host overrides if defined later).
 
-### 4.4 Schema Additions
+### 4.5 Schema Additions
 
-#### 4.4.1 SEAT_REQ (Guest -> Host)
+#### 4.5.1 SEAT_REQ (Guest -> Host)
 ```json
 {
   "type": "SEAT_REQ",
   "targetUnitId": 42,
   "requesterSlot": 1,
+  "auth": {                 // Optional
+    "method": "PIN_1DIGIT",
+    "guess": 5
+  },
   "timestamp": 17000...
 }
 ```
 
-#### 4.4.2 SEAT_ACK (Broadcast)
+#### 4.5.2 SEAT_ACK (Broadcast)
 ```json
 {
   "type": "SEAT_ACK",
   "targetUnitId": 42,
   "controllerSlot": 1, // Now controlled by Slot 1
+  "timestamp": 17000...
+}
+```
+
+#### 4.5.3 SEAT_REJECT (Private/Broadcast)
+```json
+{
+  "type": "SEAT_REJECT",
+  "targetUnitId": 42,
+  "reason": "BAD_PIN",       // 'OCCUPIED' | 'LOCKED' | 'BAD_PIN' | 'COOLDOWN'
+  "retryAfterMs": 250,       // Optional backoff hint
   "timestamp": 17000...
 }
 ```

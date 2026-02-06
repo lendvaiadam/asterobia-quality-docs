@@ -25,6 +25,14 @@ Ensure `CMD_BATCH` integrity, sequencing, and queue accumulation.
 4. **EXPECT**: `unit.controllerSlot` becomes `1` (Guest).
    - [ ] Result: `Seat Assigned`
 
+### TC-00b: Seat Challenge (PIN 1-9)
+*Goal: Guest unlocks a protected unit.*
+1. Host: Set `unit.seatPolicy = 'PIN_1DIGIT'` and `pin = 5` (via console).
+2. Guest: Click Unit -> Verify Keypad appears (1-9).
+3. Guest: Enter `9` (Wrong). -> Verify `SEAT_REJECT (BAD_PIN)`.
+4. Guest: Enter `5` (Correct). -> Verify `SEAT_ACK`.
+   - [ ] Result: `Challenge Passed`
+
 ### TC-01: Heartbeat Flow (Idle)
 *Goal: Confirm CMD_BATCH is broadcast every tick.*
 1. Wait 5 seconds.
