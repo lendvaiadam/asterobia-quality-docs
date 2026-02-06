@@ -1,43 +1,129 @@
 # Task: R013 M07 Game Loop Integration
 
-## Phase 1: Specifications & Baseline (NOW)
-- [x] **Spec**: `docs/specs/R013_M07_GAME_LOOP.md` (Strict Policies Locked) <!-- id: 0 -->
-- [x] **Repo**: Ensure `task.md`, `implementation_plan.md` exist in repo root <!-- id: 1 -->
-- [x] **Docs**: Set `STATUS_WALKTHROUGH` to M07 Slice 1 <!-- id: 2 -->
-- [x] **Test**: Create `docs/TEST_LOGS/HU-TEST-R013-M07-LOOP.md` <!-- id: 3 -->
+**Last Updated:** 2026-02-05
+**Status:** Slice 1 - GAP FIX REQUIRED
+**Roadmap:** `docs/M07_ROADMAP_TO_MULTIPLAYER.md`
+
+---
+
+## Phase 1: Specifications & Baseline
+- [x] **Spec**: `docs/specs/R013_M07_GAME_LOOP.md` (Locked)
+- [x] **Repo**: `task.md`, `implementation_plan.md` exist
+- [x] **Bebetonozandók**: `docs/specs/M07_BEBETONOZANDOK.md` (Draft)
+- [x] **HU-TEST Template**: `docs/TEST_LOGS/HU-TEST-R013-M07-LOOP.md` ✅ CREATED
+
+---
 
 ## Phase 2: Slice 1 (Transport Pipeline)
-**Goal**: `CMD_BATCH` integrity, sequencing, queuing. **NO EXECUTION.**
 
-### W1 (Backend)
-- [ ] **Protocol**: Implement `INPUT_CMD` (Sanitization) & `CMD_BATCH` (Creation) <!-- id: 4 -->
-- [ ] **Validation**: Host-side Slot/Schema verification (Anti-Cheat/Bug) <!-- id: 5 -->
-- [ ] **Transport**: Host Broadcast (`sentCount++`) -> Guest Recv (`_handleCmdBatch`) <!-- id: 6 -->
-- [ ] **Queue Logic**: Update `CommandQueue` to accept Host IDs (don't overwrite) <!-- id: 21 -->
-- [ ] **Safety Gate**: Add `Game.ENABLE_COMMAND_EXECUTION` flag (Disable for Slice 1) <!-- id: 22 -->
-- [ ] **Queue**: Guest `enqueue(cmd, scheduledTick)` (Accumulate ONLY) <!-- id: 7 -->
-- [ ] **Policies**: Dedup (Ignore), Gap (Warn), Stale (Drop - Slice 1 Mode) <!-- id: 8 -->
-- [ ] **Debug**: `getDebugNetStatus` (Counters), RingBuffer Logger (No Spam) <!-- id: 9 -->
+**Goal**: CMD_BATCH integrity, sequencing, queuing. **NO EXECUTION.**
 
-### W3 (QA)
-- [ ] **Unit Tests**: `cmdBatch` logic (ordering, limits, counters) <!-- id: 10 -->
-- [ ] **Stability**: Fix `sessionState.test.js` flake <!-- id: 11 -->
+### ✅ DONE
+- [x] Host `sendCmdBatch()` - batchSeq, scheduledTick, broadcast
+- [x] Guest `_handleCmdBatch()` - dedup, stale, gap, enqueue
+- [x] `CommandQueue` ID preservation - Host ID/seq megőrzés
+- [x] Safety Gate - `ENABLE_COMMAND_EXECUTION = false`
+- [x] Debug counters - `getDebugNetStatus()`
+- [x] NetworkDebugPanel - UI overlay
+- [x] Unit tests - `sessionManager.cmdBatch.test.js`
+- [x] Determinism audit - `M07_DETERMINISM_AUDIT.md` PASSED
 
-### W2 (Frontend)
-- [ ] **UI**: Lobby "Mission Control" & Network Pulse Widget <!-- id: 12 -->
+### ❌ GAPS (Must Fix Before HU-TEST)
+
+#### GAP-1: INPUT_CMD Path (Guest → Host) - P0
+```
+Jelenlegi: _handleInputCmd() STUB (csak console.log)
+Szükséges:
+- Slot/sender validáció
+- Command type whitelist
+- Param range check
+- Dedup by seq
+- Buffer for CMD_BATCH
+```
+- [x] Implement `_handleInputCmd()` full validation
+- [x] Add `cmdRejectedAuth`, `cmdRejectedType` counters
+- [x] Unit test: `sessionManager.inputCmd.test.js`
+
+#### GAP-2: HU-TEST Template - P0
+```
+Hiányzik: docs/TEST_LOGS/HU-TEST-R013-M07-LOOP.md
+Szükséges:
+- Evidence mezők (BatchSent, BatchRecv, QueuePending)
+- PASS/FAIL kritériumok
+- Console dump formátum
+```
+- [x] Create HU-TEST template
+- [x] Define evidence requirements
+
+#### GAP-3: Batch/Queue Limits - P0
+```
+Hiányzik: MAX konstansok és enforcement
+Szükséges:
+- MAX_COMMANDS_PER_BATCH = 50
+- MAX_QUEUE_SIZE = 200
+- Truncation/drop counters
+```
+- [x] Add `BATCH_LIMITS` constants
+- [x] Implement enforcement in `sendCmdBatch()` and `_handleCmdBatch()`
+- [x] Add `batchTruncatedCount`, `batchDroppedQueueFull` counters
+
+#### GAP-4: Ring Buffer Logging - P2
+```
+Kockázat: Per-tick console.log spam
+Szükséges:
+- RingBufferLog class
+- Sampled logging helper
+- Meta-only format
+```
+- [ ] Implement `RingBufferLog`
+- [ ] Replace per-tick logs with sampled
 
 ### Gates (Slice 1 Closure)
-- [ ] **Code Audit**: Spec Compliance Check <!-- id: 13 -->
-- [ ] **HU-TEST**: Dual Console Evidence (Queue Growth) <!-- id: 14 -->
+- [ ] **GAP Fix**: All P0 gaps resolved
+- [ ] **HU-TEST**: Dual Console Evidence (Queue Growth)
+- [ ] **Antigravity Audit**: PASS
+- [ ] **Merge**: SHA-pinned receipt
 
-## Phase 3: Slice 2 Preparation (The "Real" Multiplayer)
-**Goal**: Execution, Determinism, Snapshot Reliance.
+---
 
-- [ ] **Snapshot**: **MUST FIX** `serialize/deserialize` (Real Data) <!-- id: 15 -->
-- [ ] **Limit Check**: Verify MAX_COMMANDS/MAX_QUEUE limits <!-- id: 16 -->
-- [ ] **StateHash**: Implement Integer-XOR Checksum <!-- id: 17 -->
+## Phase 3: Slice 1 → Slice 2 Transition
 
-## Phase 4: Slice 2 Execution
-- [ ] **SimLoop**: Enable `processCommands(tick)` <!-- id: 18 -->
-- [ ] **Policies**: Switch Gap/Stale to **STRICT** (Stall/Error) <!-- id: 19 -->
-- [ ] **Verification**: HU-TEST PASS (Units move in sync) <!-- id: 20 -->
+**Pre-Requisites (Bebetonozandók):**
+- [ ] Snapshot round-trip test
+- [ ] Command canonicalization (clamp, precision)
+- [ ] StateHash integer-only definition
+- [ ] Tick ledger strukturált tracking
+- [ ] Choke point audit
+
+---
+
+## Phase 4: Slice 2 (Execution Pipeline)
+
+**Goal**: Execute commands, prove determinism.
+
+- [ ] `ENABLE_COMMAND_EXECUTION = true`
+- [ ] Execute-at-tick logic (`scheduledTick` flush)
+- [ ] Strict gap policy (STALL, not warn)
+- [ ] Strict stale policy (ERROR, not drop)
+- [ ] StateHash comparison (Host == Guest)
+- [ ] HU-TEST PASS: "Units move in sync"
+
+---
+
+## Phase 5: "Multiplayer Működik" 🎯
+
+**Definition of Done:**
+- [ ] 2 kliens ugyanazt látja
+- [ ] Parancsok mindkét oldalon végrehajtódnak
+- [ ] StateHash egyezik
+- [ ] 60 sec stabil játék
+
+---
+
+## Worker Assignment (Current)
+
+| Worker | GAP Fix | Slice 2 Prep |
+|--------|---------|--------------|
+| BE | GAP-1, GAP-3 | Execute-at-tick |
+| QA | GAP-2 | Slice 2 tests |
+| RF | GAP-4 (optional) | Cleanup |

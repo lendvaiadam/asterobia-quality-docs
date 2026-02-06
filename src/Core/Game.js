@@ -28,6 +28,7 @@ import { SessionManager } from '../SimCore/multiplayer/SessionManager.js';
 
 import { WaypointDebugOverlay } from '../UI/WaypointDebugOverlay.js';
 import { globalCommandDebugOverlay } from '../UI/CommandDebugOverlay.js';
+import { initNetworkDebugPanel } from '../UI/NetworkDebugPanel.js';
 
 export class Game {
     constructor() {
@@ -170,6 +171,23 @@ export class Game {
         // R013: Wire up transport for multiplayer channels
         if (this._supabaseTransport) {
             this.sessionManager.setTransport(this._supabaseTransport);
+        }
+
+        /**
+         * R013 M07: Command execution gate for Slice 1 transport testing.
+         * Dynamic based on role:
+         * - OFFLINE/HOST: true (they run the simulation, must execute)
+         * - GUEST Slice 1: false (queue accumulates for transport testing)
+         * - GUEST Slice 2+: true (actual gameplay)
+         * @type {boolean}
+         */
+        this._guestExecutionEnabled = false; // Slice 1: false, Slice 2: true
+
+        // R013 M07: Network debug panel for HU-TEST evidence (dev mode only)
+        if (this._isDevMode) {
+            this.networkDebugPanel = initNetworkDebugPanel(this);
+            this.networkDebugPanel.show();
+            console.log('[Game] NetworkDebugPanel initialized (dev mode)');
         }
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
@@ -366,7 +384,47 @@ export class Game {
         this.interactionManager = new InteractionManager(this);
 
         // Audio Manager (Initialized above before loadUnits)
+
+        // R013 M07: Dev-only evidence helper (no console.log dependency)
+        if (this._isDevMode) {
+            window.dumpNetEvidence = () => this._dumpNetEvidence();
+        }
     } // End Constructor
+
+    /**
+     * R013 M07: Dynamic command execution gate.
+     * - OFFLINE/HOST: always true (they run the simulation)
+     * - GUEST: controlled by _guestExecutionEnabled (Slice 1: false, Slice 2: true)
+     * @returns {boolean}
+     */
+    get ENABLE_COMMAND_EXECUTION() {
+        const role = this.sessionManager?.getRole?.() || 'OFFLINE';
+        // OFFLINE and HOST always execute (they run the sim)
+        if (role === 'OFFLINE' || role === 'HOST') {
+            return true;
+        }
+        // GUEST: controlled by slice flag
+        return this._guestExecutionEnabled;
+    }
+
+    /**
+     * R013 M07: Dev-only evidence dump (no console.log dependency).
+     * Call via window.dumpNetEvidence() in browser.
+     * @returns {Object} Evidence object for HU-TEST
+     */
+    _dumpNetEvidence() {
+        const netStatus = this.sessionManager?.getDebugNetStatus?.() || {};
+        return {
+            tick: this.simLoop?.tickCount || 0,
+            role: netStatus.role || 'OFFLINE',
+            ENABLE_COMMAND_EXECUTION: this.ENABLE_COMMAND_EXECUTION,
+            _guestExecutionEnabled: this._guestExecutionEnabled,
+            netStatus: netStatus,
+            queuePending: globalCommandQueue?.pendingCount || 0,
+            unitCount: this.units?.length || 0,
+            selectedUnitId: this.selectedUnit?.id || null
+        };
+    }
 
     // R012: Unified dev HUD for observability (only shown when dev=1)
     _createDevHUD() {
@@ -3271,9 +3329,17 @@ export class Game {
     /**
      * R006: Process input commands from the queue.
      * Called at the start of each simTick for deterministic command execution.
+     * R013 M07: Respects ENABLE_COMMAND_EXECUTION flag for Slice 1 testing.
      * @param {number} tickCount - Current tick number
      */
     _processInputCommands(tickCount) {
+        // R013 M07: Safety gate - Slice 1 accumulates queue without execution
+        if (!this.ENABLE_COMMAND_EXECUTION) {
+            // Queue grows but commands are not flushed/executed
+            // This allows HU-TEST to verify transport without crashes
+            return;
+        }
+
         const commands = globalCommandQueue.flush(tickCount);
 
         for (const cmd of commands) {
