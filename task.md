@@ -30,6 +30,13 @@
 
 ### ❌ GAPS (Must Fix Before HU-TEST)
 
+#### GAP-0: Unit Authority & Seating (Spec Update) - P0
+*Ref: `docs/specs/R013_M07_GAME_LOOP.md` Section 4*
+- [ ] **W1 BE**: `SEAT_REQ`/`ACK` logic, `controllerSlot` on Unit, Auth check in `_handleInputCmd`.
+- [ ] **W2 UI**: Minimal UI to click-to-seat, auto-select controlled unit.
+- [ ] **W3 QA**: Test `seat.test.js` (Unit takeover flow).
+- [ ] **W4 REV**: Verify no sim mutation in UI layer.
+
 #### GAP-1: INPUT_CMD Path (Guest → Host) - P0
 ```
 Jelenlegi: _handleInputCmd() STUB (csak console.log)

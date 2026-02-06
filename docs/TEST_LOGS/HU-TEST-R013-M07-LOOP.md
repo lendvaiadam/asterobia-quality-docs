@@ -17,6 +17,14 @@ Ensure `CMD_BATCH` integrity, sequencing, and queue accumulation.
 
 ## Test Cases
 
+### TC-00: Unit Seating (Req for Control)
+*Goal: Guest assumes control of a specific unit.*
+1. Guest: Click on a Unit (ID: `____`).
+2. Verify: Unit selection indicator appears.
+3. Verify: `SEAT_REQ` -> `SEAT_ACK` flow in console/debug panel.
+4. **EXPECT**: `unit.controllerSlot` becomes `1` (Guest).
+   - [ ] Result: `Seat Assigned`
+
 ### TC-01: Heartbeat Flow (Idle)
 *Goal: Confirm CMD_BATCH is broadcast every tick.*
 1. Wait 5 seconds.
@@ -58,6 +66,7 @@ Ensure `CMD_BATCH` integrity, sequencing, and queue accumulation.
 ```
 
 ## Pass Criteria
+- [ ] **Seating Successful** (Control acquired).
 - [ ] No `cmdRejectedAuth` errors.
 - [ ] No `cmdRejectedType` errors.
 - [ ] `BatchRecv` matches `BatchSent` (within margin).

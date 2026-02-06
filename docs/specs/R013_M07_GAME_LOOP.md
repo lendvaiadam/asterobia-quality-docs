@@ -87,7 +87,55 @@ Host **MUST** validate `INPUT_CMD` before accepting into `inputBuffer`:
 
 ---
 
-## 4. Slice Difference Table
+## 4. Unit Authority & Seats (Canonical Model)
+
+### 4.1 Concept: Owner vs Controller
+To support future takeover/hacking while maintaining strict authority:
+- **`ownerSlot`**: Who "possesses" the unit (Color, Scoring).
+- **`controllerSlot`**: Who currently "drives" the unit (Input Authority).
+- **`lockState`**: `OPEN` (Anyone can sit), `LOCKED` (Only owner/assigned), `HACKED` (Forced).
+
+**Initial State**:
+- All units: `ownerSlot: 0` (Host), `controllerSlot: null` (AI/Idle), `lockState: OPEN`.
+
+### 4.2 Seating Flow (Host Authoritative)
+1.  **Request**: Guest clicks unit -> Sends `SEAT_REQ { targetUnitId, requesterSlot }`.
+2.  **Validation**: Host checks `lockState` and if `controllerSlot` is empty.
+3.  **Assignment**:
+    - If Valid: Host sets `unit.controllerSlot = requesterSlot`.
+    - Broadcasts: `SEAT_ACK { targetUnitId, controllerSlot }`.
+4.  **Rejection**: Host sends `SEAT_REJECT { reason }` (Private or Broadcast).
+
+### 4.3 Command Authority Rule
+Host **MUST** reject `INPUT_CMD` if:
+`msg.slot !== unit.controllerSlot`
+(Exception: Admin/Host overrides if defined later).
+
+### 4.4 Schema Additions
+
+#### 4.4.1 SEAT_REQ (Guest -> Host)
+```json
+{
+  "type": "SEAT_REQ",
+  "targetUnitId": 42,
+  "requesterSlot": 1,
+  "timestamp": 17000...
+}
+```
+
+#### 4.4.2 SEAT_ACK (Broadcast)
+```json
+{
+  "type": "SEAT_ACK",
+  "targetUnitId": 42,
+  "controllerSlot": 1, // Now controlled by Slot 1
+  "timestamp": 17000...
+}
+```
+
+---
+
+## 5. Slice Difference Table
 
 | Feature | Slice 1 (Plumbing) | Slice 2 (Execution) |
 |---|---|---|
@@ -99,7 +147,7 @@ Host **MUST** validate `INPUT_CMD` before accepting into `inputBuffer`:
 
 ---
 
-## 5. Verification Constraints
+## 6. Verification Constraints
 
 1.  **Snapshot**: Slice 2 CANNOT start until `serialize/deserialize` is proven (no fallback).
 2.  **API**: `getDebugNetStatus()` must return sanitized counters for HU-TEST.
