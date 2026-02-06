@@ -96,6 +96,7 @@ export function serializeUnit(unit) {
         // Identity
         id: unit.id,
         name: unit.name,
+        ownerSlot: unit.ownerSlot ?? 0, // R013 M07: Ownership tracking
 
         // Position & Orientation (convert Vector3/Quaternion to plain)
         position: vec3ToPlain(unit.position),

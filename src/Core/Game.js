@@ -414,6 +414,17 @@ export class Game {
      */
     _dumpNetEvidence() {
         const netStatus = this.sessionManager?.getDebugNetStatus?.() || {};
+        // Summarize units with ownership and position
+        const unitSummary = (this.units || []).filter(u => u).map(u => ({
+            id: u.id,
+            ownerSlot: u.ownerSlot ?? 0,
+            pos: u.position ? {
+                x: u.position.x.toFixed(2),
+                y: u.position.y.toFixed(2),
+                z: u.position.z.toFixed(2)
+            } : null,
+            pathPoints: u.waypointControlPoints?.length || 0
+        }));
         return {
             tick: this.simLoop?.tickCount || 0,
             role: netStatus.role || 'OFFLINE',
@@ -421,8 +432,9 @@ export class Game {
             _guestExecutionEnabled: this._guestExecutionEnabled,
             netStatus: netStatus,
             queuePending: globalCommandQueue?.pendingCount || 0,
-            unitCount: this.units?.length || 0,
-            selectedUnitId: this.selectedUnit?.id || null
+            unitCount: this.units?.filter(u => u)?.length || 0,
+            selectedUnitId: this.selectedUnit?.id || null,
+            units: unitSummary
         };
     }
 
@@ -594,14 +606,20 @@ export class Game {
         // Pre-allocate units array to preserve order
         this.units = new Array(models.length).fill(null);
 
+        // R013 M07 FIX: Pre-compute unit IDs BEFORE async loading
+        // This ensures deterministic IDs regardless of model load order
+        const unitIds = models.map(() => nextEntityId());
+
         models.forEach((modelName, index) => {
             loader.load(`./modellek/${modelName}`, (gltf) => {
                 const model = gltf.scene;
 
-                // Create a Unit wrapper (R003: deterministic ID)
-                const unitId = nextEntityId();
+                // Create a Unit wrapper (R003: deterministic ID - now uses pre-computed ID)
+                const unitId = unitIds[index];
                 const unit = new Unit(this.planet, unitId);
                 unit.name = `Unit ${unitId}`; // Set unit name from ID
+                // R013 M07: Ownership tracking (0 = Host, assigned on join for guests)
+                unit.ownerSlot = 0; // Default: Host owns all initial units
 
                 // Replace the default cube mesh with the loaded model
                 // CRITICAL FIX: Do NOT replace unit.mesh (Group). Add model TO it.
@@ -1472,20 +1490,30 @@ export class Game {
     closePath() {
         // Called from InteractionManager when start marker is clicked
         if (!this.selectedUnit) return;
-        const unit = this.selectedUnit;
+        this.closePathForUnit(this.selectedUnit);
+    }
+
+    /**
+     * R013 M07: Close path for a specific unit (multiplayer-safe).
+     * @param {Unit} unit - Target unit
+     */
+    closePathForUnit(unit) {
+        if (!unit) return;
 
         if (unit.waypointControlPoints && unit.waypointControlPoints.length >= 3 && !unit.isPathClosed) {
             unit.loopingEnabled = true;
             unit.isPathClosed = true;
-            console.log("Path CLOSED - clicked on start marker!");
+            console.log(`Path CLOSED for unit ${unit.id}`);
 
             // NOTE: Colors are managed by updateWaypointMarkerFill - do not hardcode here
 
-            // Regenerate curve as closed loop
-            this.updateWaypointCurve();
+            // Regenerate curve as closed loop (only if this is the selected unit for visuals)
+            if (unit === this.selectedUnit) {
+                this.updateWaypointCurve();
+            }
 
             // Update Command Queue if panel is open
-            if (this.isFocusMode && this.focusedUnit) {
+            if (this.isFocusMode && this.focusedUnit === unit) {
                 this.updatePanelContent(this.focusedUnit);
             }
         }
@@ -3260,6 +3288,7 @@ export class Game {
             unit.velocity.set(data.velocity.x, data.velocity.y, data.velocity.z);
         }
         unit.health = data.health ?? unit.health;
+        unit.ownerSlot = data.ownerSlot ?? unit.ownerSlot ?? 0; // R013 M07: Ownership
         unit.currentSpeed = data.currentSpeed ?? 0;
         unit.pathIndex = data.pathIndex ?? 0;
         unit.isFollowingPath = data.isFollowingPath ?? false;
@@ -3379,8 +3408,9 @@ export class Game {
                 }
                 case CommandType.CLOSE_PATH: {
                     const unit = this.units.find(u => u && u.id === cmd.unitId);
-                    if (unit && unit === this.selectedUnit) {
-                        this.closePath();
+                    if (unit) {
+                        // R013 M07: Apply to target unit, not local selectedUnit
+                        this.closePathForUnit(unit);
                     }
                     break;
                 }
