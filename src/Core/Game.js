@@ -482,6 +482,30 @@ export class Game {
         return evidence;
     }
 
+    /**
+     * R013 M07: Get network evidence as clean, JSON-safe object.
+     * CRITICAL: Returns ONLY primitives and simple arrays.
+     * NEVER include: transport, supabase client, game ref, objects with methods.
+     * Safe to call JSON.stringify() on the result.
+     * @returns {Object} JSON-safe evidence object
+     */
+    getNetEvidence() {
+        return {
+            role: this.sessionManager?.state?.role || 'OFFLINE',
+            mySlot: this.sessionManager?.state?.mySlot ?? -1,
+            units: (this.units || []).map(u => u ? {
+                id: u.id,
+                ownerSlot: u.ownerSlot,
+                selectedBySlot: u.selectedBySlot,
+                seatPolicy: u.seatPolicy
+                // NO seatPinDigit - privacy
+                // NO references to game, supabase, transport
+            } : null).filter(Boolean),
+            selectedUnitId: this.selectedUnit?.id ?? null,
+            debugCounters: this.sessionManager?._debugCounters ? { ...this.sessionManager._debugCounters } : {}
+        };
+    }
+
     // R012: Unified dev HUD for observability (only shown when dev=1)
     _createDevHUD() {
         const hud = document.createElement('div');

@@ -508,8 +508,27 @@ export class Unit {
      * Called during unit update to reflect current seat state.
      */
     updateSeatIndicators() {
-        // Update lock indicator
+        // W2 DEBUG: Log indicator state (only once per state change)
         const shouldShowLock = this.shouldShowLockIndicator;
+        const shouldShowOccupied = this.shouldShowOccupiedIndicator;
+
+        const newState = `${shouldShowLock}-${shouldShowOccupied}`;
+        if (this._lastIndicatorState !== newState) {
+            this._lastIndicatorState = newState;
+            const sm = window.game?.sessionManager;
+            console.log('[Unit] Seat indicator update:', {
+                id: this.id,
+                seatPolicy: this.seatPolicy,
+                selectedBySlot: this.selectedBySlot,
+                ownerSlot: this.ownerSlot,
+                mySlot: sm?.state?.mySlot,
+                isGuest: sm && !sm.state.isOffline() && !sm.state.isHost(),
+                shouldShowLock,
+                shouldShowOccupied
+            });
+        }
+
+        // Update lock indicator
         if (shouldShowLock && !this._lockIndicatorSprite) {
             this._createIndicatorSprite('lock');
         }
@@ -518,7 +537,6 @@ export class Unit {
         }
 
         // Update occupied indicator
-        const shouldShowOccupied = this.shouldShowOccupiedIndicator;
         if (shouldShowOccupied && !this._occupiedIndicatorSprite) {
             this._createIndicatorSprite('occupied');
         }

@@ -600,6 +600,16 @@ export class InteractionManager {
         const sm = this.game.sessionManager;
         const mySlot = sm?.state?.mySlot;
 
+        // W2 DEBUG: Log seat flow trigger
+        console.log('[InteractionManager] _triggerSeatFlow:', {
+            unitId: unit.id,
+            seatPolicy: unit.seatPolicy,
+            selectedBySlot: unit.selectedBySlot,
+            ownerSlot: unit.ownerSlot,
+            mySlot,
+            hasKeypad: !!this.game.seatKeypadOverlay
+        });
+
         // Offline or Host - should never reach here, but safety fallback
         if (!sm || sm.state.isOffline() || sm.state.isHost()) {
             // Fallback: allow selection (offline/host always has authority)

@@ -17,6 +17,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SessionManager } from '../multiplayer/SessionManager.js';
 import { NetworkRole } from '../multiplayer/NetworkRole.js';
+import { InputFactory } from '../runtime/InputFactory.js';
 
 /**
  * Mock Game object for seat authority testing
@@ -938,6 +939,60 @@ describe('Seat Authority System', () => {
 
             // Cleanup
             consoleErrorSpy.mockRestore();
+        });
+    });
+
+    // ========================================
+    // TEST GROUP 11: SELECT/DESELECT Local Behavior (M07 Runtime Fix)
+    // ========================================
+    describe('SELECT/DESELECT local behavior', () => {
+        it('should apply SELECT locally without network round-trip', () => {
+            // Setup: mock transport that tracks sends
+            const sendCalls = [];
+            const mockTransport = { send: (cmd) => sendCalls.push(cmd) };
+
+            const factory = new InputFactory(mockTransport);
+            factory.select(1);
+
+            // SELECT should NOT go through transport
+            expect(sendCalls.filter(c => c.type === 'SELECT')).toHaveLength(0);
+        });
+
+        it('should apply DESELECT locally without network round-trip', () => {
+            const sendCalls = [];
+            const mockTransport = { send: (cmd) => sendCalls.push(cmd) };
+
+            const factory = new InputFactory(mockTransport);
+            factory.deselect();
+
+            // DESELECT should NOT go through transport
+            expect(sendCalls.filter(c => c.type === 'DESELECT')).toHaveLength(0);
+        });
+    });
+
+    // ========================================
+    // TEST GROUP 12: Evidence Dump Safety (M07 Runtime Fix)
+    // ========================================
+    describe('Evidence dump safety', () => {
+        it('should produce valid JSON without circular refs', () => {
+            const evidence = sessionManager.getNetEvidence();
+
+            // Should not throw
+            const json = JSON.stringify(evidence);
+            expect(typeof json).toBe('string');
+
+            // Should parse back
+            const parsed = JSON.parse(json);
+            expect(parsed.role).toBeDefined();
+            expect(parsed.mySlot).toBeDefined();
+            expect(Array.isArray(parsed.units)).toBe(true);
+        });
+
+        it('should not include seatPinDigit in evidence', () => {
+            const evidence = sessionManager.getNetEvidence();
+            const json = JSON.stringify(evidence);
+
+            expect(json).not.toContain('seatPinDigit');
         });
     });
 });
