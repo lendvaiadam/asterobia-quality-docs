@@ -18,6 +18,7 @@
     -   Required: Observed, Expected, Touchpoints, Severity.
 2.  **Handoff**: Antigravity does NOT patch code. Antigravity prepares a **Claude Code Prompt** referencing the Bug List.
 3.  **Lifecycle**: `OPEN` -> `IN_PROGRESS` (Worker assigned) -> `FIXED` -> `VERIFIED` (HU-TEST).
+4.  **Delegation Rule**: Delegate tasks among workers (W1-W4) by default. Do not wait for explicit user instruction to split work. Isolate changes per worker.
 
 ### Self-Check (Must perform at Session Start)
 - [ ] **Am I about to edit code?**
