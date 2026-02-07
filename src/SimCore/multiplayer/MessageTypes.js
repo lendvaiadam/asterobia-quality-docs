@@ -66,11 +66,16 @@ export const MESSAGE_SCHEMAS = Object.freeze({
 
   [MSG.PONG]: ['type', 'responderId', 'pingSeq', 'originalTimestamp', 'timestamp'],
 
-  // M07 GAP-0: Seat acquisition schemas
+  // M07 Unit Authority v0: Seat acquisition schemas
   [MSG.SEAT_REQ]: ['type', 'targetUnitId', 'requesterSlot', 'timestamp'],
   // auth field is optional: { method: 'PIN_1DIGIT', guess: 1-9 }
 
-  [MSG.SEAT_ACK]: ['type', 'targetUnitId', 'controllerSlot', 'timestamp'],
+  // M07: SEAT_ACK now uses selectedBySlot (canonical) and includes newOwnerSlot for takeover
+  // controllerSlot kept for backwards compatibility
+  [MSG.SEAT_ACK]: ['type', 'targetUnitId', 'timestamp'],
+  // selectedBySlot: The new driver slot (canonical name)
+  // controllerSlot: Deprecated alias for selectedBySlot
+  // newOwnerSlot: Set on takeover (optional - same as selectedBySlot if takeover occurred)
 
   [MSG.SEAT_REJECT]: ['type', 'targetUnitId', 'reason', 'timestamp']
   // reason: 'OCCUPIED' | 'LOCKED' | 'BAD_PIN' | 'COOLDOWN'

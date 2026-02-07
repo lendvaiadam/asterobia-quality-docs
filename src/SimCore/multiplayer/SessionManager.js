@@ -1134,13 +1134,13 @@ export class SessionManager {
       return;
     }
 
-    // M07 GAP-0: Validate seat authority
+    // M07 Unit Authority v0: Validate seat authority
     // If command targets a unit, verify sender has seat on that unit
     const targetUnitId = msg.command?.unitId;
     if (targetUnitId !== undefined && targetUnitId !== null) {
       const unit = this.game.units?.find(u => u && u.id === targetUnitId);
-      if (unit && unit.controllerSlot !== null && unit.controllerSlot !== undefined && unit.controllerSlot !== msg.slot) {
-        console.warn(`[SM] Reject InputCmd: Slot ${msg.slot} not seated on unit ${targetUnitId} (controller: ${unit.controllerSlot})`);
+      if (unit && unit.selectedBySlot !== null && unit.selectedBySlot !== undefined && unit.selectedBySlot !== msg.slot) {
+        console.warn(`[SM] Reject InputCmd: Slot ${msg.slot} not seated on unit ${targetUnitId} (selectedBySlot: ${unit.selectedBySlot})`);
         this._debugCounters.cmdRejectedAuth++;
         return;
       }
@@ -1293,7 +1293,9 @@ export class SessionManager {
 
   /**
    * Handle SEAT_REQ message (Host-side only)
-   * Validates seat request, checks cooldown, PIN challenge, and grants/rejects.
+   * M07 Unit Authority v0: Validates seat request with OCCUPIED-first check.
+   * Takeover: If selectedBySlot == null AND ownerSlot != requesterSlot,
+   *   set BOTH ownerSlot and selectedBySlot to requesterSlot.
    * @param {Object} msg - SEAT_REQ message
    */
   _handleSeatReq(msg) {
@@ -1313,11 +1315,22 @@ export class SessionManager {
     const unit = this.game.units?.find(u => u && u.id === targetUnitId);
     if (!unit) {
       console.warn(`[SM] SEAT_REQ rejected: unit ${targetUnitId} not found`);
-      this._sendSeatReject(targetUnitId, 'LOCKED');
+      this._sendSeatReject(targetUnitId, requesterSlot, 'LOCKED');
       return;
     }
 
-    // 2. Check cooldown (progressive backoff)
+    // 2. FIRST CHECK: OCCUPIED - If unit has a driver and it's not the requester, reject immediately
+    // M07 Unit Authority v0: OCCUPIED denial takes priority (no keypad shown)
+    if (unit.selectedBySlot !== null && unit.selectedBySlot !== requesterSlot) {
+      if (this.game._isDevMode) {
+        console.log(`[SM] SEAT_REQ rejected: unit ${targetUnitId} OCCUPIED by slot ${unit.selectedBySlot}`);
+      }
+      this._sendSeatReject(targetUnitId, requesterSlot, 'OCCUPIED');
+      // No cooldown for OCCUPIED - unit genuinely has another driver
+      return;
+    }
+
+    // 3. Check cooldown (progressive backoff for PIN failures)
     const cooldownKey = `${requesterSlot}_${targetUnitId}`;
     const cooldownEntry = this._seatCooldowns.get(cooldownKey);
     const now = Date.now();
@@ -1329,17 +1342,7 @@ export class SessionManager {
       if (this.game._isDevMode) {
         console.log(`[SM] SEAT_REQ rejected: cooldown (${retryAfterMs}ms remaining)`);
       }
-      this._sendSeatReject(targetUnitId, 'COOLDOWN', retryAfterMs);
-      return;
-    }
-
-    // 3. Check if unit is already controlled by someone else
-    if (unit.controllerSlot !== null && unit.controllerSlot !== undefined && unit.controllerSlot !== requesterSlot) {
-      if (this.game._isDevMode) {
-        console.log(`[SM] SEAT_REQ rejected: unit ${targetUnitId} occupied by slot ${unit.controllerSlot}`);
-      }
-      this._sendSeatReject(targetUnitId, 'OCCUPIED');
-      this._applySeatCooldown(cooldownKey, cooldownEntry);
+      this._sendSeatReject(targetUnitId, requesterSlot, 'COOLDOWN', retryAfterMs);
       return;
     }
 
@@ -1347,7 +1350,7 @@ export class SessionManager {
     const seatPolicy = unit.seatPolicy || 'OPEN';
 
     if (seatPolicy === 'OPEN') {
-      // No challenge required - grant immediately
+      // No challenge required - grant immediately (may be takeover)
       this._grantSeat(unit, requesterSlot);
       this._seatCooldowns.delete(cooldownKey);
       return;
@@ -1359,7 +1362,7 @@ export class SessionManager {
         if (this.game._isDevMode) {
           console.log(`[SM] SEAT_REQ rejected: unit ${targetUnitId} requires PIN_1DIGIT auth`);
         }
-        this._sendSeatReject(targetUnitId, 'LOCKED');
+        this._sendSeatReject(targetUnitId, requesterSlot, 'LOCKED');
         return;
       }
 
@@ -1367,12 +1370,12 @@ export class SessionManager {
       const correctPin = unit.seatPinDigit;
       if (typeof correctPin !== 'number' || correctPin < 1 || correctPin > 9) {
         console.warn(`[SM] SEAT_REQ rejected: unit ${targetUnitId} has invalid seatPinDigit`);
-        this._sendSeatReject(targetUnitId, 'LOCKED');
+        this._sendSeatReject(targetUnitId, requesterSlot, 'LOCKED');
         return;
       }
 
       if (auth.guess === correctPin) {
-        // Correct PIN - grant seat
+        // Correct PIN - grant seat (may be takeover)
         this._grantSeat(unit, requesterSlot);
         this._seatCooldowns.delete(cooldownKey);
         return;
@@ -1383,14 +1386,14 @@ export class SessionManager {
         }
         this._applySeatCooldown(cooldownKey, cooldownEntry);
         const newCooldown = this._seatCooldowns.get(cooldownKey);
-        this._sendSeatReject(targetUnitId, 'BAD_PIN', newCooldown ? (newCooldown.until - now) : SEAT_COOLDOWN_LEVELS[0]);
+        this._sendSeatReject(targetUnitId, requesterSlot, 'BAD_PIN', newCooldown ? (newCooldown.until - now) : SEAT_COOLDOWN_LEVELS[0]);
         return;
       }
     }
 
     // Unknown seat policy - treat as LOCKED
     console.warn(`[SM] SEAT_REQ rejected: unknown seatPolicy '${seatPolicy}'`);
-    this._sendSeatReject(targetUnitId, 'LOCKED');
+    this._sendSeatReject(targetUnitId, requesterSlot, 'LOCKED');
   }
 
   /**
@@ -1414,20 +1417,32 @@ export class SessionManager {
 
   /**
    * Grant seat to requester and broadcast SEAT_ACK
+   * M07 Unit Authority v0: Handles takeover - sets BOTH ownerSlot and selectedBySlot.
    * @private
    */
   async _grantSeat(unit, requesterSlot) {
-    unit.controllerSlot = requesterSlot;
+    const prevOwner = unit.ownerSlot;
+    const isTakeover = unit.selectedBySlot === null && unit.ownerSlot !== requesterSlot;
+
+    // M07: On successful seat grant, update BOTH fields
+    unit.selectedBySlot = requesterSlot;
+
+    // M07: If this is a takeover (empty seat + different owner), transfer ownership
+    if (isTakeover) {
+      unit.ownerSlot = requesterSlot;
+      this._logOwnershipChange(unit, prevOwner, requesterSlot, 'TAKEOVER');
+    }
 
     this._debugCounters.seatAckCount++;
     if (this.game._isDevMode) {
-      console.log(`[SM] SEAT_ACK: unit ${unit.id} now controlled by slot ${requesterSlot}`);
+      console.log(`[SM] SEAT_ACK: unit ${unit.id} now controlled by slot ${requesterSlot}${isTakeover ? ' (TAKEOVER)' : ''}`);
     }
 
     if (this.transport && this._sessionChannel) {
       const ack = createSeatAck({
         targetUnitId: unit.id,
-        controllerSlot: requesterSlot
+        selectedBySlot: requesterSlot,
+        newOwnerSlot: isTakeover ? requesterSlot : unit.ownerSlot
       });
 
       try {
@@ -1439,10 +1454,48 @@ export class SessionManager {
   }
 
   /**
+   * Log ownership changes for audit trail
+   * M07 Unit Authority v0: Best-effort logging (dev-mode warn if fails)
+   * @private
+   * @param {Object} unit - The unit whose ownership changed
+   * @param {number} prevOwner - Previous ownerSlot value
+   * @param {number} newOwner - New ownerSlot value
+   * @param {string} eventType - Type of event ('TAKEOVER', 'SPAWN', etc.)
+   */
+  _logOwnershipChange(unit, prevOwner, newOwner, eventType) {
+    const currentTick = this.game.simLoop?.tickCount || 0;
+    const sessionId = this.state.hostId || 'LOCAL';
+
+    // Create log entry with safe serialization (no circular refs)
+    const logEntry = {
+      sessionId,
+      unitId: unit.id,
+      tick: currentTick,
+      prevOwner,
+      newOwner,
+      eventType,
+      timestamp: Date.now()
+    };
+
+    try {
+      console.log(`[SM] OWNERSHIP_CHANGE: ${JSON.stringify(logEntry)}`);
+    } catch (err) {
+      // Dev-mode warn if logging fails
+      if (this.game._isDevMode) {
+        console.warn('[SM] _logOwnershipChange failed:', err.message);
+      }
+    }
+  }
+
+  /**
    * Send SEAT_REJECT to session channel
    * @private
+   * @param {number} targetUnitId - Unit that was denied
+   * @param {number} requesterSlot - Slot that was denied (for future targeted messaging)
+   * @param {string} reason - Rejection reason
+   * @param {number} [retryAfterMs] - Optional backoff hint
    */
-  async _sendSeatReject(targetUnitId, reason, retryAfterMs) {
+  async _sendSeatReject(targetUnitId, requesterSlot, reason, retryAfterMs) {
     this._debugCounters.seatRejectCount++;
 
     if (!this.transport || !this._sessionChannel) {
@@ -1458,7 +1511,7 @@ export class SessionManager {
     try {
       await this.transport.broadcastToChannel(this._sessionChannel, reject);
       if (this.game._isDevMode) {
-        console.log(`[SM] SEAT_REJECT sent: unit=${targetUnitId}, reason=${reason}`);
+        console.log(`[SM] SEAT_REJECT sent: unit=${targetUnitId}, slot=${requesterSlot}, reason=${reason}`);
       }
     } catch (err) {
       console.error('[SM] Failed to send SEAT_REJECT:', err);
@@ -1467,23 +1520,30 @@ export class SessionManager {
 
   /**
    * Handle SEAT_ACK message (Both sides)
-   * Updates unit.controllerSlot
+   * M07 Unit Authority v0: Updates unit.selectedBySlot and unit.ownerSlot
    * @param {Object} msg - SEAT_ACK message
    */
   _handleSeatAck(msg) {
-    const { targetUnitId, controllerSlot } = msg;
+    // M07: Support both old and new field names for compatibility
+    const { targetUnitId, selectedBySlot, controllerSlot, newOwnerSlot } = msg;
+    const effectiveSelectedBy = selectedBySlot ?? controllerSlot; // Fallback to old name
+
     const unit = this.game.units?.find(u => u && u.id === targetUnitId);
 
     if (unit) {
-      unit.controllerSlot = controllerSlot;
+      unit.selectedBySlot = effectiveSelectedBy;
+      // M07: Update ownerSlot if newOwnerSlot is provided (takeover case)
+      if (newOwnerSlot !== undefined && newOwnerSlot !== null) {
+        unit.ownerSlot = newOwnerSlot;
+      }
       if (this.game._isDevMode) {
-        console.log(`[SM] SEAT_ACK recv: unit ${targetUnitId} -> slot ${controllerSlot}`);
+        console.log(`[SM] SEAT_ACK recv: unit ${targetUnitId} -> selectedBySlot=${effectiveSelectedBy}, ownerSlot=${unit.ownerSlot}`);
       }
     }
 
     // Notify game UI (if callback registered)
     if (this.game.onSeatGranted) {
-      this.game.onSeatGranted(targetUnitId, controllerSlot);
+      this.game.onSeatGranted(targetUnitId, effectiveSelectedBy);
     }
   }
 
@@ -1538,7 +1598,7 @@ export class SessionManager {
   }
 
   /**
-   * M07 GAP-0: Check if local client has seat on a unit
+   * M07 Unit Authority v0: Check if local client has seat on a unit
    * @param {Object} unit - Unit to check
    * @returns {boolean}
    */
@@ -1547,8 +1607,8 @@ export class SessionManager {
     const mySlot = this.state.mySlot;
     // Host (slot 0) or offline always has authority
     if (this.state.isOffline() || this.state.isHost()) return true;
-    // Guest: check controllerSlot
-    return unit.controllerSlot === mySlot;
+    // Guest: check selectedBySlot (canonical field)
+    return unit.selectedBySlot === mySlot;
   }
 
   // ========================================
@@ -1658,6 +1718,33 @@ export class SessionManager {
    */
   getPlayers() {
     return this.state.players;
+  }
+
+  /**
+   * M07: Get network evidence as clean, JSON-safe object.
+   * No circular references, no Three.js objects, no Supabase client refs.
+   * Safe to call JSON.stringify() on the result.
+   * @returns {Object} JSON-safe evidence object
+   */
+  getNetEvidence() {
+    return {
+      role: this.state.role,
+      mySlot: this.state.mySlot,
+      units: this.game.units?.filter(u => u).map(u => ({
+        id: u.id,
+        ownerSlot: u.ownerSlot ?? 0,
+        selectedBySlot: u.selectedBySlot ?? null,  // M07: Canonical field name
+        seatPolicy: u.seatPolicy ?? 'OPEN'
+        // NOTE: seatPinDigit is Host-only, intentionally NOT included (privacy)
+      })) || [],
+      debugCounters: { ...this._debugCounters },
+      // Gating state
+      batchSeqCounter: this._batchSeqCounter,
+      lastReceivedBatchSeq: this._lastReceivedBatchSeq,
+      inputBufferSize: this.inputBuffer?.length || 0,
+      discoveryActive: this._discoveryActive,
+      availableHostsCount: this.availableHosts?.size || 0
+    };
   }
 
   /**

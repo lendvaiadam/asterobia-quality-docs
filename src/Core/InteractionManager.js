@@ -157,7 +157,9 @@ export class InteractionManager {
                 } else if (this.mouseDownUnit) {
                     // M07 GAP-0: Check seat authority before allowing path draw
                     if (!this._hasSeatAuthority(this.mouseDownUnit)) {
-                        console.warn('[InteractionManager] Cannot draw path: not seated on unit');
+                        if (this.game._isDevMode) {
+                            console.warn('[InteractionManager] Cannot draw path: not seated on unit');
+                        }
                         // Fall through to terrain drag instead
                         this.state = 'DRAGGING_TERRAIN';
                         if (this.game.cameraControls) {
@@ -265,7 +267,9 @@ export class InteractionManager {
 
                         // M07 GAP-0: Check seat authority before allowing waypoint
                         if (!this._hasSeatAuthority(unit)) {
-                            console.warn('[InteractionManager] Cannot add waypoint: not seated on unit');
+                            if (this.game._isDevMode) {
+                                console.warn('[InteractionManager] Cannot add waypoint: not seated on unit');
+                            }
                             return; // Block - no ghost path on host
                         }
 
@@ -582,12 +586,19 @@ export class InteractionManager {
      * M07: Trigger seat acquisition flow for a unit.
      * Called INSTEAD of select() when client doesn't have seat authority.
      * Selection is BLOCKED until seat is acquired.
+     *
+     * Keypad shown ONLY if:
+     * - unit.selectedBySlot == null (empty seat)
+     * - seatPolicy == 'PIN_1DIGIT'
+     * - unit.ownerSlot != mySlot
+     *
      * @param {Object} unit - Unit to acquire seat for
      */
     _triggerSeatFlow(unit) {
         if (!unit) return;
 
         const sm = this.game.sessionManager;
+        const mySlot = sm?.state?.mySlot;
 
         // Offline or Host - should never reach here, but safety fallback
         if (!sm || sm.state.isOffline() || sm.state.isHost()) {
@@ -596,10 +607,27 @@ export class InteractionManager {
             return;
         }
 
+        // M07: OCCUPIED CHECK - Another player already has the seat
+        if (unit.selectedBySlot !== null && unit.selectedBySlot !== mySlot) {
+            // Show OCCUPIED feedback, NO keypad, NO selection
+            this._showOccupiedFeedback(unit);
+            return;
+        }
+
+        // M07: Check if this is my own unit (ownerSlot == mySlot)
+        if (unit.ownerSlot === mySlot) {
+            // My unit - auto-seat via SEAT_REQ (Host confirms)
+            sm.sendSeatReq({
+                targetUnitId: unit.id
+            });
+            return;
+        }
+
+        // Foreign unit with empty seat - apply seat policy
         const seatPolicy = unit.seatPolicy || 'OPEN';
 
         if (seatPolicy === 'PIN_1DIGIT') {
-            // Show keypad overlay for PIN entry
+            // M07: Show keypad ONLY if unit is empty and PIN-protected
             // Selection happens AFTER successful seat acquisition (via SEAT_ACK handler)
             if (this.game.seatKeypadOverlay) {
                 this.game.seatKeypadOverlay.show(unit.id, (digit) => {
@@ -620,6 +648,32 @@ export class InteractionManager {
             });
         }
         // For LOCKED policy - do nothing, unit cannot be controlled
-        // Visual feedback could be added here (e.g., "Unit is locked" toast)
+    }
+
+    /**
+     * M07: Show "OCCUPIED" feedback when attempting to click a unit
+     * that another player is currently controlling.
+     * @param {Object} unit - The occupied unit
+     */
+    _showOccupiedFeedback(unit) {
+        if (!unit) return;
+
+        if (this.game._isDevMode) {
+            console.log(`[InteractionManager] Unit ${unit.id} is OCCUPIED by slot ${unit.selectedBySlot}`);
+        }
+
+        // Show temporary OCCUPIED feedback via keypad overlay's error display
+        if (this.game.seatKeypadOverlay) {
+            // Briefly show overlay with OCCUPIED message, then auto-hide
+            this.game.seatKeypadOverlay.show(unit.id, () => {});
+            this.game.seatKeypadOverlay.showError('OCCUPIED', 0);
+            // Auto-hide after 1.5 seconds
+            setTimeout(() => {
+                if (this.game.seatKeypadOverlay.isVisible &&
+                    this.game.seatKeypadOverlay.targetUnitId === unit.id) {
+                    this.game.seatKeypadOverlay.hide();
+                }
+            }, 1500);
+        }
     }
 }

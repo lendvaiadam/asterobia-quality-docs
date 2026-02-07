@@ -157,7 +157,16 @@ export function validateMessage(msg) {
 
     case MSG.SEAT_ACK:
       if (typeof msg.targetUnitId !== 'number') errors.push('targetUnitId must be a number');
-      if (typeof msg.controllerSlot !== 'number') errors.push('controllerSlot must be a number');
+      // M07 Unit Authority v0: Support both selectedBySlot (canonical) and controllerSlot (deprecated)
+      const hasSelectedBy = typeof msg.selectedBySlot === 'number';
+      const hasController = typeof msg.controllerSlot === 'number';
+      if (!hasSelectedBy && !hasController) {
+        errors.push('selectedBySlot or controllerSlot must be a number');
+      }
+      // newOwnerSlot is optional (only present on takeover)
+      if (msg.newOwnerSlot !== undefined && typeof msg.newOwnerSlot !== 'number') {
+        errors.push('newOwnerSlot must be a number if provided');
+      }
       break;
 
     case MSG.SEAT_REJECT:
@@ -452,18 +461,32 @@ export function createSeatReq({ targetUnitId, requesterSlot, auth }) {
 
 /**
  * Creates a SEAT_ACK message (Host -> Broadcast)
+ * M07 Unit Authority v0: Uses selectedBySlot (canonical) and includes newOwnerSlot for takeover.
  * @param {Object} params
  * @param {number} params.targetUnitId - Unit that was granted
- * @param {number} params.controllerSlot - New controller slot
+ * @param {number} params.selectedBySlot - New driver slot (canonical name)
+ * @param {number} [params.controllerSlot] - Deprecated alias for selectedBySlot
+ * @param {number} [params.newOwnerSlot] - New owner slot (only on takeover)
  * @returns {Object}
  */
-export function createSeatAck({ targetUnitId, controllerSlot }) {
-  return {
+export function createSeatAck({ targetUnitId, selectedBySlot, controllerSlot, newOwnerSlot }) {
+  // M07: Prefer selectedBySlot, fall back to controllerSlot for compatibility
+  const effectiveSelectedBy = selectedBySlot ?? controllerSlot;
+
+  const msg = {
     type: MSG.SEAT_ACK,
     targetUnitId,
-    controllerSlot,
+    selectedBySlot: effectiveSelectedBy,
+    controllerSlot: effectiveSelectedBy, // Deprecated alias for backwards compat
     timestamp: Date.now()
   };
+
+  // Include newOwnerSlot only if provided (takeover case)
+  if (newOwnerSlot !== undefined && newOwnerSlot !== null) {
+    msg.newOwnerSlot = newOwnerSlot;
+  }
+
+  return msg;
 }
 
 /**

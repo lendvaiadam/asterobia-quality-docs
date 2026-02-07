@@ -157,6 +157,16 @@ export class Unit {
         }
         this.name = `Unit ${this.id}`;
 
+        // === M07: Unit Authority v0 - Canonical Data Model ===
+        // ownerSlot: Economic owner. Defaults to spawner slot. Changes ONLY on successful takeover.
+        this.ownerSlot = 0; // Default: spawned by Host (slot 0)
+        // selectedBySlot: The driver. Exclusive - only one driver per unit. null = empty seat.
+        this.selectedBySlot = null;
+        // seatPolicy: 'OPEN' (anyone can seat) | 'PIN_1DIGIT' (requires PIN challenge)
+        this.seatPolicy = 'OPEN';
+        // seatPinDigit: 1-9 (Host-only, NOT serialized to guests)
+        this.seatPinDigit = null;
+
         // === R008: RENDER INTERPOLATION STATE ===
         // Stores authoritative position/quaternion at tick boundaries for smooth rendering.
         // These are RENDER-ONLY and do NOT affect sim state.
@@ -399,77 +409,156 @@ export class Unit {
         // Full visuals handled in update() for smooth transition ONLY if active
     }
 
+    // === M07: Unit Authority v0 - Getters ===
+
+    /**
+     * M07: Check if this unit has a driver (seat is occupied).
+     * @returns {boolean} true if selectedBySlot !== null
+     */
+    get isOccupied() {
+        return this.selectedBySlot !== null;
+    }
+
+    /**
+     * M07: Compatibility getter - maps controllerSlot to selectedBySlot.
+     * @deprecated Use selectedBySlot directly
+     * @returns {number|null}
+     */
+    get controllerSlot() {
+        return this.selectedBySlot;
+    }
+
+    /**
+     * M07: Compatibility setter - maps controllerSlot to selectedBySlot.
+     * @deprecated Use selectedBySlot directly
+     */
+    set controllerSlot(value) {
+        this.selectedBySlot = value;
+    }
+
     // === W2: LOCK INDICATOR SYSTEM ===
 
     /**
      * W2: Check if this unit is locked for the current guest.
      * Returns true if:
      * - We're in multiplayer as a guest
-     * - The unit's controllerSlot doesn't match our slot
+     * - The unit's selectedBySlot doesn't match our slot
      * @returns {boolean}
      */
     get isLockedForGuest() {
         const sm = window.game?.sessionManager;
         if (!sm || sm.state.isOffline() || sm.state.isHost()) return false;
-        return this.controllerSlot !== sm.state.mySlot;
+        return this.selectedBySlot !== sm.state.mySlot;
     }
 
     /**
-     * W2: Check if this unit should show a lock indicator.
+     * M07: Check if this unit should show a LOCK indicator (padlock).
      * Shows lock when:
-     * - seatPolicy is PIN_1DIGIT AND
-     * - Guest doesn't have the seat (controllerSlot !== mySlot)
+     * - seatPolicy == 'PIN_1DIGIT' AND
+     * - selectedBySlot == null (empty seat) AND
+     * - ownerSlot != mySlot
      * @returns {boolean}
      */
     get shouldShowLockIndicator() {
         const sm = window.game?.sessionManager;
         // Only show in multiplayer guest mode
         if (!sm || sm.state.isOffline() || sm.state.isHost()) return false;
-        // Only show for PIN-protected units
+        const mySlot = sm.state.mySlot;
+        // Must be PIN-protected
         if (this.seatPolicy !== 'PIN_1DIGIT') return false;
-        // Show if we don't control this unit
-        return this.controllerSlot !== sm.state.mySlot;
+        // Seat must be empty
+        if (this.selectedBySlot !== null) return false;
+        // Must be a foreign unit (not mine)
+        return this.ownerSlot !== mySlot;
+    }
+
+    /**
+     * M07: Check if this unit should show an OCCUPIED indicator (person icon).
+     * Shows occupied when:
+     * - selectedBySlot != null AND
+     * - selectedBySlot != mySlot
+     * @returns {boolean}
+     */
+    get shouldShowOccupiedIndicator() {
+        const sm = window.game?.sessionManager;
+        // Only show in multiplayer guest mode
+        if (!sm || sm.state.isOffline() || sm.state.isHost()) return false;
+        const mySlot = sm.state.mySlot;
+        // Seat is occupied by someone else
+        return this.selectedBySlot !== null && this.selectedBySlot !== mySlot;
+    }
+
+    /**
+     * M07: Check if this unit should show "My Unit" indicator (green glow).
+     * Shows when: selectedBySlot == mySlot
+     * @returns {boolean}
+     */
+    get isMySeatedUnit() {
+        const sm = window.game?.sessionManager;
+        // Offline/Host always "owns" selected units
+        if (!sm || sm.state.isOffline() || sm.state.isHost()) {
+            return this.isSelected;
+        }
+        const mySlot = sm.state.mySlot;
+        return this.selectedBySlot === mySlot;
+    }
+
+    /**
+     * M07: Create or update indicator sprites (lock/occupied).
+     * Called during unit update to reflect current seat state.
+     */
+    updateSeatIndicators() {
+        // Update lock indicator
+        const shouldShowLock = this.shouldShowLockIndicator;
+        if (shouldShowLock && !this._lockIndicatorSprite) {
+            this._createIndicatorSprite('lock');
+        }
+        if (this._lockIndicatorSprite) {
+            this._lockIndicatorSprite.visible = shouldShowLock;
+        }
+
+        // Update occupied indicator
+        const shouldShowOccupied = this.shouldShowOccupiedIndicator;
+        if (shouldShowOccupied && !this._occupiedIndicatorSprite) {
+            this._createIndicatorSprite('occupied');
+        }
+        if (this._occupiedIndicatorSprite) {
+            this._occupiedIndicatorSprite.visible = shouldShowOccupied;
+        }
     }
 
     /**
      * W2: Create or update the lock indicator sprite.
-     * Creates a CSS-based lock icon overlay positioned above the unit.
+     * @deprecated Use updateSeatIndicators() instead
      */
     updateLockIndicator() {
-        const shouldShow = this.shouldShowLockIndicator;
-
-        if (shouldShow && !this._lockIndicatorSprite) {
-            // Create lock indicator as a THREE.Sprite with canvas texture
-            this._createLockIndicatorSprite();
-        }
-
-        if (this._lockIndicatorSprite) {
-            this._lockIndicatorSprite.visible = shouldShow;
-        }
+        this.updateSeatIndicators();
     }
 
     /**
-     * W2: Create the lock indicator sprite (emoji-based).
+     * M07: Create an indicator sprite (lock or occupied).
      * @private
+     * @param {string} type - 'lock' or 'occupied'
      */
-    _createLockIndicatorSprite() {
-        // Create canvas for the lock emoji
+    _createIndicatorSprite(type) {
         const canvas = document.createElement('canvas');
         canvas.width = 64;
         canvas.height = 64;
         const ctx = canvas.getContext('2d');
 
-        // Draw lock emoji
         ctx.font = '48px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('\u{1F512}', 32, 32); // Lock emoji
 
-        // Create texture from canvas
+        if (type === 'lock') {
+            ctx.fillText('\u{1F512}', 32, 32); // Padlock emoji
+        } else if (type === 'occupied') {
+            ctx.fillText('\u{1F464}', 32, 32); // Person silhouette emoji
+        }
+
         const texture = new THREE.CanvasTexture(canvas);
         texture.needsUpdate = true;
 
-        // Create sprite material
         const material = new THREE.SpriteMaterial({
             map: texture,
             transparent: true,
@@ -477,14 +566,35 @@ export class Unit {
             depthWrite: false
         });
 
-        // Create sprite
-        this._lockIndicatorSprite = new THREE.Sprite(material);
-        this._lockIndicatorSprite.scale.set(1.5, 1.5, 1);
-        this._lockIndicatorSprite.position.set(0, 2.5, 0); // Above unit
-        this._lockIndicatorSprite.renderOrder = 9998; // Just below selection ring
+        const sprite = new THREE.Sprite(material);
+        sprite.scale.set(1.5, 1.5, 1);
+        sprite.position.set(0, 2.5, 0); // Above unit
+        sprite.renderOrder = 9998;
 
-        // Add to unit mesh
-        this.mesh.add(this._lockIndicatorSprite);
+        this.mesh.add(sprite);
+
+        if (type === 'lock') {
+            this._lockIndicatorSprite = sprite;
+        } else if (type === 'occupied') {
+            this._occupiedIndicatorSprite = sprite;
+        }
+    }
+
+    /**
+     * W2: Create the lock indicator sprite (emoji-based).
+     * @private
+     * @deprecated Use _createIndicatorSprite('lock') instead
+     */
+    _createLockIndicatorSprite() {
+        this._createIndicatorSprite('lock');
+    }
+
+    /**
+     * M07: Remove all seat indicator sprites.
+     */
+    removeSeatIndicators() {
+        this.removeLockIndicator();
+        this.removeOccupiedIndicator();
     }
 
     /**
@@ -498,6 +608,20 @@ export class Unit {
             }
             this._lockIndicatorSprite.material.dispose();
             this._lockIndicatorSprite = null;
+        }
+    }
+
+    /**
+     * M07: Remove the occupied indicator sprite.
+     */
+    removeOccupiedIndicator() {
+        if (this._occupiedIndicatorSprite) {
+            this.mesh.remove(this._occupiedIndicatorSprite);
+            if (this._occupiedIndicatorSprite.material.map) {
+                this._occupiedIndicatorSprite.material.map.dispose();
+            }
+            this._occupiedIndicatorSprite.material.dispose();
+            this._occupiedIndicatorSprite = null;
         }
     }
 

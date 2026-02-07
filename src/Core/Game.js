@@ -177,6 +177,30 @@ export class Game {
         // M07 GAP-0: Seat keypad overlay for PIN-protected units
         this.seatKeypadOverlay = new SeatKeypadOverlay(this);
 
+        // M07: Callback from SessionManager when seat is granted
+        // Called after SEAT_ACK is received - triggers unit selection
+        this.onSeatGranted = (targetUnitId, controllerSlot) => {
+            // Hide keypad if it was showing for this unit
+            if (this.seatKeypadOverlay &&
+                this.seatKeypadOverlay.isVisible &&
+                this.seatKeypadOverlay.targetUnitId === targetUnitId) {
+                this.seatKeypadOverlay.hide();
+            }
+
+            // If this grant is for us, select the unit
+            const mySlot = this.sessionManager?.state?.mySlot;
+            if (controllerSlot === mySlot) {
+                const unit = this.units.find(u => u && u.id === targetUnitId);
+                if (unit) {
+                    // Now we have the seat - select the unit
+                    this.selectUnit(unit, true); // skipCamera = true
+                    if (this._isDevMode) {
+                        console.log(`[Game] Seat granted: unit ${targetUnitId} -> selecting`);
+                    }
+                }
+            }
+        };
+
         /**
          * R013 M07: Command execution gate for Slice 1 transport testing.
          * Dynamic based on role:
@@ -414,14 +438,20 @@ export class Game {
     /**
      * R013 M07: Dev-only evidence dump (no console.log dependency).
      * Call via window.dumpNetEvidence() in browser.
+     * Uses getNetEvidence() for JSON-safe unit data (no circular refs).
      * @returns {Object} Evidence object for HU-TEST
      */
     _dumpNetEvidence() {
-        const netStatus = this.sessionManager?.getDebugNetStatus?.() || {};
-        // Summarize units with ownership and position
+        // Use getNetEvidence() for JSON-safe data (no circular refs, no seatPinDigit)
+        const netEvidence = this.sessionManager?.getNetEvidence?.() || {};
+
+        // Summarize units with position (separate from netEvidence units)
         const unitSummary = (this.units || []).filter(u => u).map(u => ({
             id: u.id,
             ownerSlot: u.ownerSlot ?? 0,
+            controllerSlot: u.controllerSlot ?? null,
+            seatPolicy: u.seatPolicy ?? 'OPEN',
+            // NOTE: seatPinDigit intentionally excluded (privacy)
             pos: u.position ? {
                 x: u.position.x.toFixed(2),
                 y: u.position.y.toFixed(2),
@@ -429,17 +459,27 @@ export class Game {
             } : null,
             pathPoints: u.waypointControlPoints?.length || 0
         }));
-        return {
+
+        // Build JSON-safe evidence object (no circular refs)
+        const evidence = {
             tick: this.simLoop?.tickCount || 0,
-            role: netStatus.role || 'OFFLINE',
+            role: netEvidence.role || 'OFFLINE',
+            mySlot: netEvidence.mySlot ?? 0,
             ENABLE_COMMAND_EXECUTION: this.ENABLE_COMMAND_EXECUTION,
             _guestExecutionEnabled: this._guestExecutionEnabled,
-            netStatus: netStatus,
             queuePending: globalCommandQueue?.pendingCount || 0,
             unitCount: this.units?.filter(u => u)?.length || 0,
             selectedUnitId: this.selectedUnit?.id || null,
-            units: unitSummary
+            units: unitSummary,
+            // Spread debug counters (primitives only)
+            debugCounters: netEvidence.debugCounters || {},
+            // Gating state
+            batchSeqCounter: netEvidence.batchSeqCounter ?? 0,
+            lastReceivedBatchSeq: netEvidence.lastReceivedBatchSeq ?? -1,
+            inputBufferSize: netEvidence.inputBufferSize ?? 0
         };
+
+        return evidence;
     }
 
     // R012: Unified dev HUD for observability (only shown when dev=1)
@@ -2708,7 +2748,13 @@ export class Game {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
+                // M07: Gate by seat authority
+                if (!this._hasPanelSeatAuthority()) {
+                    if (this._isDevMode) console.warn('[UI] Cannot delete command: not seated on unit');
+                    return;
+                }
+
                 const index = parseInt(btn.dataset.index);
                 console.log(`[UI] Delete command at index ${index}`);
                 this.deleteCommandAtIndex(index);
@@ -2719,6 +2765,12 @@ export class Game {
         const dropdowns = list.querySelectorAll('.action-dropdown');
         dropdowns.forEach((dd) => {
             dd.addEventListener('change', (e) => {
+                // M07: Gate by seat authority
+                if (!this._hasPanelSeatAuthority()) {
+                    if (this._isDevMode) console.warn('[UI] Cannot change command: not seated on unit');
+                    return;
+                }
+
                 const index = parseInt(dd.dataset.index);
                 const newType = e.target.value;
                 if (this.selectedUnit && this.selectedUnit.commands[index]) {
@@ -2732,6 +2784,12 @@ export class Game {
         const inputs = list.querySelectorAll('.seconds-input');
         inputs.forEach((inp) => {
             inp.addEventListener('change', (e) => {
+                // M07: Gate by seat authority
+                if (!this._hasPanelSeatAuthority()) {
+                    if (this._isDevMode) console.warn('[UI] Cannot change seconds: not seated on unit');
+                    return;
+                }
+
                 const index = parseInt(inp.dataset.index);
                 const val = parseFloat(e.target.value);
                 if (this.selectedUnit && this.selectedUnit.commands[index]) {
@@ -2742,18 +2800,36 @@ export class Game {
         });
     }
 
+    /**
+     * M07: Check if local client has seat authority on the panel unit.
+     * Used to gate UI panel modifications.
+     * @returns {boolean}
+     * @private
+     */
+    _hasPanelSeatAuthority() {
+        const unit = this.getPanelUnit();
+        if (!unit) return false;
+        return this.sessionManager?.hasSeatedUnit?.(unit) ?? true;
+    }
+
     reorderCommandsFromDOM() {
+        // M07: Gate by seat authority
+        if (!this._hasPanelSeatAuthority()) {
+            if (this._isDevMode) console.warn('[Game] Cannot reorder commands: not seated on unit');
+            return;
+        }
+
         const list = document.getElementById('command-queue-list');
         const unit = this.selectedUnit;
         if (!list || !unit || !unit.commands) return;
 
         const items = list.querySelectorAll('.command-item');
         const newOrderIndices = Array.from(items).map(item => parseInt(item.dataset.index));
-        
+
         // Reorder COMMANDS
         const reorderedCommands = newOrderIndices.map(i => unit.commands[i]);
         unit.commands = reorderedCommands;
-        
+
         // Adjust currentCommandIndex if necessary?
         // For simple logic, maybe reset or try to track the active one via ID?
         // Let's assume simpler: Reset logic or trust the user knows what they are doing.
@@ -2769,25 +2845,31 @@ export class Game {
     }
 
     clearWaypoints() {
+        // M07: Gate by seat authority
+        if (!this._hasPanelSeatAuthority()) {
+            if (this._isDevMode) console.warn('[Game] Cannot clear waypoints: not seated on unit');
+            return;
+        }
+
         const unit = this.getPanelUnit();
         if (!unit) {
             console.log("[Game] clearWaypoints: No unit");
             return;
         }
-        
+
         this.clearWaypointMarkers(); // Clears markers and resets waypoints/controlPoints arrays on unit
         unit.path = [];
         unit.isFollowingPath = false;
         unit.setCommandPause(false);
         unit.waterState = 'normal';
-        
+
         // Remove curve line
         if (unit.waypointCurveLine) {
             this.scene.remove(unit.waypointCurveLine);
             unit.waypointCurveLine.geometry.dispose();
             unit.waypointCurveLine = null;
         }
-        
+
         // Update panel (no argument needed - will use getPanelUnit)
         this.updatePanelContent();
         console.log("[Game] Waypoints cleared via UI");
@@ -2797,20 +2879,27 @@ export class Game {
      * Delete a single waypoint at the given index.
      * Removes control point, waypoint data, and marker.
      * Regenerates the path curve after deletion.
+     * M07: Gated by seat authority (checked by caller)
      */
     deleteCommandAtIndex(index) {
+        // M07: Gate by seat authority
+        if (!this._hasPanelSeatAuthority()) {
+            if (this._isDevMode) console.warn('[Game] Cannot delete command: not seated on unit');
+            return;
+        }
+
         const unit = this.getPanelUnit();
         if (!unit || !unit.commands) return;
-        
+
         // Remove command
         unit.commands.splice(index, 1);
-        
+
         // Adjust current index if needed
         if (unit.currentCommandIndex > index) unit.currentCommandIndex--;
-        
+
         // Sync derived data
         this.syncWaypointsFromCommands(unit);
-        
+
         // Update UI
         this.updatePanelContent();
         console.log(`[Game] Deleted command at index ${index}. Remaining: ${unit.commands.length}`);
@@ -3297,6 +3386,9 @@ export class Game {
         }
         unit.health = data.health ?? unit.health;
         unit.ownerSlot = data.ownerSlot ?? unit.ownerSlot ?? 0; // R013 M07: Ownership
+        // M07 Unit Authority v0: Restore selectedBySlot (handle old controllerSlot for compat)
+        unit.selectedBySlot = data.selectedBySlot ?? data.controllerSlot ?? unit.selectedBySlot ?? null;
+        unit.seatPolicy = data.seatPolicy ?? unit.seatPolicy ?? 'OPEN';
         unit.currentSpeed = data.currentSpeed ?? 0;
         unit.pathIndex = data.pathIndex ?? 0;
         unit.isFollowingPath = data.isFollowingPath ?? false;
@@ -3443,8 +3535,13 @@ export class Game {
 
         const keys = this.input.getKeys();
 
-        // Auto-Chase: ONLY when Manual Driving
-        if (this.selectedUnit && (keys.forward || keys.backward || keys.left || keys.right)) {
+        // M07: Gate keyboard-triggered camera transitions by seat authority
+        const hasSeat = this.selectedUnit
+            ? (this.sessionManager?.hasSeatedUnit?.(this.selectedUnit) ?? true)
+            : false;
+
+        // Auto-Chase: ONLY when Manual Driving (and we have the seat)
+        if (this.selectedUnit && hasSeat && (keys.forward || keys.backward || keys.left || keys.right)) {
             // First keyboard press: transition to third-person view
             if (this.cameraControls.chaseMode === 'drone') {
                 this.cameraControls.transitionToThirdPerson(this.selectedUnit);

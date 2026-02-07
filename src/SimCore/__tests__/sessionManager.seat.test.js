@@ -18,6 +18,7 @@ import { MSG } from '../multiplayer/MessageTypes.js';
 
 /**
  * Mock Game object with units for seat testing
+ * Uses both selectedBySlot (canonical) and controllerSlot (SessionManager compat) in sync
  */
 function createMockGame() {
     return {
@@ -25,9 +26,9 @@ function createMockGame() {
         _isDevMode: false,
         simLoop: { tickCount: 100 },
         units: [
-            { id: 1, ownerSlot: 0, controllerSlot: null, seatPolicy: 'OPEN' },
-            { id: 2, ownerSlot: 0, controllerSlot: null, seatPolicy: 'PIN_1DIGIT', seatPinDigit: 5 },
-            { id: 3, ownerSlot: 0, controllerSlot: 1, seatPolicy: 'OPEN' } // Already occupied
+            { id: 1, ownerSlot: 0, selectedBySlot: null, controllerSlot: null, seatPolicy: 'OPEN' },
+            { id: 2, ownerSlot: 0, selectedBySlot: null, controllerSlot: null, seatPolicy: 'PIN_1DIGIT', seatPinDigit: 5 },
+            { id: 3, ownerSlot: 0, selectedBySlot: 1, controllerSlot: 1, seatPolicy: 'OPEN' } // Already occupied
         ],
         stateSurface: { serialize: () => ({}), deserialize: vi.fn() }
     };
@@ -101,7 +102,7 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
 
             // Assert
             const unit = mockGame.units.find(u => u.id === 1);
-            expect(unit.controllerSlot).toBe(2);
+            expect(unit.selectedBySlot).toBe(2);
 
             // Check SEAT_ACK was sent
             const sentMsgs = mockTransport.getSentMessages();
@@ -123,7 +124,7 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
             sessionManager._handleSeatReq?.(seatReq);
 
             const unit = mockGame.units.find(u => u.id === 1);
-            expect(unit.controllerSlot).toBe(2);
+            expect(unit.selectedBySlot).toBe(2);
         });
     });
 
@@ -146,7 +147,7 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
 
             // Assert
             const unit = mockGame.units.find(u => u.id === 2);
-            expect(unit.controllerSlot).toBe(2);
+            expect(unit.selectedBySlot).toBe(2);
 
             const sentMsgs = mockTransport.getSentMessages();
             const ack = sentMsgs.find(m => m.msg.type === 'SEAT_ACK');
@@ -191,7 +192,7 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
 
             // Assert - Unit should NOT be seated
             const unit = mockGame.units.find(u => u.id === 2);
-            expect(unit.controllerSlot).toBeNull();
+            expect(unit.selectedBySlot).toBeNull();
 
             // Check SEAT_REJECT was sent
             const sentMsgs = mockTransport.getSentMessages();
@@ -298,7 +299,7 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
 
             // Assert
             const unit = mockGame.units.find(u => u.id === 3);
-            expect(unit.controllerSlot).toBe(1); // Unchanged
+            expect(unit.selectedBySlot).toBe(1); // Unchanged
 
             const sentMsgs = mockTransport.getSentMessages();
             const reject = sentMsgs.find(m => m.msg.type === 'SEAT_REJECT');
@@ -306,7 +307,7 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
             expect(reject.msg.reason).toBe('OCCUPIED');
         });
 
-        it('should not change controllerSlot when unit is OCCUPIED', () => {
+        it('should not change selectedBySlot when unit is OCCUPIED', () => {
             const seatReq = {
                 type: 'SEAT_REQ',
                 senderId: 'guest-id',
@@ -315,9 +316,9 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
                 auth: null
             };
 
-            const originalController = mockGame.units.find(u => u.id === 3).controllerSlot;
+            const originalController = mockGame.units.find(u => u.id === 3).selectedBySlot;
             sessionManager._handleSeatReq?.(seatReq);
-            const newController = mockGame.units.find(u => u.id === 3).controllerSlot;
+            const newController = mockGame.units.find(u => u.id === 3).selectedBySlot;
 
             expect(newController).toBe(originalController);
         });
@@ -328,9 +329,9 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
     // ========================================
     describe('INPUT_CMD without seat (auth rejection)', () => {
         it('should reject INPUT_CMD and increment cmdRejectedAuth when sender has no seat', () => {
-            // Arrange - Unit 1 has controllerSlot=null initially, but let's set it to slot 1
+            // Arrange - Unit 1 has selectedBySlot=null initially, but let's set it to slot 1
             // Guest at slot 2 tries to control it
-            mockGame.units[0].controllerSlot = 1; // Slot 1 controls unit 1
+            mockGame.units[0].selectedBySlot = 1; // Slot 1 controls unit 1
 
             const initialRejectedAuth = sessionManager._debugCounters.cmdRejectedAuth;
 
@@ -356,7 +357,7 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
 
         it('should allow INPUT_CMD when sender has valid seat', () => {
             // Arrange - Give slot 2 control of unit 1
-            mockGame.units[0].controllerSlot = 2;
+            mockGame.units[0].selectedBySlot = 2;
 
             const inputCmd = {
                 type: MSG.INPUT_CMD,
@@ -595,7 +596,7 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
 
             // Unit 1 has seatPolicy='OPEN', so should be granted
             const unit = mockGame.units.find(u => u.id === 1);
-            expect(unit.controllerSlot).toBe(2);
+            expect(unit.selectedBySlot).toBe(2);
         });
 
         it('should require PIN auth when seatPolicy is PIN_1DIGIT and no auth provided', () => {
@@ -646,7 +647,7 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
             expect(ack.msg.controllerSlot).toBe(2);
 
             // Release seat for next test
-            mockGame.units[1].controllerSlot = null;
+            mockGame.units[1].selectedBySlot = null;
             mockTransport.clearSentMessages();
 
             // Now another BAD_PIN should have reset cooldown to 250ms

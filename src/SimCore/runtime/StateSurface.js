@@ -97,8 +97,9 @@ export function serializeUnit(unit) {
         id: unit.id,
         name: unit.name,
         ownerSlot: unit.ownerSlot ?? 0, // R013 M07: Ownership tracking
-        // M07 GAP-0: Controller and seat policy (seatPinDigit is Host-only, NOT serialized)
-        controllerSlot: unit.controllerSlot ?? null, // null = AI/Idle
+        // M07 Unit Authority v0: selectedBySlot is the canonical field name
+        // seatPinDigit is Host-only, intentionally NOT serialized (privacy)
+        selectedBySlot: unit.selectedBySlot ?? null, // null = empty seat (AI/Idle)
         seatPolicy: unit.seatPolicy ?? 'OPEN', // 'OPEN' | 'PIN_1DIGIT'
 
         // Position & Orientation (convert Vector3/Quaternion to plain)
@@ -188,13 +189,21 @@ export function serializeState(game, options = {}) {
 /**
  * Deserialize a unit state back to plain object.
  * Note: Does NOT create Three.js objects - use UnitFactory for that.
+ * M07 Unit Authority v0: Normalizes old `controllerSlot` to `selectedBySlot`.
  *
  * @param {Object} data - Serialized unit data
  * @returns {Object} Unit data (ready for UnitModel or reconstruction)
  */
 export function deserializeUnit(data) {
-    // Return as-is since it's already plain objects
-    return { ...data };
+    const result = { ...data };
+
+    // M07 Compatibility: Normalize old controllerSlot to selectedBySlot
+    if (result.controllerSlot !== undefined && result.selectedBySlot === undefined) {
+        result.selectedBySlot = result.controllerSlot;
+        delete result.controllerSlot;
+    }
+
+    return result;
 }
 
 /**
