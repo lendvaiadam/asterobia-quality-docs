@@ -11,6 +11,14 @@
     *   AND the task is labeled as an *exception* or *prototype*.
 3.  **Stop Condition**: If the user says "STOP" or "Don't code", you must **IMMEDIATELY** freeze, revert uncommitted changes, and return to analysis mode.
 
+## 🐛 BUG REPORTING PROTOCOL
+**Status: ENFORCED**
+
+1.  **Log First**: Every new bug must be logged in `docs/BUGLIST.md` BEFORE any code fix.
+    -   Required: Observed, Expected, Touchpoints, Severity.
+2.  **Handoff**: Antigravity does NOT patch code. Antigravity prepares a **Claude Code Prompt** referencing the Bug List.
+3.  **Lifecycle**: `OPEN` -> `IN_PROGRESS` (Worker assigned) -> `FIXED` -> `VERIFIED` (HU-TEST).
+
 ### Self-Check (Must perform at Session Start)
 - [ ] **Am I about to edit code?**
 - [ ] **If yes, do I have explicit written permission in this session?**

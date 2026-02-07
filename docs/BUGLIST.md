@@ -1,129 +1,188 @@
-# BUGLIST - Canonical Bug Backlog
+# R013 M07 Bug List (Canonical)
 
-This file is the single source of truth for known bugs that are not yet fixed.
-**Protocol:**
-- Discovering a bug -> IMMEDIATE entry here.
-- Fixing is optional; recording is mandatory.
-- Use the template below for consistency.
+**Status**: ACTIVE
+**Owner**: Antigravity
+**Last Updated**: 2026-02-07
 
----
-
-## BUG-20260130-001
-**Title:** Unit selection via bottom tabs does not emit SELECT command in overlay history
-**Area:** Input/UI
-**Where:** game.html → bottom unit tabs; CMD overlay history
-**Repro steps:**
-1. Open http://localhost:8081/game.html
-2. Toggle CMD overlay ON (`Shift+C`)
-3. Click unit on canvas → SELECT appears in history
-4. Click the same unit via bottom unit tabs → NO SELECT appears
-**Expected:** tab selection also emits SELECT command (visible in overlay history)
-**Actual:** tab selection changes selection visually, but command history does not reflect it
-**Severity:** Minor (unless you consider this a determinism/input unification requirement)
-**Determinism Impact:** No (debug visibility / inconsistent input pipeline)
-**Suggested Fix:**
-Route tab UI selection through InputFactory or emit a SELECT command into the queue.
-
-**Notes/Links:**
-- `src/UI/BottomPanel.js`
-- `src/Core/Input.js`
+> **Protocol**:
+> 1. New bugs must be logged here before coding.
+> 2. Each bug requires: Observed, Expected, Touchpoints, Fix Idea.
+> 3. Status flow: `OPEN` -> `IN_PROGRESS` -> `FIXED` -> `VERIFIED`.
 
 ---
 
-## BUG-20260130-002
-**Title:** Dust particles accumulate over time, causing FPS drop to 10 or lower
-**Area:** Performance / Particles
-**Where:** `src/Entities/Unit.js` → `updateDustParticles()`
-**Repro steps:**
-1. Open game, move unit along path
-2. Wait 30-60 seconds while unit moves
-3. Observe Performance HUD (Shift+P): renderFPS drops from 60 → 10 → lower
-4. Dust particles visually accumulate instead of fading/despawning
-**Expected:** Old dust particles should fade out and be removed/recycled
-**Actual:** Particles appear to stack/accumulate, progressively slowing render
-**Severity:** High (makes game unplayable after ~1 minute)
-**Determinism Impact:** No (visual-only system)
-**Suggested Fix:**
-- Check particle lifecycle: ensure particles are removed after fade-out
-- Check instanced mesh count cap
-- Possible leak in dustGroup or dustInstancedMesh management
+## A) Multiplayer / Session / Debug
 
-**Notes/Links:**
-- `src/Entities/Unit.js` lines ~1726-1850 (dust system)
-- Likely missing cleanup in particle spawn/despawn cycle
+### A1. startDiscovery() confusion / discovery missing
+- **Status**: `OPEN`
+- **Severity**: P1 (Major)
+- **Observed**: `await game.sessionManager.startDiscovery()` returns undefined. No visible UI updates.
+- **Expected**: Visual feedback of "Searching..." and a list of found sessions, or a clear console log of available hosts.
+- **Touchpoints**:
+    - `src/SimCore/multiplayer/SessionManager.js`: `startDiscovery`, `getAvailableHosts`.
+    - `src/UI/NetworkDebugPanel.js`: Needs to poll `sessionManager.availableHosts`.
+- **Fix Idea**: Wire `NetworkDebugPanel` to poll `sessionManager.getAvailableHosts()` every 1s and display buttons to `joinGame(hostId)`.
 
----
+### A2. globalCommandQueue undefined
+- **Status**: `OPEN`
+- **Severity**: P1 (Major)
+- **Observed**: `ReferenceError: globalCommandQueue is not defined` when accessing `pendingCount`.
+- **Expected**: `globalCommandQueue` to be exported singleton from `CommandQueue.js` and imported where needed.
+- **Touchpoints**:
+    - `src/SimCore/runtime/CommandQueue.js`: Ensure `export const globalCommandQueue` exists.
+    - `src/Core/Game.js`: Ensure correct import.
 
-## BUG-20260130-003
-**Title:** Vehicle/unit movement + headlight/light movement stutters (non-continuous)
-**Area:** Render/Interpolation
-**Where:** `src/Entities/Unit.js` (Visual Update)
-**Repro steps:**
-1. Boot game (http://localhost:8081/game.html)
-2. Move unit via right-click
-3. Observe movement of vehicle body and headlight cone
-**Expected:** Smooth continuous motion (interpolated between ticks)
-**Actual:** Visible stepping/stuttering in both mesh and light position
-**Severity:** Medium (Ruins "premium feel" but gameplay works)
-**Determinism Impact:** No (Visual-only)
-**Suggested Fix:**
-- Verify if `renderUpdate` interpolation logic is correctly applied to both Mesh position AND Light target/position.
-- Check if `alpha` is being calculated correctly in `SimLoop`.
+### A3. Join timeout happens sometimes
+- **Status**: `OPEN`
+- **Severity**: P2 (Minor/Flake)
+- **Observed**: `Uncaught Error: Join timeout - no response from host`.
+- **Expected**: Join should be reliable on local transport.
+- **Touchpoints**:
+    - `src/SimCore/multiplayer/SessionManager.js`: `joinGame` timeout (10s).
+    - `src/SimCore/transport/LocalTransport.js`: Check latency simulation or channel subscription timing.
+- **Fix Idea**: Increase timeout to 15s? Investigate if Host is actually receiving `JOIN_REQ`.
 
-**Notes/Links:**
-- Classified as **PRE-EXISTING** (observed on main before R007 merge).
-- Target fix: **R008 Verify & Tune**.
-- **Status:** FIXED in Release 008 (SHA: 4cd448dde67e3e1cb005c540b93cd3e03d6573eb)
+### A4. dumpNetEvidence circular JSON
+- **Status**: `OPEN`
+- **Severity**: P1 (Major - Blocks Debugging)
+- **Observed**: `JSON.stringify` crashes on `dumpNetEvidence()`.
+- **Expected**: Clean JSON with primitives only.
+- **Touchpoints**:
+    - `src/Core/Game.js`: `_dumpNetEvidence`.
+    - `src/SimCore/multiplayer/SessionManager.js`: `getNetEvidence`.
+- **Fix Idea**: Ensure `getNetEvidence` (and `_dumpNetEvidence`) creates a *new* object copying only specific fields (id, tick, counts), never passing full objects/references.
 
-
----
-
-## BUG-20260130-004
-**Title:** Reordering waypoint keypoints can send unit to wrong position when dragging a point past multiple others
-**Area:** Path/Waypoints UI
-**Where:** game.html → path keypoints editing (drag/reorder)
-**Repro steps:**
-1. Open http://localhost:8081/game.html
-2. Select a unit.
-3. Create a multi-point path (Shift+Left click to place 4–6 waypoints).
-4. Drag/reorder an upcoming waypoint so it crosses over multiple later waypoints (move it beyond 2–3 points).
-5. Observe the unit’s next movement segment.
-**Expected:** The unit follows the updated waypoint order/location after the reorder.
-**Actual:** The unit moves to an unexpected location / does not follow the intended reordered next waypoint.
-**Severity:** Medium (breaks control precision)
-**Determinism Impact:** Unknown (likely No; appears to be path editing logic, but needs localization)
-**Suggested Fix:** Localize waypoint reorder logic (index/order rebuild) and ensure drag past multiple points updates route consistently.
-**Notes/Links:** Pre-existing (reported as old behavior). Needs deeper localization before fix.
+### A5. UI Debug Clutter
+- **Status**: `OPEN`
+- **Severity**: P2 (UX)
+- **Observed**: Overlapping panels (DebugPanel, NetworkDebugPanel, Stats).
+- **Expected**: Clean layout or tabs.
+- **Touchpoints**:
+    - `src/UI/NetworkDebugPanel.js`: positioning.
+- **Fix Idea**: Add a "Toggle UI" hotkey or consolidate into a single tabbed Debug UI.
 
 ---
 
-## KNOWN-GAP-R011-001
-**Title:** Fog-of-War / discovered area not included in R011 Save/Load state
-**Area:** Save/Load / FogOfWar
-**Where:** `src/SimCore/persistence/SaveManager.js`, `src/SimCore/runtime/StateSurface.js`
-**Description:**
-R011 Save/Load captures authoritative SimCore state including:
-- Unit positions, velocities, quaternions, health
-- SimLoop tick count & accumulator
-- SeededRNG state (seed, internal state, call count)
-- Entity ID counter
-- Selected unit ID
+## B) Authority / Seat / Control Gating
 
-**NOT included (Known Gap):**
-- Fog-of-War explored/visible textures
-- Discovered map area state
+### B1. Keypad / PIN flow missing
+- **Status**: `OPEN`
+- **Severity**: P0 (Blocker)
+- **Observed**: Clicking unit does not show keypad (locks hidden, guest drives instantly).
+- **Expected**: M07 v0 Spec - Foreign units require PIN.
+- **Touchpoints**:
+    - `src/Entities/Unit.js`: `seatPolicy` default (is it 'OPEN'? Should be 'PIN_1DIGIT' for test).
+    - `src/Core/InteractionManager.js`: `_triggerSeatFlow` logic.
+    - `src/UI/SeatKeypadOverlay.js`: `show()` method.
+- **Fix Idea**: 
+    1. Ensure Host initializes test units with `seatPolicy = 'PIN_1DIGIT'`.
+    2. Verify `InteractionManager` calls `overlay.show()`.
+    3. Verify overlay z-index > canvas.
 
-**Why it matters:**
-After Load, the fog-of-war will be reset to initial state (fully unexplored), not the explored state at save time. This means areas the player discovered before saving will appear unexplored after loading.
+### B2. Seat exclusivity not enforced
+- **Status**: `OPEN`
+- **Severity**: P0 (Blocker)
+- **Observed**: Multiple players might drive same unit (race condition) or Guest ignores Occupied status.
+- **Expected**: `OCCUPIED` rejection if `selectedBySlot` != null.
+- **Touchpoints**:
+    - `src/Core/InteractionManager.js`: `_triggerSeatFlow` -> check `unit.selectedBySlot`.
+    - `src/SimCore/multiplayer/SessionManager.js`: `_handleSeatReq` (Host side validation).
 
-**Expected behavior (future fix):**
-Save should capture FogOfWar texture data or exploration bitmap; Load should restore it.
+### B3. Guest select/deselect broken
+- **Status**: `OPEN`
+- **Severity**: P1 (Major)
+- **Observed**: Guest deselect used to work, now inconsistent.
+- **Expected**: Local selection (UI focus) should separate from Seat Control.
+- **Touchpoints**:
+    - `src/Core/InteractionManager.js`: `onMouseUp` -> `inputFactory.deselect()`.
+    - `src/Core/Game.js`: `_processInputCommands`.
+- **Fix Idea**: Allow `SELECT`/`DESELECT` commands to bypass `ENABLE_COMMAND_EXECUTION` check (since they are local UI state, not sim state).
 
-**Current workaround:**
-None. HU testers should be aware that fog resets on load.
-
-**Severity:** Low (cosmetic/exploration state, not gameplay-critical)
-**Determinism Impact:** No (FogOfWar is render-only state)
-**Added:** R011
+### B4. Guest inputs not gated (Ghost Driving)
+- **Status**: `OPEN`
+- **Severity**: P0 (Blocker)
+- **Observed**: Keyboard controls work even without seat.
+- **Expected**: Inputs ignored unless `unit.selectedBySlot == mySlot`.
+- **Touchpoints**:
+    - `src/Core/Game.js`: `update()` loop checking `Input.js`.
+    - `src/SimCore/runtime/InputFactory.js`: `createMoveCommand`.
+- **Fix Idea**: In `Game.update`, wrap input reading in `if (selectedUnit.selectedBySlot === mySlot)`.
 
 ---
+
+## C) Cross-client Coherence
+
+### C1. Relative Waypoints
+- **Status**: `OPEN`
+- **Severity**: P1 (Major)
+- **Observed**: Guest sees unit move relative to itself?
+- **Expected**: Shared world coordinates.
+- **Fix Idea**: Ensure `CMD_BATCH` contains absolute world coordinates. Verify `Unit.setPath` uses world space.
+
+### C2. Unit Identity Confusion
+- **Status**: `OPEN`
+- **Severity**: P2 (Design)
+- **Observed**: Shared starter units.
+- **Fix Idea**: (Future) Spawn separate fleets. (Current) Use `ownerSlot` visual tinting.
+
+---
+
+## D) Path / UI Issues
+
+### D1. Unit "Clear" broken
+- **Status**: `OPEN`
+- **Severity**: P1
+- **Touchpoints**: `src/UI/UnitControlPanel.js` (presumably).
+- **Fix Idea**: Ensure "Clear" button sends a `SET_PATH` command with empty array.
+
+### D2. Manual override breaks heading
+- **Status**: `OPEN`
+- **Severity**: P2
+- **Fix Idea**: Reset `currentSegmentIndex` or `pathIndex` when taking manual control.
+
+### D3. Straight line through obstacles
+- **Status**: `OPEN`
+- **Severity**: P2 (FOW Design)
+- **Touchpoints**: `src/Navigation/PathPlanner.js`.
+- **Fix Idea**: If target is in FOW (Unknown), return `[start, target]` (straight line). Do not try to A* through invalid/unknown nodes.
+
+### D4. Pips visible by default
+- **Status**: `OPEN`
+- **Severity**: P3 (Cosmetic)
+- **Touchpoints**: `src/Entities/Unit.js`: `waypointMarkers`.
+- **Fix Idea**: visual toggle in `Game.js` or `DebugPanel`. Default `visible = false`.
+
+---
+
+## E) Fog of War (FOW)
+
+### E1-E3. FOW Planning Logic
+- **Status**: `OPEN`
+- **Severity**: P2 (Enhancement)
+- **Expected**: Path in unknown = Orange dashed line. Path in known = Green solid line.
+- **Fix Idea**: Start with "Assumption Mode" (straight line) for user clicks in FOW.
+
+---
+
+## F) Camera / Bounds
+
+### F1. Lateral move constraint
+- **Status**: `OPEN`
+- **Severity**: P2
+- **Touchpoints**: `src/Camera/SphericalCameraController4.js`.
+- **Fix Idea**: `enforceTerrainDistance` implies some bounds, but lateral movement needs `clamp` to star-sphere radius (or `planetRadius + offset`).
+
+---
+
+## G) Performance / FX
+
+### G1. Dust Accumulation
+- **Status**: `OPEN`
+- **Severity**: P2 (Perf)
+- **Touchpoints**: `src/Entities/Unit.js` (Dust system).
+- **Fix Idea**: Ensure particles are disposed/recycled. Use `InstancedMesh` for dust if not already.
+
+### G2. Adaptive FX
+- **Status**: `OPEN`
+- **Severity**: P3
+- **Fix Idea**: `if (dt > 30ms) dust.enabled = false`.
