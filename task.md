@@ -1,7 +1,10 @@
 # Task: R013 M07 Game Loop Integration
 
-**Last Updated:** 2026-02-06
-**Status:** Slice 1 - GAP-0 COMPLETE, HU-TEST PENDING
+**Last Updated:** 2026-02-07
+**Status:** Slice 1 COMPLETE (Unit Authority v0) - HU-TEST PENDING
+**Branch:** `work/WO-R013`
+**Commits:** `cbca4aa`, `8cd482a`
+**Tests:** 333/333 PASS
 **Roadmap:** `docs/M07_ROADMAP_TO_MULTIPLAYER.md`
 
 ---
