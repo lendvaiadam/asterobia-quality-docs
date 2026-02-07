@@ -1,7 +1,7 @@
 # Task: R013 M07 Game Loop Integration
 
-**Last Updated:** 2026-02-05
-**Status:** Slice 1 - GAP FIX REQUIRED
+**Last Updated:** 2026-02-06
+**Status:** Slice 1 - GAP-0 COMPLETE, HU-TEST PENDING
 **Roadmap:** `docs/M07_ROADMAP_TO_MULTIPLAYER.md`
 
 ---
@@ -30,12 +30,12 @@
 
 ### ❌ GAPS (Must Fix Before HU-TEST)
 
-#### GAP-0: Unit Authority & Seating (Spec Update) - P0
+#### GAP-0: Unit Authority & Seating (Spec Update) - P0 ✅ COMPLETE
 *Ref: `docs/specs/R013_M07_GAME_LOOP.md` Section 4 & 4.3 (PIN)*
-- [ ] **W1 BE**: `SEAT_REQ` (PIN check, Cooldown), `controllerSlot`, Auth check.
-- [ ] **W2 UI**: Click-to-seat, Keypad Overlay (1-9), Lock Indicator.
-- [ ] **W3 QA**: Test `seat.test.js` (Takeover, BAD_PIN, COOLDOWN).
-- [ ] **W4 REV**: PID digit privacy check.
+- [x] **W1 BE**: `SEAT_REQ` (PIN check, Cooldown), `controllerSlot`, Auth check.
+- [x] **W2 UI**: Click-to-seat, Keypad Overlay (1-9), Lock Indicator.
+- [x] **W3 QA**: Test `seat.test.js` (Takeover, BAD_PIN, COOLDOWN) - 22/22 PASS.
+- [x] **W4 REV**: PID digit privacy check - seatPinDigit excluded from snapshots.
 
 #### GAP-1: INPUT_CMD Path (Guest → Host) - P0
 ```
@@ -86,7 +86,7 @@ Szükséges:
 - [ ] Replace per-tick logs with sampled
 
 ### Gates (Slice 1 Closure)
-- [ ] **GAP Fix**: All P0 gaps resolved
+- [x] **GAP Fix**: All P0 gaps resolved (GAP-0, GAP-1, GAP-2, GAP-3)
 - [ ] **HU-TEST**: Dual Console Evidence (Queue Growth)
 - [ ] **Antigravity Audit**: PASS
 - [ ] **Merge**: SHA-pinned receipt

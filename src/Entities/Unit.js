@@ -399,6 +399,108 @@ export class Unit {
         // Full visuals handled in update() for smooth transition ONLY if active
     }
 
+    // === W2: LOCK INDICATOR SYSTEM ===
+
+    /**
+     * W2: Check if this unit is locked for the current guest.
+     * Returns true if:
+     * - We're in multiplayer as a guest
+     * - The unit's controllerSlot doesn't match our slot
+     * @returns {boolean}
+     */
+    get isLockedForGuest() {
+        const sm = window.game?.sessionManager;
+        if (!sm || sm.state.isOffline() || sm.state.isHost()) return false;
+        return this.controllerSlot !== sm.state.mySlot;
+    }
+
+    /**
+     * W2: Check if this unit should show a lock indicator.
+     * Shows lock when:
+     * - seatPolicy is PIN_1DIGIT AND
+     * - Guest doesn't have the seat (controllerSlot !== mySlot)
+     * @returns {boolean}
+     */
+    get shouldShowLockIndicator() {
+        const sm = window.game?.sessionManager;
+        // Only show in multiplayer guest mode
+        if (!sm || sm.state.isOffline() || sm.state.isHost()) return false;
+        // Only show for PIN-protected units
+        if (this.seatPolicy !== 'PIN_1DIGIT') return false;
+        // Show if we don't control this unit
+        return this.controllerSlot !== sm.state.mySlot;
+    }
+
+    /**
+     * W2: Create or update the lock indicator sprite.
+     * Creates a CSS-based lock icon overlay positioned above the unit.
+     */
+    updateLockIndicator() {
+        const shouldShow = this.shouldShowLockIndicator;
+
+        if (shouldShow && !this._lockIndicatorSprite) {
+            // Create lock indicator as a THREE.Sprite with canvas texture
+            this._createLockIndicatorSprite();
+        }
+
+        if (this._lockIndicatorSprite) {
+            this._lockIndicatorSprite.visible = shouldShow;
+        }
+    }
+
+    /**
+     * W2: Create the lock indicator sprite (emoji-based).
+     * @private
+     */
+    _createLockIndicatorSprite() {
+        // Create canvas for the lock emoji
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+
+        // Draw lock emoji
+        ctx.font = '48px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('\u{1F512}', 32, 32); // Lock emoji
+
+        // Create texture from canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+
+        // Create sprite material
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false
+        });
+
+        // Create sprite
+        this._lockIndicatorSprite = new THREE.Sprite(material);
+        this._lockIndicatorSprite.scale.set(1.5, 1.5, 1);
+        this._lockIndicatorSprite.position.set(0, 2.5, 0); // Above unit
+        this._lockIndicatorSprite.renderOrder = 9998; // Just below selection ring
+
+        // Add to unit mesh
+        this.mesh.add(this._lockIndicatorSprite);
+    }
+
+    /**
+     * W2: Remove the lock indicator sprite.
+     */
+    removeLockIndicator() {
+        if (this._lockIndicatorSprite) {
+            this.mesh.remove(this._lockIndicatorSprite);
+            if (this._lockIndicatorSprite.material.map) {
+                this._lockIndicatorSprite.material.map.dispose();
+            }
+            this._lockIndicatorSprite.material.dispose();
+            this._lockIndicatorSprite = null;
+        }
+    }
+
     updateSelectionVisuals(dt) {
         const targetIntensity = this.isSelected ? 1.0 : 0.0;
 
@@ -582,6 +684,9 @@ export class Unit {
         if (this.isSelected || this.selectionIntensity > 0.01 || this.isKeyboardOverriding) {
             this.updateSelectionVisuals(dt);
         }
+
+        // W2: Update lock indicator for multiplayer seat protection
+        this.updateLockIndicator();
 
         const turnSpeed = this.turnSpeed * dt;
 

@@ -155,7 +155,7 @@ This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
 | Role | Window | Specialization |
 | :--- | :--- | :--- |
 | **Orchestrator** | Terminal 1 | Manager, Integrator, Planner. |
-| **Worker (BE)** | Terminal 2 | Backend, Supabase, SQL. |
+| **Worker (BE)** | Terminal 2 | Backend, Supabase, SQL (BA). |
 | **Worker (FE)** | Terminal 3 | Frontend, UI, Three.js, CSS. |
 | **Worker (QA)** | Terminal 4 | Test Writing, Regression, Verification. |
 | **Worker (RF)** | Terminal 5 | Refactor, Review, Generalist. |

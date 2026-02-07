@@ -10,7 +10,7 @@
 import { SessionState, PlayerStatus } from './SessionState.js';
 import { NetworkRole, canStep, sendsInputsToNetwork, broadcastsState } from './NetworkRole.js';
 import { MSG, PROTOCOL_VERSION } from './MessageTypes.js';
-import { createHostAnnounce, createJoinReq, createJoinAckAccepted, createJoinAckRejected, createCmdBatch } from './MessageSerializer.js';
+import { createHostAnnounce, createJoinReq, createJoinAckAccepted, createJoinAckRejected, createCmdBatch, createSeatReq, createSeatAck, createSeatReject } from './MessageSerializer.js';
 import { globalCommandQueue, CommandType } from '../runtime/CommandQueue.js';
 
 /**
@@ -34,6 +34,9 @@ const CMD_BATCH_STALE_THRESHOLD = 10; // Drop batches older than 10 ticks
 // M07 GAP-3: Limits
 const MAX_COMMANDS_PER_BATCH = 50;
 const MAX_QUEUE_SIZE = 200;
+
+// M07 GAP-0: Seat cooldown levels (progressive backoff)
+const SEAT_COOLDOWN_LEVELS = [250, 500, 1000, 2000]; // ms, capped at 2000
 
 /**
  * SessionManager - Central multiplayer coordinator
@@ -194,8 +197,17 @@ export class SessionManager {
       cmdRejectedAuth: 0,     // Host: rejected due to senderId/slot mismatch
       cmdRejectedType: 0,     // Host: rejected due to invalid command type
       batchTruncatedCount: 0, // Host: batch truncated due to size limit
-      batchDroppedQueueFull: 0 // Guest: batch dropped due to queue overflow
+      batchDroppedQueueFull: 0, // Guest: batch dropped due to queue overflow
+      // M07 GAP-0: Seat counters
+      seatReqCount: 0,        // Total SEAT_REQ received
+      seatAckCount: 0,        // Total SEAT_ACK sent/received
+      seatRejectCount: 0,     // Total SEAT_REJECT sent
+      seatCooldownHitCount: 0 // Cooldowns triggered
     };
+
+    // M07 GAP-0: Seat cooldown tracking (Host-side)
+    // Key: `${requesterSlot}_${targetUnitId}`, Value: { until: timestamp, level: 0-3 }
+    this._seatCooldowns = new Map();
 
     // Bind methods for callbacks
     this._onTransportMessage = this._onTransportMessage.bind(this);
@@ -745,6 +757,19 @@ export class SessionManager {
         this._handlePong(msg);
         break;
 
+      // M07 GAP-0: Seat messages
+      case MSG.SEAT_REQ:
+        this._handleSeatReq(msg);
+        break;
+
+      case MSG.SEAT_ACK:
+        this._handleSeatAck(msg);
+        break;
+
+      case MSG.SEAT_REJECT:
+        this._handleSeatReject(msg);
+        break;
+
       default:
         console.warn(`[SessionManager] Unknown message type: ${msg.type}`);
     }
@@ -1109,6 +1134,18 @@ export class SessionManager {
       return;
     }
 
+    // M07 GAP-0: Validate seat authority
+    // If command targets a unit, verify sender has seat on that unit
+    const targetUnitId = msg.command?.unitId;
+    if (targetUnitId !== undefined && targetUnitId !== null) {
+      const unit = this.game.units?.find(u => u && u.id === targetUnitId);
+      if (unit && unit.controllerSlot !== null && unit.controllerSlot !== undefined && unit.controllerSlot !== msg.slot) {
+        console.warn(`[SM] Reject InputCmd: Slot ${msg.slot} not seated on unit ${targetUnitId} (controller: ${unit.controllerSlot})`);
+        this._debugCounters.cmdRejectedAuth++;
+        return;
+      }
+    }
+
     // 3. Validate Sequence (Gap/Dedup)
     // M07 Policy: Loose (Log warning, but process). Stricter rules in Slice 2.
     if (this.state.isDuplicateSeq(msg.slot, msg.seq)) {
@@ -1248,6 +1285,270 @@ export class SessionManager {
       this.rtt = Date.now() - sent;
       this.pendingPings.delete(msg.pingSeq);
     }
+  }
+
+  // ========================================
+  // M07 GAP-0: SEAT HANDLERS
+  // ========================================
+
+  /**
+   * Handle SEAT_REQ message (Host-side only)
+   * Validates seat request, checks cooldown, PIN challenge, and grants/rejects.
+   * @param {Object} msg - SEAT_REQ message
+   */
+  _handleSeatReq(msg) {
+    // Only Host processes SEAT_REQ
+    if (!this.state.isHost()) {
+      return;
+    }
+
+    this._debugCounters.seatReqCount++;
+    const { targetUnitId, requesterSlot, auth } = msg;
+
+    if (this.game._isDevMode) {
+      console.log(`[SM] SEAT_REQ: slot=${requesterSlot} wants unit=${targetUnitId}`);
+    }
+
+    // 1. Find the target unit
+    const unit = this.game.units?.find(u => u && u.id === targetUnitId);
+    if (!unit) {
+      console.warn(`[SM] SEAT_REQ rejected: unit ${targetUnitId} not found`);
+      this._sendSeatReject(targetUnitId, 'LOCKED');
+      return;
+    }
+
+    // 2. Check cooldown (progressive backoff)
+    const cooldownKey = `${requesterSlot}_${targetUnitId}`;
+    const cooldownEntry = this._seatCooldowns.get(cooldownKey);
+    const now = Date.now();
+
+    if (cooldownEntry && now < cooldownEntry.until) {
+      // Still in cooldown
+      this._debugCounters.seatCooldownHitCount++;
+      const retryAfterMs = cooldownEntry.until - now;
+      if (this.game._isDevMode) {
+        console.log(`[SM] SEAT_REQ rejected: cooldown (${retryAfterMs}ms remaining)`);
+      }
+      this._sendSeatReject(targetUnitId, 'COOLDOWN', retryAfterMs);
+      return;
+    }
+
+    // 3. Check if unit is already controlled by someone else
+    if (unit.controllerSlot !== null && unit.controllerSlot !== undefined && unit.controllerSlot !== requesterSlot) {
+      if (this.game._isDevMode) {
+        console.log(`[SM] SEAT_REQ rejected: unit ${targetUnitId} occupied by slot ${unit.controllerSlot}`);
+      }
+      this._sendSeatReject(targetUnitId, 'OCCUPIED');
+      this._applySeatCooldown(cooldownKey, cooldownEntry);
+      return;
+    }
+
+    // 4. Check seat policy
+    const seatPolicy = unit.seatPolicy || 'OPEN';
+
+    if (seatPolicy === 'OPEN') {
+      // No challenge required - grant immediately
+      this._grantSeat(unit, requesterSlot);
+      this._seatCooldowns.delete(cooldownKey);
+      return;
+    }
+
+    if (seatPolicy === 'PIN_1DIGIT') {
+      // PIN challenge required
+      if (!auth || auth.method !== 'PIN_1DIGIT') {
+        if (this.game._isDevMode) {
+          console.log(`[SM] SEAT_REQ rejected: unit ${targetUnitId} requires PIN_1DIGIT auth`);
+        }
+        this._sendSeatReject(targetUnitId, 'LOCKED');
+        return;
+      }
+
+      // Validate PIN (Host-only field: unit.seatPinDigit)
+      const correctPin = unit.seatPinDigit;
+      if (typeof correctPin !== 'number' || correctPin < 1 || correctPin > 9) {
+        console.warn(`[SM] SEAT_REQ rejected: unit ${targetUnitId} has invalid seatPinDigit`);
+        this._sendSeatReject(targetUnitId, 'LOCKED');
+        return;
+      }
+
+      if (auth.guess === correctPin) {
+        // Correct PIN - grant seat
+        this._grantSeat(unit, requesterSlot);
+        this._seatCooldowns.delete(cooldownKey);
+        return;
+      } else {
+        // Wrong PIN - reject with BAD_PIN and apply cooldown
+        if (this.game._isDevMode) {
+          console.log(`[SM] SEAT_REQ rejected: BAD_PIN (guess=${auth.guess})`);
+        }
+        this._applySeatCooldown(cooldownKey, cooldownEntry);
+        const newCooldown = this._seatCooldowns.get(cooldownKey);
+        this._sendSeatReject(targetUnitId, 'BAD_PIN', newCooldown ? (newCooldown.until - now) : SEAT_COOLDOWN_LEVELS[0]);
+        return;
+      }
+    }
+
+    // Unknown seat policy - treat as LOCKED
+    console.warn(`[SM] SEAT_REQ rejected: unknown seatPolicy '${seatPolicy}'`);
+    this._sendSeatReject(targetUnitId, 'LOCKED');
+  }
+
+  /**
+   * Apply progressive cooldown for seat requests
+   * @private
+   */
+  _applySeatCooldown(cooldownKey, currentEntry) {
+    const now = Date.now();
+    let level = 0;
+
+    if (currentEntry) {
+      level = Math.min(currentEntry.level + 1, SEAT_COOLDOWN_LEVELS.length - 1);
+    }
+
+    const cooldownMs = SEAT_COOLDOWN_LEVELS[level];
+    this._seatCooldowns.set(cooldownKey, {
+      until: now + cooldownMs,
+      level
+    });
+  }
+
+  /**
+   * Grant seat to requester and broadcast SEAT_ACK
+   * @private
+   */
+  async _grantSeat(unit, requesterSlot) {
+    unit.controllerSlot = requesterSlot;
+
+    this._debugCounters.seatAckCount++;
+    if (this.game._isDevMode) {
+      console.log(`[SM] SEAT_ACK: unit ${unit.id} now controlled by slot ${requesterSlot}`);
+    }
+
+    if (this.transport && this._sessionChannel) {
+      const ack = createSeatAck({
+        targetUnitId: unit.id,
+        controllerSlot: requesterSlot
+      });
+
+      try {
+        await this.transport.broadcastToChannel(this._sessionChannel, ack);
+      } catch (err) {
+        console.error('[SM] Failed to broadcast SEAT_ACK:', err);
+      }
+    }
+  }
+
+  /**
+   * Send SEAT_REJECT to session channel
+   * @private
+   */
+  async _sendSeatReject(targetUnitId, reason, retryAfterMs) {
+    this._debugCounters.seatRejectCount++;
+
+    if (!this.transport || !this._sessionChannel) {
+      return;
+    }
+
+    const reject = createSeatReject({
+      targetUnitId,
+      reason,
+      retryAfterMs
+    });
+
+    try {
+      await this.transport.broadcastToChannel(this._sessionChannel, reject);
+      if (this.game._isDevMode) {
+        console.log(`[SM] SEAT_REJECT sent: unit=${targetUnitId}, reason=${reason}`);
+      }
+    } catch (err) {
+      console.error('[SM] Failed to send SEAT_REJECT:', err);
+    }
+  }
+
+  /**
+   * Handle SEAT_ACK message (Both sides)
+   * Updates unit.controllerSlot
+   * @param {Object} msg - SEAT_ACK message
+   */
+  _handleSeatAck(msg) {
+    const { targetUnitId, controllerSlot } = msg;
+    const unit = this.game.units?.find(u => u && u.id === targetUnitId);
+
+    if (unit) {
+      unit.controllerSlot = controllerSlot;
+      if (this.game._isDevMode) {
+        console.log(`[SM] SEAT_ACK recv: unit ${targetUnitId} -> slot ${controllerSlot}`);
+      }
+    }
+
+    // Notify game UI (if callback registered)
+    if (this.game.onSeatGranted) {
+      this.game.onSeatGranted(targetUnitId, controllerSlot);
+    }
+  }
+
+  /**
+   * Handle SEAT_REJECT message (Guest-side)
+   * Shows error in UI
+   * @param {Object} msg - SEAT_REJECT message
+   */
+  _handleSeatReject(msg) {
+    const { targetUnitId, reason, retryAfterMs } = msg;
+
+    if (this.game._isDevMode) {
+      console.log(`[SM] SEAT_REJECT recv: unit=${targetUnitId}, reason=${reason}, retry=${retryAfterMs}ms`);
+    }
+
+    // Show error in keypad overlay if visible
+    if (this.game.seatKeypadOverlay && this.game.seatKeypadOverlay.isVisible) {
+      const errorMsg = reason === 'BAD_PIN' ? 'Wrong PIN' :
+                       reason === 'COOLDOWN' ? 'Too fast!' :
+                       reason === 'OCCUPIED' ? 'Occupied' : 'Locked';
+      this.game.seatKeypadOverlay.showError(errorMsg, retryAfterMs || 0);
+    }
+  }
+
+  /**
+   * M07 GAP-0: Send SEAT_REQ to host
+   * Called from InteractionManager when user clicks a unit
+   * @param {Object} options - { targetUnitId, auth? }
+   */
+  async sendSeatReq(options) {
+    const { targetUnitId, auth } = options;
+
+    if (!this.transport || !this._sessionChannel) {
+      console.warn('[SM] sendSeatReq: No transport or channel');
+      return;
+    }
+
+    const req = createSeatReq({
+      targetUnitId,
+      requesterSlot: this.state.mySlot,
+      auth
+    });
+
+    try {
+      await this.transport.broadcastToChannel(this._sessionChannel, req);
+      if (this.game._isDevMode) {
+        console.log(`[SM] SEAT_REQ sent: unit=${targetUnitId}, auth=${auth ? auth.method : 'none'}`);
+      }
+    } catch (err) {
+      console.error('[SM] Failed to send SEAT_REQ:', err);
+    }
+  }
+
+  /**
+   * M07 GAP-0: Check if local client has seat on a unit
+   * @param {Object} unit - Unit to check
+   * @returns {boolean}
+   */
+  hasSeatedUnit(unit) {
+    if (!unit) return false;
+    const mySlot = this.state.mySlot;
+    // Host (slot 0) or offline always has authority
+    if (this.state.isOffline() || this.state.isHost()) return true;
+    // Guest: check controllerSlot
+    return unit.controllerSlot === mySlot;
   }
 
   // ========================================

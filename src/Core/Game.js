@@ -29,6 +29,7 @@ import { SessionManager } from '../SimCore/multiplayer/SessionManager.js';
 import { WaypointDebugOverlay } from '../UI/WaypointDebugOverlay.js';
 import { globalCommandDebugOverlay } from '../UI/CommandDebugOverlay.js';
 import { initNetworkDebugPanel } from '../UI/NetworkDebugPanel.js';
+import { SeatKeypadOverlay } from '../UI/SeatKeypadOverlay.js';
 
 export class Game {
     constructor() {
@@ -172,6 +173,9 @@ export class Game {
         if (this._supabaseTransport) {
             this.sessionManager.setTransport(this._supabaseTransport);
         }
+
+        // M07 GAP-0: Seat keypad overlay for PIN-protected units
+        this.seatKeypadOverlay = new SeatKeypadOverlay(this);
 
         /**
          * R013 M07: Command execution gate for Slice 1 transport testing.
@@ -3046,7 +3050,11 @@ export class Game {
             unit.smoothingRadius = this.unitParams.smoothingRadius;
 
             if (unit === this.selectedUnit) {
-                unit.update(keys, fixedDt, this.pathPlanner);
+                // M07 GAP-0: Gate keyboard movement by seat authority
+                // If client doesn't have seat, don't pass keyboard input
+                const hasSeat = this.sessionManager?.hasSeatedUnit?.(unit) ?? true;
+                const effectiveKeys = hasSeat ? keys : { forward: false, backward: false, left: false, right: false };
+                unit.update(effectiveKeys, fixedDt, this.pathPlanner);
             } else {
                 unit.update({ forward: false, backward: false, left: false, right: false }, fixedDt, this.pathPlanner);
             }
@@ -3359,20 +3367,20 @@ export class Game {
      * R006: Process input commands from the queue.
      * Called at the start of each simTick for deterministic command execution.
      * R013 M07: Respects ENABLE_COMMAND_EXECUTION flag for Slice 1 testing.
+     *
+     * M07 GAP-0 Fix: SELECT/DESELECT are UI-only (per-client visual state)
+     * and always execute regardless of gate. Sim-mutating commands (MOVE,
+     * SET_PATH, CLOSE_PATH) are gated by ENABLE_COMMAND_EXECUTION.
+     *
      * @param {number} tickCount - Current tick number
      */
     _processInputCommands(tickCount) {
-        // R013 M07: Safety gate - Slice 1 accumulates queue without execution
-        if (!this.ENABLE_COMMAND_EXECUTION) {
-            // Queue grows but commands are not flushed/executed
-            // This allows HU-TEST to verify transport without crashes
-            return;
-        }
-
+        // Always flush the queue - we need to process UI commands even if sim is gated
         const commands = globalCommandQueue.flush(tickCount);
 
         for (const cmd of commands) {
             switch (cmd.type) {
+                // === UI-ONLY COMMANDS (always execute, per-client visual state) ===
                 case CommandType.SELECT: {
                     const unit = this.units.find(u => u && u.id === cmd.unitId);
                     if (unit) {
@@ -3384,7 +3392,10 @@ export class Game {
                     this.deselectUnit();
                     break;
                 }
+
+                // === SIM-MUTATING COMMANDS (gated by ENABLE_COMMAND_EXECUTION) ===
                 case CommandType.MOVE: {
+                    if (!this.ENABLE_COMMAND_EXECUTION) break; // Gate
                     const unit = this.units.find(u => u && u.id === cmd.unitId);
                     if (unit) {
                         const pos = new THREE.Vector3(cmd.position.x, cmd.position.y, cmd.position.z);
@@ -3393,6 +3404,7 @@ export class Game {
                     break;
                 }
                 case CommandType.SET_PATH: {
+                    if (!this.ENABLE_COMMAND_EXECUTION) break; // Gate
                     const unit = this.units.find(u => u && u.id === cmd.unitId);
                     if (unit && cmd.points && cmd.points.length > 0) {
                         // Clear existing path and add new waypoints
@@ -3407,6 +3419,7 @@ export class Game {
                     break;
                 }
                 case CommandType.CLOSE_PATH: {
+                    if (!this.ENABLE_COMMAND_EXECUTION) break; // Gate
                     const unit = this.units.find(u => u && u.id === cmd.unitId);
                     if (unit) {
                         // R013 M07: Apply to target unit, not local selectedUnit

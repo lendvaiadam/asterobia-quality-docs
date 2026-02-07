@@ -155,10 +155,21 @@ export class InteractionManager {
                     this.state = 'DRAGGING_MARKER';
                     console.log("Started dragging marker:", this.mouseDownMarker.userData.waypointNumber);
                 } else if (this.mouseDownUnit) {
-                    // Drag on Unit -> Path Draw
-                    this.state = 'DRAWING_PATH';
-                    this.game.startPathDrawing(this.mouseDownUnit); // Delegate to Game
-                    // Ensure camera doesn't move
+                    // M07 GAP-0: Check seat authority before allowing path draw
+                    if (!this._hasSeatAuthority(this.mouseDownUnit)) {
+                        console.warn('[InteractionManager] Cannot draw path: not seated on unit');
+                        // Fall through to terrain drag instead
+                        this.state = 'DRAGGING_TERRAIN';
+                        if (this.game.cameraControls) {
+                            this.game.cameraControls.startDrag(this.mouseDownTerrain || this.raycastTerrain());
+                            this.game.cameraControls.isLMBDown = true;
+                        }
+                    } else {
+                        // Drag on Unit -> Path Draw (seated)
+                        this.state = 'DRAWING_PATH';
+                        this.game.startPathDrawing(this.mouseDownUnit); // Delegate to Game
+                        // Ensure camera doesn't move
+                    }
                 } else if (this.mouseDownTerrain) {
                     // Drag on Terrain -> Terrain/Camera Drag
                     this.state = 'DRAGGING_TERRAIN';
@@ -237,14 +248,27 @@ export class InteractionManager {
                     // Clear marker reference (no drag happened)
                     this.mouseDownMarker = null;
                 } else if (this.mouseDownUnit) {
-                    // (1) Click on Unit -> SELECT ONLY (Don't fly)
-                    // R006: Use InputFactory for deterministic command
-                    this.inputFactory.select(this.mouseDownUnit.id, { skipCamera: true });
+                    // M07: Check seat authority BEFORE selection
+                    if (this._hasSeatAuthority(this.mouseDownUnit)) {
+                        // Already seated - allow normal selection
+                        // R006: Use InputFactory for deterministic command
+                        this.inputFactory.select(this.mouseDownUnit.id, { skipCamera: true });
+                    } else {
+                        // Not seated - trigger seat flow, DON'T select yet
+                        this._triggerSeatFlow(this.mouseDownUnit);
+                    }
                 } else if (this.mouseDownTerrain) {
                     // (2) Click on Terrain
                     if (event.shiftKey && this.game.selectedUnit) {
                         // Shift+Click -> ADD WAYPOINT
                         const unit = this.game.selectedUnit;
+
+                        // M07 GAP-0: Check seat authority before allowing waypoint
+                        if (!this._hasSeatAuthority(unit)) {
+                            console.warn('[InteractionManager] Cannot add waypoint: not seated on unit');
+                            return; // Block - no ghost path on host
+                        }
+
                         const capabilities = unit.capabilities || this.game.pathPlanner?.defaultCapabilities;
 
                         if (this.game.pathPlanner && !this.game.pathPlanner.isValidDestination(this.mouseDownTerrain, capabilities)) {
@@ -534,5 +558,68 @@ export class InteractionManager {
                 hitUnit.setHover(true);
             }
         }
+    }
+
+    // ========================================
+    // M07 GAP-0: SEAT HELPERS
+    // ========================================
+
+    /**
+     * Check if local client has seat authority on a unit.
+     * Host/Offline always has authority.
+     * Guest has authority if unit.controllerSlot === mySlot.
+     * @param {Object} unit - Unit to check
+     * @returns {boolean}
+     */
+    _hasSeatAuthority(unit) {
+        if (!unit) return false;
+        const sm = this.game.sessionManager;
+        if (!sm) return true; // No session manager = offline, always allowed
+        return sm.hasSeatedUnit(unit);
+    }
+
+    /**
+     * M07: Trigger seat acquisition flow for a unit.
+     * Called INSTEAD of select() when client doesn't have seat authority.
+     * Selection is BLOCKED until seat is acquired.
+     * @param {Object} unit - Unit to acquire seat for
+     */
+    _triggerSeatFlow(unit) {
+        if (!unit) return;
+
+        const sm = this.game.sessionManager;
+
+        // Offline or Host - should never reach here, but safety fallback
+        if (!sm || sm.state.isOffline() || sm.state.isHost()) {
+            // Fallback: allow selection (offline/host always has authority)
+            this.inputFactory.select(unit.id, { skipCamera: true });
+            return;
+        }
+
+        const seatPolicy = unit.seatPolicy || 'OPEN';
+
+        if (seatPolicy === 'PIN_1DIGIT') {
+            // Show keypad overlay for PIN entry
+            // Selection happens AFTER successful seat acquisition (via SEAT_ACK handler)
+            if (this.game.seatKeypadOverlay) {
+                this.game.seatKeypadOverlay.show(unit.id, (digit) => {
+                    // On digit submit, send SEAT_REQ with PIN auth
+                    sm.sendSeatReq({
+                        targetUnitId: unit.id,
+                        auth: { method: 'PIN_1DIGIT', guess: digit }
+                    });
+                });
+            } else {
+                console.warn('[InteractionManager] No keypad overlay - cannot acquire PIN seat');
+            }
+        } else if (seatPolicy === 'OPEN') {
+            // Send SEAT_REQ directly for OPEN units
+            // Selection happens AFTER successful seat acquisition (via SEAT_ACK handler)
+            sm.sendSeatReq({
+                targetUnitId: unit.id
+            });
+        }
+        // For LOCKED policy - do nothing, unit cannot be controlled
+        // Visual feedback could be added here (e.g., "Unit is locked" toast)
     }
 }

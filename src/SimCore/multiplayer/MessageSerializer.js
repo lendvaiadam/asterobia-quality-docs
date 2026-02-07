@@ -100,8 +100,15 @@ export function validateMessage(msg) {
       break;
 
     case MSG.CMD_BATCH:
+      // M07: Extended validation
+      if (typeof msg.batchSeq !== 'number') errors.push('batchSeq must be a number');
       if (typeof msg.simTick !== 'number') errors.push('simTick must be a number');
+      if (typeof msg.scheduledTick !== 'number') errors.push('scheduledTick must be a number');
       if (!Array.isArray(msg.commands)) errors.push('commands must be an array');
+      // stateHash is optional (can be null or string)
+      if (msg.stateHash !== null && typeof msg.stateHash !== 'string') {
+        errors.push('stateHash must be null or a string');
+      }
       break;
 
     case MSG.SNAPSHOT:
@@ -131,6 +138,37 @@ export function validateMessage(msg) {
     case MSG.PONG:
       if (typeof msg.pingSeq !== 'number') errors.push('pingSeq must be a number');
       if (typeof msg.originalTimestamp !== 'number') errors.push('originalTimestamp must be a number');
+      break;
+
+    // M07 GAP-0: Seat acquisition message validation
+    case MSG.SEAT_REQ:
+      if (typeof msg.targetUnitId !== 'number') errors.push('targetUnitId must be a number');
+      if (typeof msg.requesterSlot !== 'number') errors.push('requesterSlot must be a number');
+      // auth is optional, but if present must have method and guess
+      if (msg.auth) {
+        if (msg.auth.method !== 'PIN_1DIGIT') {
+          errors.push('auth.method must be PIN_1DIGIT');
+        }
+        if (typeof msg.auth.guess !== 'number' || msg.auth.guess < 1 || msg.auth.guess > 9) {
+          errors.push('auth.guess must be a number 1-9');
+        }
+      }
+      break;
+
+    case MSG.SEAT_ACK:
+      if (typeof msg.targetUnitId !== 'number') errors.push('targetUnitId must be a number');
+      if (typeof msg.controllerSlot !== 'number') errors.push('controllerSlot must be a number');
+      break;
+
+    case MSG.SEAT_REJECT:
+      if (typeof msg.targetUnitId !== 'number') errors.push('targetUnitId must be a number');
+      if (!['OCCUPIED', 'LOCKED', 'BAD_PIN', 'COOLDOWN'].includes(msg.reason)) {
+        errors.push('reason must be one of: OCCUPIED, LOCKED, BAD_PIN, COOLDOWN');
+      }
+      // retryAfterMs is optional
+      if (msg.retryAfterMs !== undefined && typeof msg.retryAfterMs !== 'number') {
+        errors.push('retryAfterMs must be a number if provided');
+      }
       break;
   }
 
@@ -297,14 +335,18 @@ export function createInputCmd({ senderId, slot, seq, command }) {
 
 /**
  * Creates a CMD_BATCH message
+ * M07: Extended schema with batchSeq, scheduledTick, stateHash
  * @param {Object} params
  * @returns {Object}
  */
-export function createCmdBatch({ simTick, commands }) {
+export function createCmdBatch({ batchSeq, simTick, scheduledTick, commands, stateHash = null }) {
   return {
     type: MSG.CMD_BATCH,
-    simTick,
+    batchSeq,              // M07: Monotonic sequence for idempotency
+    simTick,               // "Created at" tick
+    scheduledTick,         // M07: "Execute at" tick (simTick + BUFFER)
     commands,
+    stateHash,             // M07: Optional checksum for debugging
     timestamp: Date.now()
   };
 }
@@ -381,4 +423,66 @@ export function createPong({ responderId, pingSeq, originalTimestamp }) {
     originalTimestamp,
     timestamp: Date.now()
   };
+}
+
+// ========================================
+// M07 GAP-0: Seat Acquisition Messages
+// ========================================
+
+/**
+ * Creates a SEAT_REQ message (Guest -> Host)
+ * @param {Object} params
+ * @param {number} params.targetUnitId - Unit to request control of
+ * @param {number} params.requesterSlot - Requesting player's slot
+ * @param {Object} [params.auth] - Optional auth challenge { method: 'PIN_1DIGIT', guess: 1-9 }
+ * @returns {Object}
+ */
+export function createSeatReq({ targetUnitId, requesterSlot, auth }) {
+  const msg = {
+    type: MSG.SEAT_REQ,
+    targetUnitId,
+    requesterSlot,
+    timestamp: Date.now()
+  };
+  if (auth) {
+    msg.auth = auth;
+  }
+  return msg;
+}
+
+/**
+ * Creates a SEAT_ACK message (Host -> Broadcast)
+ * @param {Object} params
+ * @param {number} params.targetUnitId - Unit that was granted
+ * @param {number} params.controllerSlot - New controller slot
+ * @returns {Object}
+ */
+export function createSeatAck({ targetUnitId, controllerSlot }) {
+  return {
+    type: MSG.SEAT_ACK,
+    targetUnitId,
+    controllerSlot,
+    timestamp: Date.now()
+  };
+}
+
+/**
+ * Creates a SEAT_REJECT message (Host -> Private/Broadcast)
+ * @param {Object} params
+ * @param {number} params.targetUnitId - Unit that was denied
+ * @param {string} params.reason - 'OCCUPIED' | 'LOCKED' | 'BAD_PIN' | 'COOLDOWN'
+ * @param {number} [params.retryAfterMs] - Optional backoff hint in ms
+ * @returns {Object}
+ */
+export function createSeatReject({ targetUnitId, reason, retryAfterMs }) {
+  const msg = {
+    type: MSG.SEAT_REJECT,
+    targetUnitId,
+    reason,
+    timestamp: Date.now()
+  };
+  if (retryAfterMs !== undefined) {
+    msg.retryAfterMs = retryAfterMs;
+  }
+  return msg;
 }

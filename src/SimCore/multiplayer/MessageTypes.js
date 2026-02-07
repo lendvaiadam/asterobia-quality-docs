@@ -19,7 +19,11 @@ export const MSG = Object.freeze({
   RESYNC_REQ: 'RESYNC_REQ',
   RESYNC_ACK: 'RESYNC_ACK',
   PING: 'PING',
-  PONG: 'PONG'
+  PONG: 'PONG',
+  // M07 GAP-0: Seat acquisition messages
+  SEAT_REQ: 'SEAT_REQ',
+  SEAT_ACK: 'SEAT_ACK',
+  SEAT_REJECT: 'SEAT_REJECT'
 });
 
 /**
@@ -47,7 +51,9 @@ export const MESSAGE_SCHEMAS = Object.freeze({
 
   [MSG.INPUT_CMD]: ['type', 'senderId', 'slot', 'seq', 'command', 'timestamp'],
 
-  [MSG.CMD_BATCH]: ['type', 'simTick', 'commands', 'timestamp'],
+  // M07: Extended CMD_BATCH schema with batchSeq, scheduledTick
+  [MSG.CMD_BATCH]: ['type', 'batchSeq', 'simTick', 'scheduledTick', 'commands', 'timestamp'],
+  // stateHash is optional
 
   [MSG.SNAPSHOT]: ['type', 'simTick', 'stateHash', 'state', 'timestamp'],
 
@@ -58,7 +64,17 @@ export const MESSAGE_SCHEMAS = Object.freeze({
 
   [MSG.PING]: ['type', 'senderId', 'seq', 'timestamp'],
 
-  [MSG.PONG]: ['type', 'responderId', 'pingSeq', 'originalTimestamp', 'timestamp']
+  [MSG.PONG]: ['type', 'responderId', 'pingSeq', 'originalTimestamp', 'timestamp'],
+
+  // M07 GAP-0: Seat acquisition schemas
+  [MSG.SEAT_REQ]: ['type', 'targetUnitId', 'requesterSlot', 'timestamp'],
+  // auth field is optional: { method: 'PIN_1DIGIT', guess: 1-9 }
+
+  [MSG.SEAT_ACK]: ['type', 'targetUnitId', 'controllerSlot', 'timestamp'],
+
+  [MSG.SEAT_REJECT]: ['type', 'targetUnitId', 'reason', 'timestamp']
+  // reason: 'OCCUPIED' | 'LOCKED' | 'BAD_PIN' | 'COOLDOWN'
+  // retryAfterMs is optional
 });
 
 /**

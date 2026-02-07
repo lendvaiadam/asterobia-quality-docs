@@ -97,6 +97,9 @@ export function serializeUnit(unit) {
         id: unit.id,
         name: unit.name,
         ownerSlot: unit.ownerSlot ?? 0, // R013 M07: Ownership tracking
+        // M07 GAP-0: Controller and seat policy (seatPinDigit is Host-only, NOT serialized)
+        controllerSlot: unit.controllerSlot ?? null, // null = AI/Idle
+        seatPolicy: unit.seatPolicy ?? 'OPEN', // 'OPEN' | 'PIN_1DIGIT'
 
         // Position & Orientation (convert Vector3/Quaternion to plain)
         position: vec3ToPlain(unit.position),

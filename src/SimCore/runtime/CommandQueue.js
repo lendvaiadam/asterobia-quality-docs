@@ -36,6 +36,7 @@ export class CommandQueue {
 
     /**
      * Enqueue a command for processing.
+     * R013 M07: Preserves existing id/seq from Host CMD_BATCH if present.
      * @param {Object} command - Command object with type and payload
      * @param {number} [scheduledTick] - Tick to execute (default: next tick)
      * @returns {Object} The stamped command
@@ -43,9 +44,11 @@ export class CommandQueue {
     enqueue(command, scheduledTick = null) {
         const stamped = {
             ...command,
-            id: 'icmd_' + nextEntityId(),
-            seq: this._seqCounter++,
-            enqueuedAt: this._seqCounter, // For ordering
+            // R013 M07: Preserve Host-assigned ID, or generate local ID
+            id: command.id || ('icmd_' + nextEntityId()),
+            // R013 M07: Preserve Host-assigned seq, or use local counter
+            seq: command.seq ?? this._seqCounter++,
+            enqueuedAt: this._seqCounter, // For ordering (always local)
             scheduledTick: scheduledTick  // null = immediate (next flush)
         };
 

@@ -39,7 +39,7 @@ export class NetworkDebugPanel {
       padding: 10px 15px;
       border: 1px solid #0f0;
       border-radius: 4px;
-      z-index: 10000;
+      z-index: 15000;
       min-width: 250px;
       display: none;
       box-shadow: 0 2px 10px rgba(0, 255, 0, 0.2);

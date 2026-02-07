@@ -32,8 +32,8 @@ import {
 } from '../multiplayer/MessageSerializer.js';
 
 describe('MessageTypes', () => {
-  it('exports all 11 message types', () => {
-    expect(Object.keys(MSG)).toHaveLength(11);
+  it('exports all 14 message types', () => {
+    expect(Object.keys(MSG)).toHaveLength(14);
     expect(MSG.HELLO).toBe('HELLO');
     expect(MSG.HOST_ANNOUNCE).toBe('HOST_ANNOUNCE');
     expect(MSG.JOIN_REQ).toBe('JOIN_REQ');
@@ -45,6 +45,9 @@ describe('MessageTypes', () => {
     expect(MSG.RESYNC_ACK).toBe('RESYNC_ACK');
     expect(MSG.PING).toBe('PING');
     expect(MSG.PONG).toBe('PONG');
+    expect(MSG.SEAT_REQ).toBe('SEAT_REQ');
+    expect(MSG.SEAT_ACK).toBe('SEAT_ACK');
+    expect(MSG.SEAT_REJECT).toBe('SEAT_REJECT');
   });
 
   it('exports frozen MSG object', () => {
@@ -160,12 +163,14 @@ describe('MessageSerializer - encode/decode round-trip', () => {
       { slot: 0, seq: 10, command: { action: 'MOVE' } },
       { slot: 1, seq: 47, command: { action: 'STOP' } }
     ];
-    const original = createCmdBatch({ simTick: 1043, commands });
+    const original = createCmdBatch({ simTick: 1043, commands, batchSeq: 5, scheduledTick: 1045 });
     const encoded = encode(original);
     const decoded = decode(encoded);
 
     expect(decoded.type).toBe(MSG.CMD_BATCH);
     expect(decoded.simTick).toBe(1043);
+    expect(decoded.batchSeq).toBe(5);
+    expect(decoded.scheduledTick).toBe(1045);
     expect(decoded.commands).toEqual(commands);
   });
 
@@ -395,7 +400,7 @@ describe('MessageSerializer - edge cases', () => {
   });
 
   it('handles empty commands array in CMD_BATCH', () => {
-    const msg = createCmdBatch({ simTick: 50, commands: [] });
+    const msg = createCmdBatch({ simTick: 50, commands: [], batchSeq: 1, scheduledTick: 52 });
     const result = validateMessage(msg);
     expect(result.valid).toBe(true);
   });
