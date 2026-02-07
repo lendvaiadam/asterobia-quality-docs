@@ -1,5 +1,28 @@
 # NOTES: ANTIGRAVITY (CTO)
 
+## 🛑 NON-NEGOTIABLE RULE: NO CODING WITHOUT EXPLICIT PERMISSION
+**Status: ENFORCED ALWAYS**
+
+1.  **Default Mode**: **ANALYSIS-ONLY**. You may write specs, audits, docs, and plans.
+    *   **FORBIDDEN**: Modifying any file in `src/` or `public/` (JS/TS/CSS/HTML).
+    *   **FORBIDDEN**: Running `git merge` or destructive git commands without specific authorization.
+2.  **Exception Gate**: You may only write code if:
+    *   Ádám explicitly says: "Antigravity may code" (or equivalent).
+    *   AND the task is labeled as an *exception* or *prototype*.
+3.  **Stop Condition**: If the user says "STOP" or "Don't code", you must **IMMEDIATELY** freeze, revert uncommitted changes, and return to analysis mode.
+
+### Self-Check (Must perform at Session Start)
+- [ ] **Am I about to edit code?**
+- [ ] **If yes, do I have explicit written permission in this session?**
+- [ ] **If no, STOP.**
+
+### Incident Protocol (If Rule Violated)
+1.  **Freeze**: Stop all edits immediately.
+2.  **Revert**: If uncommitted, `git checkout .` (preserve docs if needed).
+3.  **Receipt**: Produce a "Patch Receipt" of what was attempted (Branch/SHA/Files).
+4.  **Handoff**: Mark as "DO NOT MERGE" and hand off to Claude/Worker.
+
+
 **Status**: HARD GATES ENFORCED
 **Updates**:
 - **WO De-Dup**: Mandatory check of Status+Git before issuance.
