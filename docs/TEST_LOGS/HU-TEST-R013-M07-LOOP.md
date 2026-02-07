@@ -5,6 +5,25 @@
 **Version:** M07-Slice1
 **Status:** [PASS/FAIL]
 
+## Preflight: Ensure correct branch + HEAD commit
+**Why:** Prevents testing on the wrong branch or stale head, ensuring verification against the exact approved snapshot.
+
+### Commands (Run in Terminal)
+```powershell
+cd "D:\___AI_PROJECTEK___\AI_GAME\_GAME_3_"
+git checkout work/WO-R013
+git log --oneline -5
+```
+
+### PASS Criteria
+- The **FIRST (top) line** of output starts with: `6383f84`
+
+### FAIL Handling
+1.  **STOP** the test immediately.
+2.  Paste the output into chat.
+3.  Run `git branch --show-current` and confirm the active branch.
+4.  **Do NOT proceed** until HEAD matches `6383f84`.
+
 ## Objective
 Verify robust command transport from Host to Guest without execution.
 Ensure `CMD_BATCH` integrity, sequencing, and queue accumulation.
