@@ -274,3 +274,24 @@ Default output: MD files under /quality or /docs.
 ### 2026-02-01: Bootstrap Cleanup
 - **Action**: Deleted temporary `docs/readable-export-ee26077` branch (readable export).
 - **Status**: Not merged to main.
+
+### BLOCKER: R013-NB1 Phase 1 (Minimal Viable Loop)
+- **Date**: 2026-02-10
+- **Branch**: `work/r013-nb1-phase1`
+- **Status**: 🛑 **MERGE BLOCKED** (Failed HU-TEST #2)
+- **Symptom**: Guest join timeout. `transport.state: DISCONNECTED`, `wsReadyStateLabel: CLOSED (3)`.
+- **Diagnostics**:
+    - `joinReqsSent: 1`
+    - `joinAcksRecv: 0`
+    - `wsReadyStateLabel: CLOSED (3)`
+    - `pendingMessageCount: 2` (Messages stuck in buffer)
+    - `messagesSent: 0` (Transport failed to flush)
+- **Root Cause Hypothesis**:
+    1.  **Premature Close**: Transport `onOpen` fires, App queues `JOIN_REQ`, but socket closes immediately (Server reject? Network error?).
+    2.  **Flush Bug**: `WebSocketTransport` queues messages but never attempts `socket.send()`.
+    3.  **Lifecycle Race**: `send()` called before `OPEN`.
+- **Action**: Fix required from Claude Code.
+- **Audit Requirement**:
+    1.  Verify `pendingMessageCount` drains to 0.
+    2.  Verify `messagesSent` increments.
+    3.  Verify server logs show connection `OPEN` and stable.
