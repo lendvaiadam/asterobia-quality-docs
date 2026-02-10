@@ -37,3 +37,37 @@ Multiplayer readiness requires **Strict Determinism** and **State Isolation**.
 -   R011 verified Save/Load (Persistence).
 -   R012 will verify Realtime Sync (Supabase).
 -   Ensure your changes support **Snapshot Interpolation** (rendering state is separate from authoritative state).
+
+## M07 CMD_BATCH Checklist (Slice 1)
+
+### Host-Side Requirements
+- [ ] Host creates CMD_BATCH with `{type, simTick, seq, commands[], timestamp}`
+- [ ] Commands collected from local input during tick
+- [ ] Batch sent to all connected guests via `SessionManager.broadcast()`
+- [ ] State hash included for validation (optional in Slice 1)
+
+### Guest-Side Requirements
+- [ ] Guest receives CMD_BATCH via WebSocket message handler
+- [ ] Validate message schema before processing
+- [ ] Enqueue commands in `CommandQueue` with correct tick association
+- [ ] Log received batch (tick, seq, command count)
+- [ ] Handle gaps: log warning, continue (no STALL in Slice 1)
+
+### Integration Points
+```
+Host SimLoop.tick()
+    ↓
+InputFactory.flush() → commands[]
+    ↓
+SessionManager.broadcast(CMD_BATCH)
+    ↓ (WebSocket)
+Guest.onMessage(CMD_BATCH)
+    ↓
+CommandQueue.enqueueBatch(tick, commands)
+```
+
+### Test Scenarios
+1. Single command in batch → received and logged
+2. Multiple commands in batch → all received in order
+3. Empty batch (no commands this tick) → handled gracefully
+4. Out-of-order batch arrival → logged, not executed yet (Slice 1)
