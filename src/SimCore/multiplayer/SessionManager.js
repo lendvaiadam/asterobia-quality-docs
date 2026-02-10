@@ -695,9 +695,7 @@ export class SessionManager {
     // SUBSCRIBED status before broadcast messages reliably propagate to all members.
     // Without this, JOIN_REQ may be sent before the Host's channel sees the Guest.
     await new Promise(resolve => setTimeout(resolve, 500));
-    if (this.game._isDevMode) {
-      console.log('[SessionManager] Channel stabilization delay complete, sending JOIN_REQ');
-    }
+    console.log('[SessionManager] Channel stabilization delay complete, sending JOIN_REQ');
 
     // M06: Create and send JOIN_REQ
     const joinReq = createJoinReq({
@@ -705,15 +703,13 @@ export class SessionManager {
       displayName: this.game.playerName || 'Guest'
     });
 
-    // M06: Debug evidence (dev-only)
-    if (this.game._isDevMode) {
-      this._debugJoinReqSentCount = (this._debugJoinReqSentCount || 0) + 1;
-      this._debugLastJoinReqAt = Date.now();
-    }
+    // Always track join diagnostic counters (not gated by _isDevMode)
+    this._debugJoinReqSentCount = (this._debugJoinReqSentCount || 0) + 1;
+    this._debugLastJoinReqAt = Date.now();
 
     try {
       await this.transport.broadcastToChannel(sessionChannel, joinReq);
-      console.log(`[SessionManager] JOIN_REQ sent to ${hostId}`);
+      console.log(`[SessionManager] JOIN_REQ sent to ${hostId} (count: ${this._debugJoinReqSentCount})`);
     } catch (err) {
       console.error('[SessionManager] Failed to send JOIN_REQ:', err);
       // Leave session channel on failure
@@ -728,15 +724,20 @@ export class SessionManager {
 
       const timeoutId = setTimeout(() => {
         if (this.pendingJoin) {
+          // Comprehensive debug info for HU-test diagnostics
+          const transportDebug = typeof this.transport?.getDebugInfo === 'function'
+            ? this.transport.getDebugInfo()
+            : { type: this.transport?.constructor?.name || 'NONE' };
           const debugInfo = {
             hostId: this.pendingJoin.hostId,
             clientId: this.pendingJoin.clientId,
             sessionChannel: this._sessionChannel,
             channelJoined: this.transport?.isJoinedToChannel?.(this._sessionChannel) ?? 'unknown',
             joinReqsSent: this._debugJoinReqSentCount || 0,
-            joinAcksRecv: this._debugJoinAckRecvCount || 0
+            joinAcksRecv: this._debugJoinAckRecvCount || 0,
+            transport: transportDebug
           };
-          console.error('[SessionManager] Join timeout - no response from host. Debug:', debugInfo);
+          console.error('[SessionManager] Join timeout - no response from host. Debug:', JSON.stringify(debugInfo, null, 2));
           this.pendingJoin = null;
           // Cleanup session channel
           if (this._sessionChannel) {
@@ -1267,11 +1268,10 @@ export class SessionManager {
       return;
     }
 
-    // M06: Debug evidence (dev-only)
-    if (this.game._isDevMode) {
-      this._debugJoinAckRecvCount = (this._debugJoinAckRecvCount || 0) + 1;
-      this._debugLastJoinAckAt = Date.now();
-    }
+    // Always track join diagnostic counters (not gated by _isDevMode)
+    this._debugJoinAckRecvCount = (this._debugJoinAckRecvCount || 0) + 1;
+    this._debugLastJoinAckAt = Date.now();
+    console.log(`[SessionManager] JOIN_ACK received (count: ${this._debugJoinAckRecvCount}, accepted: ${msg.accepted})`);
 
     // Clear timeout
     if (this.pendingJoin.timeoutId) {

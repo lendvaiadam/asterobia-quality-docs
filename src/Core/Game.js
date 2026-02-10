@@ -22,6 +22,7 @@ import { nextEntityId, peekEntityId, setEntityIdCounter } from '../SimCore/runti
 import { rngNext, getGlobalRNG } from '../SimCore/runtime/SeededRNG.js';
 import { globalCommandQueue, CommandType } from '../SimCore/runtime/CommandQueue.js';
 import { initializeTransport, SupabaseTransport } from '../SimCore/transport/index.js';
+import { WebSocketTransport } from '../SimCore/transport/WebSocketTransport.js';
 import { SaveManager, MemoryStorageAdapter, LocalStorageAdapter, SupabaseStorageAdapter } from '../SimCore/persistence/index.js';
 import { serializeState, hashState } from '../SimCore/runtime/StateSurface.js';
 import { SessionManager } from '../SimCore/multiplayer/SessionManager.js';
@@ -124,6 +125,16 @@ export class Game {
                     this._updateNetStatus('LOCAL', { config: keyMsg, auth: 'FAIL', rt: 'N/A' });
                 }
             }
+        } else if (netMode === 'ws') {
+            // R013-NB1: WebSocket direct-connect mode
+            const wsUrl = urlParams.get('wsUrl') || 'ws://localhost:3000';
+            console.log('[Game] Initializing WebSocket Transport to', wsUrl);
+
+            const wsTransport = new WebSocketTransport({ url: wsUrl });
+            this._transport = initializeTransport(wsTransport);
+            this._wsTransport = wsTransport; // Store ref for status polling
+
+            this._updateNetStatus('WS', { config: 'DIRECT', auth: 'N/A', rt: 'CONNECTING...' });
         } else {
             // Default: Local Transport
             this._transport = initializeTransport();
@@ -183,12 +194,14 @@ export class Game {
         // R013: Wire up transport for multiplayer channels
         if (this._supabaseTransport) {
             this.sessionManager.setTransport(this._supabaseTransport);
+        } else if (this._wsTransport) {
+            this.sessionManager.setTransport(this._wsTransport);
         }
 
-        // R013: Multiplayer join UI (only when net=supabase)
+        // R013: Multiplayer join UI (when net=supabase or net=ws)
         // R013: Multiplayer status HUD (created but hidden until overlay closes)
         this.multiplayerHUD = null;
-        if (netMode === 'supabase') {
+        if (netMode === 'supabase' || netMode === 'ws') {
             this.multiplayerHUD = new MultiplayerHUD(this);
             this.joinOverlay = new JoinOverlay();
             this.joinOverlay.onHost = async (roomCode, username) => {
@@ -841,7 +854,7 @@ export class Game {
 
     // R013: Show the multiplayer status HUD (called when JoinOverlay hides)
     _showMultiplayerHUD() {
-        if (this.multiplayerHUD && this._netMode === 'supabase') {
+        if (this.multiplayerHUD && (this._netMode === 'supabase' || this._netMode === 'ws')) {
             this.multiplayerHUD.show();
         }
     }
