@@ -23,7 +23,13 @@ export const MSG = Object.freeze({
   // M07 GAP-0: Seat acquisition messages
   SEAT_REQ: 'SEAT_REQ',
   SEAT_ACK: 'SEAT_ACK',
-  SEAT_REJECT: 'SEAT_REJECT'
+  SEAT_REJECT: 'SEAT_REJECT',
+  SEAT_RELEASE: 'SEAT_RELEASE',
+  // Host-leave resilience: graceful leave messages
+  HOST_LEAVE: 'HOST_LEAVE',
+  GUEST_LEAVE: 'GUEST_LEAVE',
+  // Position sync: periodic authoritative unit positions from host
+  POSITION_SYNC: 'POSITION_SYNC'
 });
 
 /**
@@ -77,9 +83,18 @@ export const MESSAGE_SCHEMAS = Object.freeze({
   // controllerSlot: Deprecated alias for selectedBySlot
   // newOwnerSlot: Set on takeover (optional - same as selectedBySlot if takeover occurred)
 
-  [MSG.SEAT_REJECT]: ['type', 'targetUnitId', 'reason', 'timestamp']
+  [MSG.SEAT_REJECT]: ['type', 'targetUnitId', 'reason', 'timestamp'],
   // reason: 'OCCUPIED' | 'LOCKED' | 'BAD_PIN' | 'COOLDOWN'
   // retryAfterMs is optional
+
+  [MSG.SEAT_RELEASE]: ['type', 'targetUnitId', 'releasedBySlot', 'timestamp'],
+
+  // Host-leave resilience
+  [MSG.HOST_LEAVE]: ['type', 'hostId', 'timestamp'],
+  [MSG.GUEST_LEAVE]: ['type', 'slot', 'timestamp'],
+
+  // Position sync
+  [MSG.POSITION_SYNC]: ['type', 'tick', 'units', 'timestamp']
 });
 
 /**

@@ -179,7 +179,7 @@ const DEFAULT_GAME_STATE = {
     showNavMesh: false,
     
     // Game session
-    sessionStartTime: Date.now(),
+    sessionStartTime: 0,
     totalSimulatedTime: 0
 };
 

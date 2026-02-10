@@ -32,8 +32,8 @@ import {
 } from '../multiplayer/MessageSerializer.js';
 
 describe('MessageTypes', () => {
-  it('exports all 14 message types', () => {
-    expect(Object.keys(MSG)).toHaveLength(14);
+  it('exports all 18 message types', () => {
+    expect(Object.keys(MSG)).toHaveLength(18);
     expect(MSG.HELLO).toBe('HELLO');
     expect(MSG.HOST_ANNOUNCE).toBe('HOST_ANNOUNCE');
     expect(MSG.JOIN_REQ).toBe('JOIN_REQ');
@@ -48,6 +48,10 @@ describe('MessageTypes', () => {
     expect(MSG.SEAT_REQ).toBe('SEAT_REQ');
     expect(MSG.SEAT_ACK).toBe('SEAT_ACK');
     expect(MSG.SEAT_REJECT).toBe('SEAT_REJECT');
+    expect(MSG.SEAT_RELEASE).toBe('SEAT_RELEASE');
+    expect(MSG.HOST_LEAVE).toBe('HOST_LEAVE');
+    expect(MSG.GUEST_LEAVE).toBe('GUEST_LEAVE');
+    expect(MSG.POSITION_SYNC).toBe('POSITION_SYNC');
   });
 
   it('exports frozen MSG object', () => {

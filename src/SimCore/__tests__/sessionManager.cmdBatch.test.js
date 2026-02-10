@@ -103,7 +103,7 @@ describe('SessionManager CMD_BATCH (M07)', () => {
       expect(globalCommandQueue.pendingCount).toBe(0);
     });
 
-    it('should drop stale scheduledTick', () => {
+    it('should reschedule late scheduledTick instead of dropping', () => {
       mockGame.simLoop.tickCount = 105; // Current tick is past scheduledTick
 
       const msg = {
@@ -118,8 +118,10 @@ describe('SessionManager CMD_BATCH (M07)', () => {
 
       sessionManager._handleCmdBatch(msg);
 
-      expect(sessionManager._debugCounters.batchDropStaleCount).toBe(1);
-      expect(sessionManager._debugCounters.batchRecvCount).toBe(0);
+      // Late batches are rescheduled to currentTick + 1, not dropped
+      expect(sessionManager._debugCounters.batchDropStaleCount).toBe(0);
+      expect(sessionManager._debugCounters.batchRecvCount).toBe(1);
+      expect(msg.scheduledTick).toBe(106); // Rescheduled to 105 + 1
     });
 
     it('should warn but process on gap in batchSeq', () => {

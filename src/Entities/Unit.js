@@ -12,6 +12,7 @@ export class Unit {
         this.speed = 5.0;
         this.currentSpeed = 0.0; // Actual speed for audio/visuals
         this.turnSpeed = 2.0;
+        this.currentTurnSpeed = 0.0; // Smoothed turn velocity for inertia
         this.groundOffset = 0.22; // Hover height
         this.smoothingRadius = 0.0; // Default 0, adjustable via slider
 
@@ -160,12 +161,33 @@ export class Unit {
         // === M07: Unit Authority v0 - Canonical Data Model ===
         // ownerSlot: Economic owner. Defaults to spawner slot. Changes ONLY on successful takeover.
         this.ownerSlot = 0; // Default: spawned by Host (slot 0)
+        // ownerHistory: Tracks every ownership change for audit/replay
+        // Each entry: { slot, previousSlot, acquiredAt, method }
+        this.ownerHistory = [];
         // selectedBySlot: The driver. Exclusive - only one driver per unit. null = empty seat.
         this.selectedBySlot = null;
         // seatPolicy: 'OPEN' (anyone can seat) | 'PIN_1DIGIT' (requires PIN challenge)
         this.seatPolicy = 'OPEN';
         // seatPinDigit: 1-9 (Host-only, NOT serialized to guests)
         this.seatPinDigit = null;
+
+        // === POOLED OBJECTS FOR HOT-PATH REUSE (avoid GC pressure) ===
+        // These are reused every frame in update() instead of allocating new objects.
+        // NEVER pass these to async code or store references - they are overwritten each tick.
+        this._poolBlendedDir = new THREE.Vector3();
+        this._poolTempDir = new THREE.Vector3();
+        this._poolTangent = new THREE.Vector3();
+        this._poolRight = new THREE.Vector3();
+        this._poolOrthoFwd = new THREE.Vector3();
+        this._poolTargetQuat = new THREE.Quaternion();
+        this._poolRotMatrix = new THREE.Matrix4();
+        this._poolSphereNormal = new THREE.Vector3();
+        this._poolForward = new THREE.Vector3();
+        this._poolMoveDir = new THREE.Vector3();
+        this._poolAxis = new THREE.Vector3();
+        this._poolTempQuat = new THREE.Quaternion();
+        this._poolSlopeDir = new THREE.Vector3();
+        this._poolSlopeCross = new THREE.Vector3();
 
         // === R008: RENDER INTERPOLATION STATE ===
         // Stores authoritative position/quaternion at tick boundaries for smooth rendering.
@@ -175,6 +197,39 @@ export class Unit {
         this._interpPrevQuat = new THREE.Quaternion();
         this._interpCurrQuat = new THREE.Quaternion();
         this._interpInitialized = false; // First tick needs both prev/curr set to same
+    }
+
+    // === Ownership History Helpers ===
+
+    /**
+     * Returns the slot of the original owner (first entry in ownerHistory).
+     * Falls back to current ownerSlot if no history exists.
+     */
+    get originalOwner() {
+        return this.ownerHistory.length > 0 ? this.ownerHistory[0].slot : this.ownerSlot;
+    }
+
+    /**
+     * Returns the number of ownership changes recorded.
+     */
+    get ownershipCount() {
+        return this.ownerHistory.length;
+    }
+
+    /**
+     * Record an ownership change in the history.
+     * @param {number} newSlot - The new owner's slot
+     * @param {number} previousSlot - The previous owner's slot
+     * @param {number} simTick - The sim tick when the change occurred
+     * @param {string} method - How: 'SPAWN' | 'PIN_CAPTURE' | 'SEAT_CLAIM' | 'TRANSFER'
+     */
+    recordOwnershipChange(newSlot, previousSlot, simTick, method) {
+        this.ownerHistory.push({
+            slot: newSlot,
+            previousSlot: previousSlot,
+            acquiredAt: simTick,
+            method: method
+        });
     }
 
     /**
@@ -268,23 +323,92 @@ export class Unit {
         group.add(this.spotLight.target);
 
         // 4. SELECTION RING (Ground Projected)
-        // === HIGHLIGHT "NUCLEAR" FIX ===
-        // Using MeshBasicMaterial with depthTest: false to force visibility on top of everything
+        // Light blue pulsing ring, occluded by planet (depthTest: true)
         // User Request: 1.5x larger than previous (1.76, 2.2)
         // New: 2.64, 3.3
         const glowRingGeo = new THREE.RingGeometry(2.64, 3.3, 32);
-        this.glowMaterial = new THREE.MeshBasicMaterial({ 
-            color: 0xff00ff, // MAGENTA for maximum visibility
-            transparent: true, 
-            opacity: 0.8,
-            depthTest: false, // DRAW ON TOP OF EVERYTHING
+
+        // Compute UVs for shader gradient
+        const pos = glowRingGeo.attributes.position;
+        const uvs = new Float32Array(pos.count * 2);
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i);
+            const y = pos.getY(i);
+            uvs[i * 2] = (x / 3.3) * 0.5 + 0.5;     // Normalize to 0..1
+            uvs[i * 2 + 1] = (y / 3.3) * 0.5 + 0.5;  // Normalize to 0..1
+        }
+        glowRingGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+
+        this.glowMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0.0 },
+                uOpacity: { value: 0.8 }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform float uTime;
+                uniform float uOpacity;
+                varying vec2 vUv;
+                void main() {
+                    // Convert UV to angle around center
+                    vec2 center = vUv - 0.5;
+                    float angle = atan(center.y, center.x);
+                    // Rotate over time (matches preloader 3s spin)
+                    float rotatedAngle = angle - uTime * 2.094; // ~2PI/3 per second
+                    // Normalize to 0..1
+                    float t = fract(rotatedAngle / 6.2832 + 0.5);
+                    // Conic gradient: cyan (#00d4ff) -> green (#00ff9d) -> transparent -> cyan
+                    vec3 cyan = vec3(0.0, 0.831, 1.0);
+                    vec3 green = vec3(0.0, 1.0, 0.616);
+                    vec3 color;
+                    float minAlpha = uOpacity * 0.05; // 5% minimum opacity everywhere
+                    float alpha = uOpacity;
+                    if (t < 0.25) {
+                        // dim region
+                        color = cyan;
+                        alpha = minAlpha;
+                    } else if (t < 0.35) {
+                        // fade in from dim to cyan
+                        float ft = (t - 0.25) / 0.1;
+                        color = cyan;
+                        alpha = mix(minAlpha, uOpacity, ft);
+                    } else if (t < 0.5) {
+                        // cyan to green
+                        float ft = (t - 0.35) / 0.15;
+                        color = mix(cyan, green, ft);
+                    } else if (t < 0.65) {
+                        // green to cyan
+                        float ft = (t - 0.5) / 0.15;
+                        color = mix(green, cyan, ft);
+                    } else if (t < 0.75) {
+                        // fade out from cyan to dim
+                        float ft = (t - 0.65) / 0.1;
+                        color = cyan;
+                        alpha = mix(uOpacity, minAlpha, ft);
+                    } else {
+                        // dim region
+                        color = cyan;
+                        alpha = minAlpha;
+                    }
+                    gl_FragColor = vec4(color, alpha);
+                }
+            `,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
             side: THREE.DoubleSide
         });
 
         this.glowRing = new THREE.Mesh(glowRingGeo, this.glowMaterial);
         this.glowRing.rotation.x = -Math.PI / 2; 
         this.glowRing.position.y = 0.5; // Raised clearly above ground
-        this.glowRing.renderOrder = 9999; // EXTREME PRIORITY
+        this.glowRing.renderOrder = 999; // Render on top of terrain
         // this.glowRing.visible = false; // Keep it potentially visible for now if opacity is handled
         
         group.add(this.glowRing);
@@ -352,7 +476,6 @@ export class Unit {
                 this.bodyMaterial.emissive = new THREE.Color(0xffffff);
                 this.bodyMaterial.emissiveIntensity = 2.0;
             } else if (!state && !this.isSelected) {
-                // No hover, no selection = no glow
                 this.bodyMaterial.emissiveIntensity = 0;
             }
             // If selected, updateSelectionVisuals handles the glow
@@ -366,8 +489,10 @@ export class Unit {
 
     setCommandPause(paused) {
         this.pausedByCommand = paused;
-        // If unpaused, ensure we are in path following mode if path exists
-        if (!paused && this.path) {
+        // If unpaused, ensure we are in path following mode if path exists AND has points
+        // Bug #13 fix: [] is truthy in JS, so check length to avoid re-enabling
+        // isFollowingPath on a cleared/empty path
+        if (!paused && this.path && this.path.length > 0) {
             this.isFollowingPath = true;
         }
     }
@@ -390,21 +515,46 @@ export class Unit {
 
     setSelection(active) {
         this.isSelected = active;
-        console.log(`[Unit ${this.id}] setSelection(${active}) - glowRing exists: ${!!this.glowRing}, glowMaterial exists: ${!!this.glowMaterial}`);
-        
+        if (window.game?._isDevMode) console.log(`[Unit ${this.id}] setSelection(${active}) - glowRing exists: ${!!this.glowRing}, glowMaterial exists: ${!!this.glowMaterial}`);
+
         // IMMEDIATE minimum visibility when selected (don't wait for lerp)
         if (active) {
             if (this.glowMaterial) {
-                this.glowMaterial.opacity = 0.3; // Start visible immediately
+                if (this.glowMaterial.uniforms) {
+                    this.glowMaterial.uniforms.uOpacity.value = 0.3;
+                } else {
+                    this.glowMaterial.opacity = 0.3;
+                } // Start visible immediately
                 this.glowRing.visible = true;
                 // FIX: Jumpstart intensity so updateSelectionVisuals doesn't hide it immediately (it hides if < 0.01)
                 this.selectionIntensity = Math.max(this.selectionIntensity, 0.2);
             }
+            // Bug #5: Immediately show overhead green indicator on selection
+            if (!this._myUnitIndicatorSprite) {
+                this._createIndicatorSprite('myUnit');
+            }
+            if (this._myUnitIndicatorSprite) {
+                this._myUnitIndicatorSprite.visible = true;
+            }
         } else {
             // IMMEDIATE HIDE on deselect (Phase 2 Fix)
             this.selectionIntensity = 0;
-            if (this.glowMaterial) this.glowMaterial.opacity = 0;
+            this.isKeyboardOverriding = false; // Bug #4: Clear keyboard override to kill selection ring
+            // Start headlight deselect countdown
+            this._deselectTimestamp = performance.now();
+            if (this.glowMaterial) {
+                if (this.glowMaterial.uniforms) {
+                    this.glowMaterial.uniforms.uOpacity.value = 0;
+                } else {
+                    this.glowMaterial.opacity = 0;
+                }
+            }
             if (this.glowRing) this.glowRing.visible = false;
+            if (this.terrainRing) this.terrainRing.visible = false;
+            // Bug #5: Immediately hide overhead green indicator on deselect
+            if (this._myUnitIndicatorSprite) {
+                this._myUnitIndicatorSprite.visible = false;
+            }
         }
         // Full visuals handled in update() for smooth transition ONLY if active
     }
@@ -481,8 +631,8 @@ export class Unit {
      */
     get shouldShowOccupiedIndicator() {
         const sm = window.game?.sessionManager;
-        // Only show in multiplayer guest mode
-        if (!sm || sm.state.isOffline() || sm.state.isHost()) return false;
+        // Only show in multiplayer mode (both Host and Guest see occupied)
+        if (!sm || sm.state.isOffline()) return false;
         const mySlot = sm.state.mySlot;
         // Seat is occupied by someone else
         return this.selectedBySlot !== null && this.selectedBySlot !== mySlot;
@@ -504,28 +654,33 @@ export class Unit {
     }
 
     /**
+     * M07: Get display name of the player occupying this unit.
+     * @returns {string|null}
+     */
+    get occupantDisplayName() {
+        if (this.selectedBySlot === null) return null;
+        const sm = window.game?.sessionManager;
+        if (!sm) return null;
+        const player = sm.state.getPlayer(this.selectedBySlot);
+        if (player?.displayName) return player.displayName;
+        return this.selectedBySlot === 0 ? 'Host' : `Player ${this.selectedBySlot}`;
+    }
+
+    /**
      * M07: Create or update indicator sprites (lock/occupied).
      * Called during unit update to reflect current seat state.
      */
     updateSeatIndicators() {
-        // W2 DEBUG: Log indicator state (only once per state change)
         const shouldShowLock = this.shouldShowLockIndicator;
         const shouldShowOccupied = this.shouldShowOccupiedIndicator;
 
-        const newState = `${shouldShowLock}-${shouldShowOccupied}`;
+        // Detect occupant change to recreate name label
+        const currentOccupant = shouldShowOccupied ? this.selectedBySlot : null;
+        const occupantChanged = this._lastOccupantSlot !== currentOccupant;
+
+        const newState = `${shouldShowLock}-${shouldShowOccupied}-${currentOccupant}`;
         if (this._lastIndicatorState !== newState) {
             this._lastIndicatorState = newState;
-            const sm = window.game?.sessionManager;
-            console.log('[Unit] Seat indicator update:', {
-                id: this.id,
-                seatPolicy: this.seatPolicy,
-                selectedBySlot: this.selectedBySlot,
-                ownerSlot: this.ownerSlot,
-                mySlot: sm?.state?.mySlot,
-                isGuest: sm && !sm.state.isOffline() && !sm.state.isHost(),
-                shouldShowLock,
-                shouldShowOccupied
-            });
         }
 
         // Update lock indicator
@@ -536,12 +691,30 @@ export class Unit {
             this._lockIndicatorSprite.visible = shouldShowLock;
         }
 
-        // Update occupied indicator
-        if (shouldShowOccupied && !this._occupiedIndicatorSprite) {
-            this._createIndicatorSprite('occupied');
+        // Update occupied indicator (recreate if occupant changed for name update)
+        if (shouldShowOccupied && (occupantChanged || !this._occupiedIndicatorSprite)) {
+            if (this._occupiedIndicatorSprite) {
+                this._occupiedIndicatorSprite.removeFromParent();
+                this._occupiedIndicatorSprite = null;
+            }
+            this._createIndicatorSprite('occupied', this.occupantDisplayName);
+            this._lastOccupantSlot = currentOccupant;
         }
-        if (this._occupiedIndicatorSprite) {
-            this._occupiedIndicatorSprite.visible = shouldShowOccupied;
+        if (!shouldShowOccupied && this._occupiedIndicatorSprite) {
+            this._occupiedIndicatorSprite.visible = false;
+            this._lastOccupantSlot = null;
+        }
+        if (this._occupiedIndicatorSprite && shouldShowOccupied) {
+            this._occupiedIndicatorSprite.visible = true;
+        }
+
+        // Update myUnit green glow indicator
+        const shouldShowMyUnit = this.isMySeatedUnit;
+        if (shouldShowMyUnit && !this._myUnitIndicatorSprite) {
+            this._createIndicatorSprite('myUnit');
+        }
+        if (this._myUnitIndicatorSprite) {
+            this._myUnitIndicatorSprite.visible = shouldShowMyUnit;
         }
     }
 
@@ -554,24 +727,54 @@ export class Unit {
     }
 
     /**
-     * M07: Create an indicator sprite (lock or occupied).
+     * M07: Create an indicator sprite (lock, occupied, or myUnit).
      * @private
-     * @param {string} type - 'lock' or 'occupied'
+     * @param {string} type - 'lock', 'occupied', or 'myUnit'
+     * @param {string} [playerName] - Display name for 'occupied' type
      */
-    _createIndicatorSprite(type) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 64;
-        const ctx = canvas.getContext('2d');
+    _createIndicatorSprite(type, playerName) {
+        let canvas, ctx, sprite;
 
-        ctx.font = '48px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        if (type === 'occupied' && playerName) {
+            // Wider canvas for person icon + name
+            canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 64;
+            ctx = canvas.getContext('2d');
 
-        if (type === 'lock') {
-            ctx.fillText('\u{1F512}', 32, 32); // Padlock emoji
-        } else if (type === 'occupied') {
-            ctx.fillText('\u{1F464}', 32, 32); // Person silhouette emoji
+            // Person silhouette icon
+            ctx.font = '40px Arial';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('\u{1F464}', 8, 32);
+
+            // Player name
+            ctx.fillStyle = '#ff6666';
+            ctx.font = 'bold 24px "Inter", "Segoe UI", Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText(playerName, 52, 32);
+        } else {
+            canvas = document.createElement('canvas');
+            canvas.width = 64;
+            canvas.height = 64;
+            ctx = canvas.getContext('2d');
+            ctx.font = '48px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            if (type === 'lock') {
+                ctx.fillText('\u{1F512}', 32, 32);
+            } else if (type === 'occupied') {
+                ctx.fillText('\u{1F464}', 32, 32);
+            } else if (type === 'myUnit') {
+                ctx.fillStyle = '#00ff44';
+                ctx.beginPath();
+                ctx.arc(32, 32, 24, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '32px Arial';
+                ctx.fillText('\u2713', 32, 34);
+            }
         }
 
         const texture = new THREE.CanvasTexture(canvas);
@@ -580,14 +783,19 @@ export class Unit {
         const material = new THREE.SpriteMaterial({
             map: texture,
             transparent: true,
-            depthTest: false,
+            depthTest: true,
             depthWrite: false
         });
 
-        const sprite = new THREE.Sprite(material);
-        sprite.scale.set(1.5, 1.5, 1);
-        sprite.position.set(0, 2.5, 0); // Above unit
-        sprite.renderOrder = 9998;
+        sprite = new THREE.Sprite(material);
+        // Occupied with name is wider
+        if (type === 'occupied' && playerName) {
+            sprite.scale.set(4, 1, 1);
+        } else {
+            sprite.scale.set(1.5, 1.5, 1);
+        }
+        sprite.position.set(0, 2.5, 0);
+        sprite.renderOrder = 100;
 
         this.mesh.add(sprite);
 
@@ -595,6 +803,8 @@ export class Unit {
             this._lockIndicatorSprite = sprite;
         } else if (type === 'occupied') {
             this._occupiedIndicatorSprite = sprite;
+        } else if (type === 'myUnit') {
+            this._myUnitIndicatorSprite = sprite;
         }
     }
 
@@ -613,6 +823,7 @@ export class Unit {
     removeSeatIndicators() {
         this.removeLockIndicator();
         this.removeOccupiedIndicator();
+        this.removeMyUnitIndicator();
     }
 
     /**
@@ -643,6 +854,20 @@ export class Unit {
         }
     }
 
+    /**
+     * M07: Remove the myUnit indicator sprite.
+     */
+    removeMyUnitIndicator() {
+        if (this._myUnitIndicatorSprite) {
+            this.mesh.remove(this._myUnitIndicatorSprite);
+            if (this._myUnitIndicatorSprite.material.map) {
+                this._myUnitIndicatorSprite.material.map.dispose();
+            }
+            this._myUnitIndicatorSprite.material.dispose();
+            this._myUnitIndicatorSprite = null;
+        }
+    }
+
     updateSelectionVisuals(dt) {
         const targetIntensity = this.isSelected ? 1.0 : 0.0;
 
@@ -656,8 +881,10 @@ export class Unit {
         // FIX: Early exit if not selected AND not active (prevents flicker on deselect)
         if (!this.isSelected && !isActive) {
             this.spotLight.intensity = 0;
-            this.glowMaterial.opacity = 0;
-            if (this.bodyMaterial) this.bodyMaterial.emissiveIntensity = 0;
+            if (this.glowMaterial.uniforms) { this.glowMaterial.uniforms.uOpacity.value = 0; } else { this.glowMaterial.opacity = 0; }
+            if (this.bodyMaterial) {
+                this.bodyMaterial.emissiveIntensity = 0;
+            }
             this.glowRing.visible = false;
             if (this.terrainRing) this.terrainRing.visible = false;
             this.selectionIntensity = 0; // Reset for next selection
@@ -666,8 +893,10 @@ export class Unit {
 
         if (this.selectionIntensity < 0.01 && !isActive) {
             this.spotLight.intensity = 0;
-            this.glowMaterial.opacity = 0;
-            if (this.bodyMaterial) this.bodyMaterial.emissiveIntensity = 0;
+            if (this.glowMaterial.uniforms) { this.glowMaterial.uniforms.uOpacity.value = 0; } else { this.glowMaterial.opacity = 0; }
+            if (this.bodyMaterial) {
+                this.bodyMaterial.emissiveIntensity = 0;
+            }
             this.glowRing.visible = false;
             // Hide terrain ring
             if (this.terrainRing) this.terrainRing.visible = false;
@@ -680,8 +909,10 @@ export class Unit {
         }
         this.timeAccumulator += dt;
 
-        // Pulse Logic (Sine wave) - FASTER when keyboard active
-        const pulseFreq = isActive ? 6.0 : 4.0; // Faster pulse when active
+        // Pulse Logic (Sine wave)
+        // Selection ring: slow 3.5s cycle (full transparent to opaque and back)
+        // Keyboard active: faster pulse
+        const pulseFreq = isActive ? 6.0 : (2.0 * Math.PI / 3.5); // ~1.795 for 3.5s cycle
         const pulse = (Math.sin(this.timeAccumulator * pulseFreq) * 0.5 + 0.5); // 0 to 1
 
         // Determine which intensity to use (active overrides selection)
@@ -691,10 +922,17 @@ export class Unit {
         const spotMax = isActive ? 80.0 : 60.0; // Brighter when active
         this.spotLight.intensity = visualIntensity * (spotMax * 0.7 + spotMax * 0.3 * pulse);
 
-        // 2. Glow Ring - ORANGE when active, CYAN when just selected
-        const ringOpacity = isActive ? (0.8 + 0.2 * pulse) : (0.7 + 0.3 * pulse); // Higher base opacity
-        this.glowMaterial.opacity = visualIntensity * ringOpacity;
-        this.glowMaterial.color.set(isActive ? 0xff8800 : 0x00ffff); // Orange vs Bright Cyan
+        // 2. Glow Ring - ORANGE when active, LIGHT BLUE when just selected
+        // Selection: slow pulse from 0.0 (transparent) to 0.8 (opaque) and back
+        // Active: stays bright with subtle pulse
+        const ringOpacity = isActive ? (0.8 + 0.2 * pulse) : (0.8 * pulse);
+        if (this.glowMaterial.uniforms) {
+            this.glowMaterial.uniforms.uOpacity.value = visualIntensity * ringOpacity;
+            this.glowMaterial.uniforms.uTime.value = performance.now() * 0.001;
+        } else {
+            this.glowMaterial.opacity = visualIntensity * ringOpacity;
+        }
+        // Color handled by shader gradient (no .color on ShaderMaterial)
 
         // 3. Unit Emissive Glow - ORANGE when active, BLUE when selected
         if (this.bodyMaterial) {
@@ -786,7 +1024,7 @@ export class Unit {
         this.isFollowingPath = true;
         this.pausedByCommand = false;
 
-        console.log(`Path Set. Closest Node: ${closestIndex}, Next Target: ${this.pathIndex}`);
+        if (window.game?._isDevMode) console.log(`Path Set. Closest Node: ${closestIndex}, Next Target: ${this.pathIndex}`);
     }
 
     steerTowards(point) {
@@ -835,8 +1073,8 @@ export class Unit {
         // Hover Speed Logic (Easy In / Easy Out)
         // Also include pausedByCommand for smooth stop/start
         const targetFactor = (this.hoverState || this.pausedByCommand) ? 0.0 : 1.0;
-        // Smoothly interpolate factor - FAST stop (8.0), slower resume (4.0)
-        const lerpSpeed = (this.hoverState || this.pausedByCommand) ? 4.0 : 3.0; // Slower for smoother ease
+        // Smoothly interpolate factor - inertia: gradual decel (~0.8s) and accel (~1.1s)
+        const lerpSpeed = (this.hoverState || this.pausedByCommand) ? 2.5 : 1.8;
         this.speedFactor = THREE.MathUtils.lerp(this.speedFactor, targetFactor, dt * lerpSpeed);
 
         // Effective Speed
@@ -846,6 +1084,47 @@ export class Unit {
         if (this.speedFactor < 0.001) {
             moveSpeed = 0;
             this.speedFactor = 0; // Snap to fully stopped
+        }
+
+        // === TERRAIN SLOPE PHYSICS ===
+        // Uphill slows unit down, downhill speeds it up
+        if (this.velocityDirection && this.velocityDirection.lengthSq() > 0.001) {
+            const surfaceNormal = this._poolAxis.copy(this.position).normalize(); // Radial "up" direction
+            // Dot product: positive = moving uphill, negative = moving downhill
+            const slopeDot = this.velocityDirection.dot(surfaceNormal);
+            // Clamp influence to reasonable range (-0.3 to +0.3)
+            const slopeInfluence = THREE.MathUtils.clamp(slopeDot, -0.3, 0.3);
+            // Convert to speed factor: uphill reduces speed, downhill increases
+            // 0.0 slope = 1.0 factor, +0.3 (steep uphill) = 0.7, -0.3 (steep downhill) = 1.3
+            const slopeSpeedFactor = 1.0 - slopeInfluence;
+            moveSpeed *= slopeSpeedFactor;
+        }
+
+        // Lateral drift on cross-slopes (gravity pulls unit downhill on traversals)
+        if (this.velocityDirection && moveSpeed > 0 && this.velocityDirection.lengthSq() > 0.001) {
+            const surfaceNormal = this._poolSphereNormal.copy(this.position).normalize();
+            const terrainNormal = this.getSmoothedNormal();
+
+            // "Downhill" direction on the surface via double cross product
+            const slopeDir = this._poolSlopeDir.crossVectors(
+                this._poolSlopeCross.crossVectors(terrainNormal, surfaceNormal),
+                terrainNormal
+            ).normalize();
+
+            // Only apply if there IS a slope (slopeDir is meaningful)
+            if (slopeDir.lengthSq() > 0.001) {
+                // How steep is the slope? (1 - dot of terrain normal and sphere normal)
+                const steepness = 1.0 - Math.abs(terrainNormal.dot(surfaceNormal));
+
+                // How much are we moving across the slope? (perpendicular to fall line)
+                const crossSlopeFactor = 1.0 - Math.abs(this.velocityDirection.dot(slopeDir));
+
+                // Apply small lateral drift
+                const driftStrength = steepness * crossSlopeFactor * 0.3 * dt;
+                if (driftStrength > 0.001) {
+                    this.position.addScaledVector(slopeDir, driftStrength * moveSpeed);
+                }
+            }
         }
 
         // === ROLL-BACK UPDATE (collision push-back on EXACT arrival path) ===
@@ -889,7 +1168,7 @@ export class Unit {
                 this.cameraShakeIntensity = 0;
                 
                 if (this.bounceLockTimer > maxRollbackTime) {
-                    console.log("Rock: Max rollback time (2s) reached. Control restored.");
+                    if (window.game?._isDevMode) console.log("Rock: Max rollback time (2s) reached. Control restored.");
                 }
             }
         } else {
@@ -924,7 +1203,7 @@ export class Unit {
 
                     if (this.stuckTimer >= this.stuckThreshold && !this.isStuck) {
                         this.isStuck = true;
-                        console.log(`[Unit ${this.id}] STUCK detected after ${this.stuckTimer.toFixed(1)}s`);
+                        if (window.game?._isDevMode) console.log(`[Unit ${this.id}] STUCK detected after ${this.stuckTimer.toFixed(1)}s`);
                         // TODO: Trigger repath here
                     }
                 } else {
@@ -945,7 +1224,7 @@ export class Unit {
             this.waitTimer -= dt;
             if (this.waitTimer <= 0) {
                 this.waitTimer = 0;
-                console.log("Wait finished, resuming...");
+                if (window.game?._isDevMode) console.log("Wait finished, resuming...");
             } else {
                 // Determine braking/idle state
                 // Use friction to stop smoothly if needed, or hard stop?
@@ -1014,7 +1293,7 @@ export class Unit {
                 this.isInTransition = false;
                 this.transitionPath = null;
                 this.transitionIndex = 0;
-                console.log("Transition arc complete, now following main path");
+                if (window.game?._isDevMode) console.log("Transition arc complete, now following main path");
             } else {
                 // Move along transition path
                 const target = this.transitionPath[this.transitionIndex];
@@ -1022,10 +1301,10 @@ export class Unit {
                     const distToTarget = this.position.distanceTo(target);
 
                     // Direction to current target
-                    const dir = target.clone().sub(this.position).normalize();
+                    const dir = this._poolTangent.copy(target).sub(this.position).normalize();
 
                     // CRITICAL FIX: Update velocityDirection explicitly before using it
-                    this.velocityDirection = dir.clone();
+                    this.velocityDirection.copy(dir);
 
                     // === SMOOTH HEADING ROTATION (STABILIZED) ===
                     // Use look-ahead to prevent jitter/spinning
@@ -1067,36 +1346,50 @@ export class Unit {
                         }
                     }
 
-                    const lookDir = lookDest ? lookDest.clone().sub(this.position).normalize() : dir;
+                    const lookDir = lookDest ? this._poolTempDir.copy(lookDest).sub(this.position).normalize() : dir;
 
                     if (this.headingQuaternion && lookDir.lengthSq() > 0.001) {
                         const sphereNormal = this.getSmoothedNormal();
 
                         // Project look direction onto terrain tangent plane
-                        const tangentDir = lookDir.clone().sub(
-                            sphereNormal.clone().multiplyScalar(lookDir.dot(sphereNormal))
+                        const tangentDir = this._poolTangent.copy(lookDir).sub(
+                            this._poolSphereNormal.copy(sphereNormal).multiplyScalar(lookDir.dot(sphereNormal))
                         ).normalize();
 
                         if (tangentDir.lengthSq() > 0.001) {
                             // Build orientation: Up=Normal, Forward=Tangent
                             const up = sphereNormal;
                             const forward = tangentDir;
-                            const right = new THREE.Vector3().crossVectors(up, forward).normalize();
-                            const orthoForward = new THREE.Vector3().crossVectors(right, up).normalize();
+                            const right = this._poolRight.crossVectors(up, forward).normalize();
+                            const orthoForward = this._poolOrthoFwd.crossVectors(right, up).normalize();
 
-                            const rotMatrix = new THREE.Matrix4().makeBasis(right, up, orthoForward);
-                            const targetQuat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
+                            const rotMatrix = this._poolRotMatrix.makeBasis(right, up, orthoForward);
+                            const targetQuat = this._poolTargetQuat.setFromRotationMatrix(rotMatrix);
 
-                            // Smooth rotation (slerp)
-                            this.headingQuaternion.slerp(targetQuat, 0.15);
+                            // Smooth rotation (dt-independent slerp for inertia)
+                            this.headingQuaternion.slerp(targetQuat, 1.0 - Math.pow(0.002, dt));
                         }
                     }
                     // Track velocity direction for arc continuity
                     // this.velocityDirection already updated above
                     this.currentSpeed = moveSpeed;
 
+                    // Advance transition index when close to current target point
+                    // (This drives the transition to completion - without it, the unit
+                    // would orbit the first transition point forever)
+                    if (distToTarget < 1.0) {
+                        this.transitionIndex++;
+                        if (this.transitionIndex >= this.transitionPath.length) {
+                            // Transition complete - switch to main path
+                            this.isInTransition = false;
+                            this.transitionPath = null;
+                            this.transitionIndex = 0;
+                            if (window.game?._isDevMode) console.log("Transition arc complete (point advance), now following main path");
+                        }
+                    }
+
                     // Project to terrain
-                    const posDir = this.position.clone().normalize();
+                    const posDir = this._poolTempDir.copy(this.position).normalize();
                     const terrainRadius = this.planet.terrain.getRadiusAt(posDir);
                     const groundOffset = this.groundOffset || 0.5;
                     this.position.copy(posDir.multiplyScalar(terrainRadius + groundOffset));
@@ -1119,7 +1412,7 @@ export class Unit {
             // One-time log
             if (!this._pathFollowingLogged) {
                 this._pathFollowingLogged = true;
-                console.log(`[Unit] Path following ACTIVE! Path length: ${this.path.length}`);
+                if (window.game?._isDevMode) console.log(`[Unit] Path following ACTIVE! Path length: ${this.path.length}`);
             }
 
             // Initialize path index if needed
@@ -1132,7 +1425,7 @@ export class Unit {
                 } else {
                     // Path completed
                     this.isFollowingPath = false;
-                    console.log("Path completed.");
+                    if (window.game?._isDevMode) console.log("Path completed.");
                 }
             }
 
@@ -1176,7 +1469,7 @@ export class Unit {
                      
                      // Initialize state if needed
                      if (this.actionState === 'idle') {
-                         console.log(`[Unit] Starting Action: ${currentCmd.type}`);
+                         if (window.game?._isDevMode) console.log(`[Unit] Starting Action: ${currentCmd.type}`);
                          this.activeAction = currentCmd; // Keep reference for legacy property if needed, or just use currentCmd
                          this.actionState = 'stopping';
                          this.actionTimer = 0;
@@ -1203,7 +1496,7 @@ export class Unit {
                         // ...
                         
                         if (this.actionTimer >= duration) {
-                            console.log(`[Unit] Action Completed: ${currentCmd.type}`);
+                            if (window.game?._isDevMode) console.log(`[Unit] Action Completed: ${currentCmd.type}`);
                             this.actionState = 'resuming';
                             this.actionTimer = 0;
                         }
@@ -1221,7 +1514,7 @@ export class Unit {
                             
                             // ADVANCE COMMAND QUEUE
                             this.currentCommandIndex++;
-                            console.log(`[Unit] Advanced to command index ${this.currentCommandIndex}`);
+                            if (window.game?._isDevMode) console.log(`[Unit] Advanced to command index ${this.currentCommandIndex}`);
                         }
                     }
                 } else {
@@ -1236,7 +1529,7 @@ export class Unit {
                     
                     if (nextIdx > currentIdx) {
                         // 1. Current Tangent (Direction of current segment)
-                        const currentTangent = this.path[nextIdx].clone().sub(this.path[currentIdx]).normalize();
+                        const currentTangent = this._poolTangent.copy(this.path[nextIdx]).sub(this.path[currentIdx]).normalize();
 
                         // 2. Future Tangent (approx 1s ahead)
                         const lookAheadDist = Math.max(3.0, this.speed * 1.5); 
@@ -1255,7 +1548,7 @@ export class Unit {
                         const futureNextIdx = Math.min(this.path.length - 1, futureIdx + 1);
                         
                         if (futureNextIdx > futureIdx) {
-                            const futureTangent = this.path[futureNextIdx].clone().sub(this.path[futureIdx]).normalize();
+                            const futureTangent = this._poolTempDir.copy(this.path[futureNextIdx]).sub(this.path[futureIdx]).normalize();
 
                             // 3. Compare Tangents (Dot Product)
                             // dot = 1.0 (Aligned) -> Max Speed
@@ -1324,12 +1617,12 @@ export class Unit {
                     if (!target) break;
 
                     // CHECK IF TARGET IS UNDERWATER
-                    const targetDir = target.clone().normalize();
+                    const targetDir = this._poolTempDir.copy(target).normalize();
                     const targetTerrainRadius = this.planet.terrain.getRadiusAt(targetDir);
                     const targetIsUnderwater = targetTerrainRadius < pathWaterRadius;
 
                     if (targetIsUnderwater && !canEnterWater) {
-                        console.log("Path leads to water! Starting water pushback.");
+                        if (window.game?._isDevMode) console.log("Path leads to water! Starting water pushback.");
                         this.waterState = 'slowing';  // FIXED: was 'backing' which is not handled!
                         this.isFollowingPath = false;
                         break;
@@ -1348,10 +1641,10 @@ export class Unit {
                         // (Wait logic removed - user request)
                     } else {
                         // Move towards target incrementally
-                        const dir = target.clone().sub(this.position).normalize();
+                        const dir = this._poolTangent.copy(target).sub(this.position).normalize();
 
                         // Calculate desired position
-                        const desiredPos = this.position.clone().addScaledVector(dir, remainingMove);
+                        const desiredPos = this._poolForward.copy(this.position).addScaledVector(dir, remainingMove);
 
                         // === ROCK COLLISION CHECK ===
                         if (this.planet && this.planet.rockCollision) {
@@ -1371,13 +1664,13 @@ export class Unit {
                         }
 
                         // Store velocity direction
-                        this.velocityDirection = dir.clone();
+                        this.velocityDirection.copy(dir);
                         remainingMove = 0;
                     }
 
                     // === CRITICAL: PROJECT TO TERRAIN AFTER EVERY MOVEMENT ===
                     // This ensures we NEVER go through the ground
-                    const posDir = this.position.clone().normalize();
+                    const posDir = this._poolTempDir.copy(this.position).normalize();
                     const terrainRadius = this.planet.terrain.getRadiusAt(posDir);
                     const groundOffset = this.groundOffset || 0.5;
                     this.position.copy(posDir.multiplyScalar(terrainRadius + groundOffset));
@@ -1452,7 +1745,7 @@ export class Unit {
                                     }
                                 });
                                 
-                                console.log(`[ARRIVAL] Arrived at ${arrivedWp.id?.slice(-4)}, next target: ${newTargetWp?.id?.slice(-4)}`);
+                                if (window.game?._isDevMode) console.log(`[ARRIVAL] Arrived at ${arrivedWp.id?.slice(-4)}, next target: ${newTargetWp?.id?.slice(-4)}`);
                             
                                 // === COMMAND PROGRESSION ===
                                 // Check if the waypoint we arrived at corresponds to the current command
@@ -1461,7 +1754,7 @@ export class Unit {
                                     
                                     // Match IDs (arrivedWp.id IS the command ID)
                                     if (currentCmd && arrivedWp.id === currentCmd.id) {
-                                        console.log(`[Unit] Finished Move Command: ${currentCmd.id}`);
+                                        if (window.game?._isDevMode) console.log(`[Unit] Finished Move Command: ${currentCmd.id}`);
                                         this.currentCommandIndex++;
                                         
                                         // Update status
@@ -1495,7 +1788,7 @@ export class Unit {
                         
                         this.targetWaypointId = this.waypoints[nextIdx].id;
                         this.waypoints[nextIdx].logicalState = 'approaching';
-                        console.log(`[INIT] last=${this.lastWaypointId?.slice(-4)} target=${this.targetWaypointId?.slice(-4)}`);
+                        if (window.game?._isDevMode) console.log(`[INIT] last=${this.lastWaypointId?.slice(-4)} target=${this.targetWaypointId?.slice(-4)}`);
                     }
                 }
             }
@@ -1522,9 +1815,9 @@ export class Unit {
                 } else if (autoMove !== 0) {
                     // MANUAL / AUTO MOVEMENT (Smooth Acceleration)
                     const targetSpeed = this.speed * autoMove;
-                    const moveDir = new THREE.Vector3(0, 0, 1).applyQuaternion(this.headingQuaternion); // Forward
+                    const moveDir = this._poolMoveDir.set(0, 0, 1).applyQuaternion(this.headingQuaternion); // Forward
 
-                    const targetVel = moveDir.clone().multiplyScalar(targetSpeed);
+                    const targetVel = this._poolTempDir.copy(moveDir).multiplyScalar(targetSpeed);
 
                     // Smooth Ease-In (Acceleration)
                     // Lerp velocity towards target (dt * factor)
@@ -1558,11 +1851,45 @@ export class Unit {
                 }
             }
 
+            // === LOOK-AHEAD STEERING for smooth curves ===
+            // Override velocityDirection with a blended look-ahead direction so the unit
+            // anticipates turns instead of reacting AFTER reaching each sample point.
+            // Only active during autonomous path-following (not keyboard override).
+            if (this.isFollowingPath && this.path && this.path.length > 0 && !this.isKeyboardOverriding) {
+                const lookAheadPoints = 8; // ~4 meters ahead at 0.5m spacing
+                const blendedDir = this._poolBlendedDir.set(0, 0, 0);
+                let totalWeight = 0;
+                const tempDir = this._poolTempDir;
+
+                for (let la = 0; la < lookAheadPoints; la++) {
+                    let idx = this.pathIndex + la;
+                    if (idx >= this.path.length) {
+                        if (this.isPathClosed || this.loopingEnabled) {
+                            idx = idx % this.path.length;
+                        } else {
+                            idx = this.path.length - 1;
+                        }
+                    }
+                    tempDir.copy(this.path[idx]).sub(this.position);
+                    if (tempDir.lengthSq() < 0.001) continue;
+                    tempDir.normalize();
+                    const weight = 1.0 / (1.0 + la * 0.5); // Closer points weigh more
+                    blendedDir.addScaledVector(tempDir, weight);
+                    totalWeight += weight;
+                }
+
+                if (totalWeight > 0 && blendedDir.lengthSq() > 0.001) {
+                    blendedDir.divideScalar(totalWeight).normalize();
+                    // Use blended direction for heading calculation
+                    this.velocityDirection.copy(blendedDir);
+                }
+            }
+
             // ORIENTATION: Look toward path direction
             // STRICT RULE: "Unit mindíg abba az irányba fordul, amerre megy."
             // Use velocityDirection (actual movement) instead of theoretical path tangent
 
-            let tangent = new THREE.Vector3();
+            const tangent = this._poolTangent.set(0, 0, 0);
 
             if (this.velocityDirection && this.velocityDirection.lengthSq() > 0.001) {
                 tangent.copy(this.velocityDirection).normalize();
@@ -1575,31 +1902,32 @@ export class Unit {
                 }
 
                 if (this.path[lookAhead]) {
-                    tangent = this.path[lookAhead].clone().sub(this.position).normalize();
+                    tangent.copy(this.path[lookAhead]).sub(this.position).normalize();
                 } else if (this.path[this.pathIndex]) {
-                    tangent = this.path[this.pathIndex].clone().sub(this.position).normalize();
+                    tangent.copy(this.path[this.pathIndex]).sub(this.position).normalize();
                 }
             }
 
             // Project tangent onto SMOOTHED terrain plane (for tilt + smoothness)
             // Visual tilt is handled here directly
             const sphereNormal = this.getSmoothedNormal(); // Use smoothed normal instead of rigid sphere normal
-            const projectedTangent = tangent.clone().sub(
-                sphereNormal.clone().multiplyScalar(tangent.dot(sphereNormal))
+            const dotTN = tangent.dot(sphereNormal);
+            const projectedTangent = this._poolForward.copy(tangent).sub(
+                this._poolSphereNormal.copy(sphereNormal).multiplyScalar(dotTN)
             ).normalize();
 
             if (projectedTangent.lengthSq() > 0.01) {
                 // Build orientation from Smoothed Normal (up) and curve tangent (forward)
                 const up = sphereNormal;
                 const forward = projectedTangent;
-                const right = new THREE.Vector3().crossVectors(up, forward).normalize();
+                const right = this._poolRight.crossVectors(up, forward).normalize();
 
                 // Re-orthogonalize forward
-                const orthoForward = new THREE.Vector3().crossVectors(right, up).normalize();
+                const orthoForward = this._poolOrthoFwd.crossVectors(right, up).normalize();
 
                 // Build rotation matrix
-                const m = new THREE.Matrix4().makeBasis(right, up, orthoForward);
-                const targetHeading = new THREE.Quaternion().setFromRotationMatrix(m);
+                const m = this._poolRotMatrix.makeBasis(right, up, orthoForward);
+                const targetHeading = this._poolTargetQuat.setFromRotationMatrix(m);
 
                 // STRICT ORIENTATION: Heading (Forward)
                 // User requirement: "Unit mindíg abba az irányba fordul, amerre megy."
@@ -1616,7 +1944,7 @@ export class Unit {
                 // The previous "Strict Copy" was causing the jitter because terrain normals are noisy.
                 
                 // RE-ENABLE SMOOTH ROTATION (High speed = fast but not instant)
-                const rotateSpeed = 15.0; // Fast enough for "strict" feel, smooth enough to kill noise
+                const rotateSpeed = 12.0; // Inertia: physical objects don't snap-turn instantly
                 this.headingQuaternion.slerp(targetQuaternion, dt * rotateSpeed);
                 this.mesh.quaternion.copy(this.headingQuaternion);
             }
@@ -1632,9 +1960,9 @@ export class Unit {
             // Move towards target
             const toTarget = target.clone().sub(this.position).normalize();
 
-            // Speed control (Smooth Ease-In during transition)
+            // Speed control (Smooth Ease-In during transition - gradual for inertia)
             const targetVel = toTarget.multiplyScalar(this.speed);
-            this.velocity.lerp(targetVel, dt * 3.0);
+            this.velocity.lerp(targetVel, dt * 2.0);
             this.velocityDirection = toTarget.clone();
 
             // Advance point (Simpler threshold for smooth curve traversal)
@@ -1657,7 +1985,7 @@ export class Unit {
             if (this.waypoints && this.waypoints.length > 1 && !this.targetWaypointId) {
                 this.lastWaypointId = this.waypoints[0].id;    // Start point = Blue (just left)
                 this.targetWaypointId = this.waypoints[1].id; // First destination = Orange
-                console.log(`[Unit ${this.id || 'unknown'}] INIT: last=${this.lastWaypointId?.slice(-4)} target=${this.targetWaypointId?.slice(-4)}`);
+                if (window.game?._isDevMode) console.log(`[Unit ${this.id || 'unknown'}] INIT: last=${this.lastWaypointId?.slice(-4)} target=${this.targetWaypointId?.slice(-4)}`);
             }
 
 
@@ -1761,6 +2089,19 @@ export class Unit {
                 }
                 this.isKeyboardOverriding = true;
                 this.isFollowingPath = false;
+                // Cancel any active transition arc (user is taking manual control)
+                if (this.isInTransition) {
+                    this.isInTransition = false;
+                    this.transitionPath = null;
+                    this.transitionIndex = 0;
+                }
+                // Bug #13 fix: Re-align headingQuaternion to current mesh orientation
+                // when transitioning from path-following to manual control. Without this,
+                // headingQuaternion retains the last path-following direction which may
+                // not match the mesh's visual forward after drift fix re-projection.
+                if (this.headingQuaternion && this.mesh) {
+                    this.headingQuaternion.copy(this.mesh.quaternion);
+                }
                 // Don't set pausedByCommand here - we're actively controlling
                 this.setHeadlightsOn(true);
             }
@@ -1779,8 +2120,12 @@ export class Unit {
                 // User can resume keyboard control at any time without pressing Play
                 if (this.keyboardOverrideTimer > 0.5) {
                     this.isKeyboardOverriding = false;
-                    // NOTE: Do NOT set pausedByCommand = true here!
-                    // This was blocking keyboard resume. Let user use Play/Pause for path control.
+
+                    // Do NOT auto-rejoin path - user must press Play to resume
+                    // Just stop the unit and keep saved path for later
+                    this.velocity.set(0, 0, 0);
+                    this.velocityDirection.set(0, 0, 0);
+                    // Keep savedPath intact so Play button can use it later
                 }
             }
         }
@@ -1791,25 +2136,30 @@ export class Unit {
         const turnInput = isLocked ? 0 : (this.pausedByCommand ? manualTurn : (manualTurn || autoTurn));
         let moveInput = isLocked ? 0 : (this.pausedByCommand ? manualMove : (manualMove || autoMove));
 
-        // === HEADLIGHTS LOGIC (User Request) ===
-        // Rule: ON when moving, manually controlled, or following path
-        // OFF only after 60 seconds of complete inactivity
+        // === HEADLIGHTS LOGIC ===
+        // Rule: ON when selected OR moving/following path
+        // After deselect: stay on for 3 seconds if no movement action, then turn off
         const isMoving = this.velocity.lengthSq() > 0.05; // ~0.22 speed threshold
         const isActive = isMoving || hasKeyboardInput || this.isFollowingPath || this.isInTransition;
-        
-        if (isActive) {
-            // Reset idle timer when active
+
+        if (this.isSelected) {
+            // Selected: always keep headlights on
+            this.headlightIdleTimer = 0;
+            this.setHeadlightsOn(true);
+        } else if (isActive) {
+            // Not selected but has movement - keep on, reset timer
             this.headlightIdleTimer = 0;
             this.setHeadlightsOn(true);
         } else {
-            // Increment idle timer
-            this.headlightIdleTimer = (this.headlightIdleTimer || 0) + dt;
-            
-            // Only turn off after 60 seconds of complete inactivity
-            if (this.headlightIdleTimer > 60) {
+            // Not selected and idle - use 3 second countdown from deselect
+            const timeSinceDeselect = this._deselectTimestamp
+                ? (performance.now() - this._deselectTimestamp) / 1000
+                : 999;
+
+            if (timeSinceDeselect > 3) {
                 this.setHeadlightsOn(false);
             } else {
-                this.setHeadlightsOn(true); // Keep on while idling < 60s
+                this.setHeadlightsOn(true); // Keep on during 3s grace period
             }
         }
 
@@ -1822,36 +2172,49 @@ export class Unit {
         // This ensures the "Vertical Axis" of the quaternion is always the Sphere Normal
         // SKIP during path following - orientation is already handled by slerp in path logic
         if (!this.isFollowingPath || this.isInTransition) {
-            const currentSphereNormal = this.position.clone().normalize();
-            const headingForward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.headingQuaternion).normalize();
+            const currentSphereNormal = this._poolSphereNormal.copy(this.position).normalize();
+            const headingForward = this._poolForward.set(0, 0, 1).applyQuaternion(this.headingQuaternion).normalize();
             // Project forward to be orthogonal to sphere normal
-            const orthoForward = headingForward.clone().sub(currentSphereNormal.clone().multiplyScalar(headingForward.dot(currentSphereNormal))).normalize();
+            const dotHF = headingForward.dot(currentSphereNormal);
+            const orthoForward = this._poolOrthoFwd.copy(headingForward).sub(this._poolTempDir.copy(currentSphereNormal).multiplyScalar(dotHF)).normalize();
 
-            const sphereRight = new THREE.Vector3().crossVectors(currentSphereNormal, orthoForward).normalize();
-            const sphereBasis = new THREE.Matrix4().makeBasis(sphereRight, currentSphereNormal, orthoForward);
+            const sphereRight = this._poolRight.crossVectors(currentSphereNormal, orthoForward).normalize();
+            const sphereBasis = this._poolRotMatrix.makeBasis(sphereRight, currentSphereNormal, orthoForward);
             this.headingQuaternion.setFromRotationMatrix(sphereBasis);
         }
 
-        // 1. Handle Turning (Local Y Axis)
-        if (turnInput !== 0) {
-            let dir = turnInput > 0 ? -1 : 1; // Invert because Right is Negative Rotation
+        // 1. Handle Turning (Local Y Axis) - with rotational inertia
+        {
+            let targetTurnSpeed = 0;
+            if (turnInput !== 0) {
+                let dir = turnInput > 0 ? -1 : 1; // Invert because Right is Negative Rotation
 
-            // INVERTED REVERSE STEERING
-            // If we are strictly reversing (manual input < 0 or auto-reverse), flip steering.
-            // Check moveInput (which captures manual or auto move command)
-            if (moveInput < 0) {
-                dir *= -1;
+                // INVERTED REVERSE STEERING
+                // If we are strictly reversing (manual input < 0 or auto-reverse), flip steering.
+                // Check moveInput (which captures manual or auto move command)
+                if (moveInput < 0) {
+                    dir *= -1;
+                }
+                targetTurnSpeed = dir * this.turnSpeed;
             }
 
-            // Rotate around World Up (Sphere Normal) to ensure correct Yaw
-            const axis = this.position.clone().normalize();
-            const rot = new THREE.Quaternion().setFromAxisAngle(axis, dir * turnSpeed);
-            this.headingQuaternion.premultiply(rot);
+            // Smooth turn velocity: ease-in when starting, ease-out when stopping
+            const turnLerpRate = turnInput !== 0 ? 4.0 : 6.0; // Faster decel than accel
+            this.currentTurnSpeed = THREE.MathUtils.lerp(this.currentTurnSpeed, targetTurnSpeed, dt * turnLerpRate);
+
+            // Snap to zero if negligible (avoid micro-rotation drift)
+            if (Math.abs(this.currentTurnSpeed) < 0.01) this.currentTurnSpeed = 0;
+
+            if (this.currentTurnSpeed !== 0) {
+                // Rotate around World Up (Sphere Normal) to ensure correct Yaw
+                const axis = this._poolAxis.copy(this.position).normalize();
+                const rot = this._poolTempQuat.setFromAxisAngle(axis, this.currentTurnSpeed * dt);
+                this.headingQuaternion.premultiply(rot);
+            }
         }
 
         // 2. Handle Movement (Local Z Axis)
-        const forwardLocal = new THREE.Vector3(0, 0, 1);
-        const forwardWorld = forwardLocal.applyQuaternion(this.headingQuaternion).normalize();
+        const forwardWorld = this._poolMoveDir.set(0, 0, 1).applyQuaternion(this.headingQuaternion).normalize();
 
 
         // === WATER BEHAVIOR (Delegated) ===
@@ -1903,7 +2266,7 @@ export class Unit {
                         this.bounceVelocity = Math.abs(adjustedDist) / (1 / 60) * 0.2; // Reduced from 0.5 for gentler shake
                         this.bounceCooldown = 0.5;
                         finalPos = oldPos; // DON'T move toward rock
-                        console.log('[Unit] Rock collision (keyboard)! Bouncing back on path...');
+                        if (window.game?._isDevMode) console.log('[Unit] Rock collision (keyboard)! Bouncing back on path...');
                     }
                     // If no collision, finalPos stays as calculated (normal movement)
                 }
@@ -1953,26 +2316,27 @@ export class Unit {
         // 2. Rotate to match Terrain Normal (Tilt).
 
         // Heading basis (Sphere space)
-        const visualHeadingForward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.headingQuaternion).normalize();
+        const visualHeadingForward = this._poolForward.set(0, 0, 1).applyQuaternion(this.headingQuaternion).normalize();
 
         // Construct Basis aligned to Terrain Normal but facing Heading
         const up = terrainNormal;
 
         // Project Heading Forward onto Terrain Plane
-        let forward = visualHeadingForward.clone().sub(up.clone().multiplyScalar(visualHeadingForward.dot(up))).normalize();
+        const dotVU = visualHeadingForward.dot(up);
+        const forward = this._poolOrthoFwd.copy(visualHeadingForward).sub(this._poolTempDir.copy(up).multiplyScalar(dotVU)).normalize();
 
         // Calculate Right (Up x Forward)
-        const right = new THREE.Vector3().crossVectors(up, forward).normalize();
+        const right = this._poolRight.crossVectors(up, forward).normalize();
 
         // Re-calculate Forward to ensure orthogonality (Forward = Right x Up)
         forward.crossVectors(right, up).normalize();
 
         // Create Target Rotation Matrix
-        const m = new THREE.Matrix4().makeBasis(right, up, forward);
-        const targetQuat = new THREE.Quaternion().setFromRotationMatrix(m);
+        const m = this._poolRotMatrix.makeBasis(right, up, forward);
+        const targetQuat = this._poolTargetQuat.setFromRotationMatrix(m);
 
-        // Smoothly rotate mesh towards target (visual smoothing during sim tick)
-        this.mesh.quaternion.slerp(targetQuat, 0.2);
+        // Smoothly rotate mesh towards target (dt-independent visual smoothing)
+        this.mesh.quaternion.slerp(targetQuat, 1.0 - Math.pow(0.001, dt));
 
         // R008: Removed direct mesh.position.copy(this.position)
         // Mesh position is now set by applyInterpolatedRender() for smooth 60fps motion.
@@ -2343,8 +2707,13 @@ export class Unit {
         const n0 = this.planet.terrain.getNormalAt(this.position);
 
         // Sample radius (footprint size)
-        // Sample radius (footprint size)
         const radius = this.smoothingRadius;
+
+        // headingQuaternion may not be initialized yet (before first WASD input)
+        if (!this.headingQuaternion) {
+            return n0;
+        }
+
         const basis = SphericalMath.getBasis(this.headingQuaternion);
 
         // Sample 4 points around
@@ -2452,7 +2821,7 @@ export class Unit {
                 // Enter water -> Switch to Slowing
                 this.waterState = 'slowing';
                 this.waterEntryVector = this.headingQuaternion.clone(); // Remember entry direction? Or just velocity?
-                console.log("Water: Entering -> Slowing down...");
+                if (window.game?._isDevMode) console.log("Water: Entering -> Slowing down...");
             }
             return moveInput; // Allow control
         }
@@ -2479,7 +2848,7 @@ export class Unit {
                 // Save current position as water entry position
                 this.waterEntryPosition = this.position.clone();
                 
-                console.log(`Water: Stopped. Will reverse to shore.`);
+                if (window.game?._isDevMode) console.log(`Water: Stopped. Will reverse to shore.`);
                 return 0;
             }
             return effectiveInput;
@@ -2502,7 +2871,7 @@ export class Unit {
                 this.waterState = 'normal';
                 this.waterSlowdownFactor = 1.0;
                 this.isWaterPushing = false;
-                console.log(`Water: Reached shore. Control restored.`);
+                if (window.game?._isDevMode) console.log(`Water: Reached shore. Control restored.`);
                 return 0;
             }
             
@@ -2565,9 +2934,9 @@ export class Unit {
                 // FIX: Restore path following if we had a path before water entry
                 if (this.path && this.path.length > 0) {
                     this.isFollowingPath = true;
-                    console.log("Water: Recovered. Path following restored.");
+                    if (window.game?._isDevMode) console.log("Water: Recovered. Path following restored.");
                 } else {
-                    console.log("Water: Recovered. No path to resume.");
+                    if (window.game?._isDevMode) console.log("Water: Recovered. No path to resume.");
                 }
                 return 0;
             }
@@ -2873,6 +3242,10 @@ export class Unit {
         // CHECK TOGGLE (Optimization: Don't spawn if invisible)
         if (Unit.enableDust === false) return;
 
+        // Cap total particles per unit to prevent accumulation
+        const MAX_DUST_PER_UNIT = 40;
+        if (this.dustParticles && this.dustParticles.length >= MAX_DUST_PER_UNIT) return;
+
         // CHECK UNDERWATER (User Request: No dust in water)
         if (this.isUnderwater) return;
 
@@ -2929,9 +3302,9 @@ export class Unit {
             // - Normal: Slower than before.
             // - Special Half: Even slower.
             // User Request: 4 second lifetime
-            let lifeTime = 4.0; // Fixed 4 second duration
+            let lifeTime = 2.0; // Reduced from 4.0 to prevent particle buildup
             if (isSlowOne) {
-                lifeTime *= 1.5; // Some even longer
+                lifeTime *= 1.3; // Slightly longer for variation
             }
 
             if (!this.dustParticles) this.dustParticles = [];
@@ -2952,15 +3325,30 @@ export class Unit {
     updateDustParticles(dt) {
         if (!this.dustParticles) return;
 
+        // Clean up all particles if dust is disabled
+        if (Unit.enableDust === false && this.dustParticles.length > 0) {
+            for (const p of this.dustParticles) {
+                if (p.mesh) {
+                    if (this.dustGroup) this.dustGroup.remove(p.mesh);
+                    if (p.mesh.geometry) p.mesh.geometry.dispose();
+                    if (p.mesh.material) p.mesh.material.dispose();
+                    p.mesh = null;
+                }
+            }
+            this.dustParticles = [];
+            return;
+        }
+
         for (let i = this.dustParticles.length - 1; i >= 0; i--) {
             const p = this.dustParticles[i];
             p.age += dt;
 
             if (p.age >= p.lifetime) {
                 if (p.mesh) {
-                    this.scene.remove(p.mesh);
+                    this.dustGroup.remove(p.mesh);
                     if (p.mesh.geometry) p.mesh.geometry.dispose();
                     if (p.mesh.material) p.mesh.material.dispose();
+                    p.mesh = null;
                 }
                 this.dustParticles.splice(i, 1);
                 continue;
@@ -3029,19 +3417,34 @@ export class Unit {
                 // Color Logic
                 if (this.isSelected) {
                     // Selected: Solid Blue, slight pulse
-                    this.glowMaterial.color.setHex(0x00d4ff);
+                    // Color handled by shader gradient
                     const pulse = 0.8 + 0.2 * Math.sin(this.timeAccumulator * 3.0);
-                    this.glowMaterial.opacity = this.selectionIntensity * 0.4 * pulse;
+                    if (this.glowMaterial.uniforms) {
+                        this.glowMaterial.uniforms.uOpacity.value = this.selectionIntensity * 0.4 * pulse;
+                        this.glowMaterial.uniforms.uTime.value = performance.now() * 0.001;
+                    } else {
+                        this.glowMaterial.opacity = this.selectionIntensity * 0.4 * pulse;
+                    }
                 } else if (this.isHovered) {
                     // Hovered: Lighter/Cyan, faster pulse
-                    this.glowMaterial.color.setHex(0xAAFFFF);
+                    // Color handled by shader gradient
                     const pulse = 0.6 + 0.4 * Math.sin(this.timeAccumulator * 8.0); // Fast pulse
-                    this.glowMaterial.opacity = this.selectionIntensity * 0.3 * pulse; // Lower opacity
+                    if (this.glowMaterial.uniforms) {
+                        this.glowMaterial.uniforms.uOpacity.value = this.selectionIntensity * 0.3 * pulse;
+                        this.glowMaterial.uniforms.uTime.value = performance.now() * 0.001;
+                    } else {
+                        this.glowMaterial.opacity = this.selectionIntensity * 0.3 * pulse;
+                    } // Lower opacity
                 }
 
                 // Rotation (Slow spin)
                 this.glowRing.rotation.z += dt * 0.2;
             }
+        }
+
+        // Bug #5 fix: Sync overhead green indicator with selection state
+        if (this._myUnitIndicatorSprite) {
+            this._myUnitIndicatorSprite.visible = this.isSelected;
         }
     }
 
@@ -3076,6 +3479,100 @@ export class Unit {
     }
 
     /**
+     * Generate a smooth Bezier transition arc from current position to a path rejoin point.
+     * Used when auto-rejoining path after keyboard override.
+     *
+     * Creates a cubic Bezier curve that:
+     * - Starts at the unit's current position with tangent matching current heading
+     * - Ends at the path rejoin point with tangent matching the path direction there
+     * - Projects all points onto the terrain surface
+     *
+     * @param {number} targetIdx - Index in this.path to rejoin at
+     */
+    _generateRejoinArc(targetIdx) {
+        if (!this.path || targetIdx >= this.path.length || targetIdx < 0) return;
+
+        const startPos = this.position.clone();
+        const endPos = this.path[targetIdx].clone();
+        const distance = startPos.distanceTo(endPos);
+
+        // If already very close, no arc needed - just resume directly
+        if (distance < 0.5) return;
+
+        // Start tangent: current heading direction (where the unit is facing)
+        const startTangent = new THREE.Vector3();
+        if (this.velocityDirection && this.velocityDirection.lengthSq() > 0.001) {
+            startTangent.copy(this.velocityDirection).normalize();
+        } else if (this.headingQuaternion) {
+            startTangent.set(0, 0, 1).applyQuaternion(this.headingQuaternion).normalize();
+        } else {
+            // Fallback: direction toward rejoin point
+            startTangent.copy(endPos).sub(startPos).normalize();
+        }
+
+        // End tangent: path direction at the rejoin point (look a few points ahead)
+        const endTangent = new THREE.Vector3();
+        const pathLen = this.path.length;
+        let lookIdx = targetIdx + 6; // ~3 meters ahead on path
+        if (this.isPathClosed || this.loopingEnabled) {
+            lookIdx = lookIdx % pathLen;
+        } else {
+            lookIdx = Math.min(lookIdx, pathLen - 1);
+        }
+
+        if (lookIdx !== targetIdx) {
+            endTangent.copy(this.path[lookIdx]).sub(this.path[targetIdx]).normalize();
+        } else {
+            // At end of path, use direction from previous point
+            const prevIdx = Math.max(0, targetIdx - 3);
+            endTangent.copy(this.path[targetIdx]).sub(this.path[prevIdx]).normalize();
+        }
+
+        // Cubic Bezier control points
+        // Scale tangent influence by distance for natural-looking curves
+        const tangentScale = distance * 0.35;
+        const cp1 = startPos.clone().addScaledVector(startTangent, tangentScale);
+        const cp2 = endPos.clone().addScaledVector(endTangent, -tangentScale);
+
+        // Sample the Bezier curve into discrete points
+        // More samples for longer distances (minimum 8, ~2 points per meter)
+        const numSamples = Math.max(8, Math.ceil(distance * 2));
+        const transPath = [];
+
+        for (let i = 1; i <= numSamples; i++) {
+            const t = i / numSamples;
+            const it = 1 - t;
+
+            // Cubic Bezier: B(t) = (1-t)^3*P0 + 3(1-t)^2*t*P1 + 3(1-t)*t^2*P2 + t^3*P3
+            const point = new THREE.Vector3();
+            point.addScaledVector(startPos, it * it * it);
+            point.addScaledVector(cp1, 3 * it * it * t);
+            point.addScaledVector(cp2, 3 * it * t * t);
+            point.addScaledVector(endPos, t * t * t);
+
+            // Project point onto terrain surface
+            if (this.planet && this.planet.terrain) {
+                const dir = point.clone().normalize();
+                const terrainRadius = this.planet.terrain.getRadiusAt(dir);
+                const groundOffset = this.groundOffset || 0.22;
+                point.copy(dir.multiplyScalar(terrainRadius + groundOffset));
+            }
+
+            transPath.push(point);
+        }
+
+        // Activate transition arc system
+        this.transitionPath = transPath;
+        this.transitionIndex = 0;
+        this.isInTransition = true;
+        this.transitionVelocityDir = startTangent.clone();
+
+        if (window.game?._isDevMode) {
+            console.log(`[Unit ${this.id}] Rejoin arc: ${transPath.length} points, ${distance.toFixed(1)}m`);
+        }
+    }
+
+    /**
      * Calculate a detour around the obstacle to a point further ahead.
      */
     replanPath(pathPlanner) {
@@ -3093,6 +3590,55 @@ export class Unit {
             this.transitionVelocityDir = this.velocityDirection.clone();
             
             // console.log("Detour found:", newPath.length, "points");
+        }
+    }
+
+    /**
+     * Check for collision with other units and apply mutual bounce.
+     * Both units get pushed apart when they're within collision radius.
+     * @param {Unit[]} allUnits - Array of all units in the game
+     */
+    checkUnitCollisions(allUnits) {
+        if (this.isBouncing || this.bounceCooldown > 0) return; // Already bouncing
+        
+        const COLLISION_RADIUS = 1.5; // Distance threshold for collision
+        const BOUNCE_STRENGTH = 3.0;  // Initial bounce velocity
+        
+        for (const other of allUnits) {
+            if (!other || other === this) continue;
+            if (other.isBouncing || other.bounceCooldown > 0) continue;
+            
+            const dist = this.position.distanceTo(other.position);
+            if (dist < COLLISION_RADIUS && dist > 0.01) {
+                // Calculate bounce directions (apart from each other)
+                // On a sphere, use the tangent plane direction
+                const sphereNormal = this.position.clone().normalize();
+                
+                // Direction from other to this (push this unit away)
+                const pushDir = this.position.clone().sub(other.position);
+                // Project onto tangent plane
+                const dot = pushDir.dot(sphereNormal);
+                pushDir.sub(sphereNormal.clone().multiplyScalar(dot)).normalize();
+                
+                // Apply bounce to THIS unit
+                this.bounceDirection = pushDir;
+                this.bounceVelocity = BOUNCE_STRENGTH;
+                this.bounceCooldown = 0.5;
+                this.bounceLockTimer = 0;
+                
+                // Apply bounce to OTHER unit (opposite direction)
+                const otherPushDir = pushDir.clone().negate();
+                other.bounceDirection = otherPushDir;
+                other.bounceVelocity = BOUNCE_STRENGTH;
+                other.bounceCooldown = 0.5;
+                other.bounceLockTimer = 0;
+                
+                if (window.game?._isDevMode) {
+                    console.log(`[Unit] Collision: Unit ${this.id} <-> Unit ${other.id} at dist ${dist.toFixed(2)}m`);
+                }
+                
+                break; // Only handle one collision per frame
+            }
         }
     }
 }

@@ -290,6 +290,9 @@ export class SupabaseTransport extends TransportBase {
                     commands: batch
                 }
             });
+
+            // R013: Track outbound for diagnostics
+            this._cmdsSentTotal = (this._cmdsSentTotal || 0) + batch.length;
         } catch (err) {
             console.error('[SupabaseTransport] Send failed:', err);
             // Re-queue failed commands (front of batch for ordering)
@@ -306,12 +309,21 @@ export class SupabaseTransport extends TransportBase {
         const { clientId, commands } = payload.payload || {};
 
         if (!commands || !Array.isArray(commands)) {
+            // R013: Debug - log unexpected payload structure
+            console.warn('[SupabaseTransport] Broadcast with no commands. payload keys:', Object.keys(payload || {}), 'payload.payload keys:', Object.keys(payload?.payload || {}));
             return;
         }
 
         // If echoLocal is false, skip our own commands
         if (!this._echoLocal && clientId === this._clientId) {
             return;
+        }
+
+        // R013: Track inbound for diagnostics
+        const isRemote = clientId !== this._clientId;
+        this._cmdsRecvTotal = (this._cmdsRecvTotal || 0) + commands.length;
+        if (isRemote) {
+            this._cmdsRecvRemote = (this._cmdsRecvRemote || 0) + commands.length;
         }
 
         // Deliver each command to the receive callback
@@ -344,6 +356,21 @@ export class SupabaseTransport extends TransportBase {
      */
     get clientId() {
         return this._clientId;
+    }
+
+    /**
+     * R013: Get command flow diagnostics for HUD display.
+     * @returns {{ sent: number, recvTotal: number, recvRemote: number, state: string }}
+     */
+    getCmdDiagnostics() {
+        return {
+            sent: this._cmdsSentTotal || 0,
+            recvTotal: this._cmdsRecvTotal || 0,
+            recvRemote: this._cmdsRecvRemote || 0,
+            state: this._state,
+            room: this._room,
+            clientId: this._clientId ? this._clientId.substring(0, 8) : 'N/A'
+        };
     }
 
     /**

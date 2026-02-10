@@ -97,6 +97,12 @@ export function serializeUnit(unit) {
         id: unit.id,
         name: unit.name,
         ownerSlot: unit.ownerSlot ?? 0, // R013 M07: Ownership tracking
+        ownerHistory: (unit.ownerHistory || []).map(entry => ({
+            slot: entry.slot,
+            previousSlot: entry.previousSlot,
+            acquiredAt: entry.acquiredAt,
+            method: entry.method
+        })),
         // M07 Unit Authority v0: selectedBySlot is the canonical field name
         // seatPinDigit is Host-only, intentionally NOT serialized (privacy)
         selectedBySlot: unit.selectedBySlot ?? null, // null = empty seat (AI/Idle)

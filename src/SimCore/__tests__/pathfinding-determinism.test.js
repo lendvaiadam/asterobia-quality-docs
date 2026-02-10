@@ -5,8 +5,10 @@
  * 1. Synchronous (no async/Promise in hot path)
  * 2. Deterministic (same inputs → same output, 100 runs)
  *
- * Run: node --experimental-vm-modules src/SimCore/__tests__/pathfinding-determinism.test.js
+ * Run: npx vitest run src/SimCore/__tests__/pathfinding-determinism.test.js
  */
+
+import { describe, it, expect } from 'vitest';
 
 // ============ Minimal Test NavMesh (No Three.js dependency) ============
 
@@ -206,180 +208,130 @@ class TestNavMesh {
     }
 }
 
-// ============ Test Framework ============
-
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-    try {
-        fn();
-        console.log(`✓ ${name}`);
-        passed++;
-    } catch (err) {
-        console.log(`✗ ${name}`);
-        console.log(`  Error: ${err.message}`);
-        failed++;
-    }
-}
-
-function assertEqual(actual, expected, msg = '') {
-    if (actual !== expected) {
-        throw new Error(`${msg} Expected ${expected}, got ${actual}`);
-    }
-}
-
-function assertArrayEqual(actual, expected, msg = '') {
-    if (actual.length !== expected.length) {
-        throw new Error(`${msg} Array length mismatch: ${actual.length} vs ${expected.length}`);
-    }
-    for (let i = 0; i < actual.length; i++) {
-        if (actual[i] !== expected[i]) {
-            throw new Error(`${msg} Array[${i}] mismatch: ${actual[i]} vs ${expected[i]}`);
-        }
-    }
-}
-
 // ============ Tests ============
 
-test('A* finds path on simple grid', () => {
-    const mesh = new TestNavMesh(10, 10);
-    const result = mesh.findPath(0, 99); // Top-left to bottom-right
+describe('Pathfinding Determinism (R009)', () => {
+    it('A* finds path on simple grid', () => {
+        const mesh = new TestNavMesh(10, 10);
+        const result = mesh.findPath(0, 99); // Top-left to bottom-right
 
-    assertEqual(result.success, true, 'path found');
-    assertEqual(result.path[0], 0, 'starts at 0');
-    assertEqual(result.path[result.path.length - 1], 99, 'ends at 99');
-});
+        expect(result.success).toBe(true);
+        expect(result.path[0]).toBe(0);
+        expect(result.path[result.path.length - 1]).toBe(99);
+    });
 
-test('A* handles obstacles', () => {
-    const mesh = new TestNavMesh(10, 10);
-    // Add a wall blocking direct path
-    mesh.addObstacle(4, 0, 4, 8);
+    it('A* handles obstacles', () => {
+        const mesh = new TestNavMesh(10, 10);
+        // Add a wall blocking direct path
+        mesh.addObstacle(4, 0, 4, 8);
 
-    const result = mesh.findPath(0, 9);
+        const result = mesh.findPath(0, 9);
 
-    assertEqual(result.success, true, 'path around obstacle');
-    // Path should not contain any node in column 4 (rows 0-8)
-    for (const idx of result.path) {
-        const x = idx % 10;
-        const y = Math.floor(idx / 10);
-        if (x === 4 && y <= 8) {
-            throw new Error(`Path contains obstacle node (${x}, ${y})`);
+        expect(result.success).toBe(true);
+        // Path should not contain any node in column 4 (rows 0-8)
+        for (const idx of result.path) {
+            const x = idx % 10;
+            const y = Math.floor(idx / 10);
+            if (x === 4 && y <= 8) {
+                expect.fail(`Path contains obstacle node (${x}, ${y})`);
+            }
         }
-    }
-});
+    });
 
-test('A* returns failure for blocked goal', () => {
-    const mesh = new TestNavMesh(10, 10);
-    mesh.nodes[99].walkable = false; // Block goal
+    it('A* returns failure for blocked goal', () => {
+        const mesh = new TestNavMesh(10, 10);
+        mesh.nodes[99].walkable = false; // Block goal
 
-    const result = mesh.findPath(0, 99);
+        const result = mesh.findPath(0, 99);
 
-    assertEqual(result.success, false, 'no path to blocked goal');
-});
+        expect(result.success).toBe(false);
+    });
 
-test('DETERMINISM: 100 identical runs produce identical paths', () => {
-    // Create a complex scenario with multiple obstacles
-    const createMesh = () => {
+    it('DETERMINISM: 100 identical runs produce identical paths', () => {
+        // Create a complex scenario with multiple obstacles
+        const createMesh = () => {
+            const mesh = new TestNavMesh(20, 20);
+            mesh.addObstacle(5, 0, 5, 15);  // Vertical wall
+            mesh.addObstacle(10, 5, 10, 19); // Another wall
+            mesh.addObstacle(15, 0, 15, 10); // Third wall
+            return mesh;
+        };
+
+        const startIdx = 0;
+        const goalIdx = 399; // Bottom-right
+
+        // First run - establish baseline
+        const mesh1 = createMesh();
+        const baseline = mesh1.findPath(startIdx, goalIdx);
+
+        expect(baseline.success).toBe(true);
+
+        // Run 100 times, verify identical
+        for (let i = 0; i < 100; i++) {
+            const mesh = createMesh();
+            const result = mesh.findPath(startIdx, goalIdx);
+
+            expect(result.success).toBe(baseline.success);
+            expect(result.iterations).toBe(baseline.iterations);
+            expect(result.path).toEqual(baseline.path);
+        }
+    });
+
+    it('DETERMINISM: Same obstacle pattern, same result regardless of call order', () => {
+        // Create mesh with obstacles
+        const mesh = new TestNavMesh(15, 15);
+        mesh.addObstacle(3, 3, 3, 12);
+        mesh.addObstacle(7, 0, 7, 9);
+        mesh.addObstacle(11, 5, 11, 14);
+
+        // Multiple pathfinding requests
+        const paths = {
+            topLeftToBottomRight: mesh.findPath(0, 224),
+            topRightToBottomLeft: mesh.findPath(14, 210),
+            centerToCorner: mesh.findPath(112, 0)
+        };
+
+        // Run again and verify identical
+        const mesh2 = new TestNavMesh(15, 15);
+        mesh2.addObstacle(3, 3, 3, 12);
+        mesh2.addObstacle(7, 0, 7, 9);
+        mesh2.addObstacle(11, 5, 11, 14);
+
+        const paths2 = {
+            topLeftToBottomRight: mesh2.findPath(0, 224),
+            topRightToBottomLeft: mesh2.findPath(14, 210),
+            centerToCorner: mesh2.findPath(112, 0)
+        };
+
+        for (const key of Object.keys(paths)) {
+            expect(paths[key].success).toBe(paths2[key].success);
+            expect(paths[key].path).toEqual(paths2[key].path);
+        }
+    });
+
+    it('A* is synchronous (no Promise return)', () => {
+        const mesh = new TestNavMesh(10, 10);
+        const result = mesh.findPath(0, 99);
+
+        // Verify result is NOT a Promise
+        const isPromise = result && typeof result.then === 'function';
+        expect(isPromise).toBe(false);
+        expect(typeof result.success).toBe('boolean');
+        expect(Array.isArray(result.path)).toBe(true);
+    });
+
+    it('ITERATION COUNT: Same inputs = same iteration count', () => {
         const mesh = new TestNavMesh(20, 20);
-        mesh.addObstacle(5, 0, 5, 15);  // Vertical wall
-        mesh.addObstacle(10, 5, 10, 19); // Another wall
-        mesh.addObstacle(15, 0, 15, 10); // Third wall
-        return mesh;
-    };
+        mesh.addObstacle(8, 0, 8, 18);
 
-    const startIdx = 0;
-    const goalIdx = 399; // Bottom-right
+        const results = [];
+        for (let i = 0; i < 50; i++) {
+            results.push(mesh.findPath(0, 399));
+        }
 
-    // First run - establish baseline
-    const mesh1 = createMesh();
-    const baseline = mesh1.findPath(startIdx, goalIdx);
-
-    if (!baseline.success) {
-        throw new Error('Baseline path failed');
-    }
-
-    // Run 100 times, verify identical
-    for (let i = 0; i < 100; i++) {
-        const mesh = createMesh();
-        const result = mesh.findPath(startIdx, goalIdx);
-
-        assertEqual(result.success, baseline.success, `Run ${i}: success`);
-        assertEqual(result.iterations, baseline.iterations, `Run ${i}: iterations`);
-        assertArrayEqual(result.path, baseline.path, `Run ${i}: path`);
-    }
+        const baseIterations = results[0].iterations;
+        for (let i = 1; i < results.length; i++) {
+            expect(results[i].iterations).toBe(baseIterations);
+        }
+    });
 });
-
-test('DETERMINISM: Same obstacle pattern, same result regardless of call order', () => {
-    // Create mesh with obstacles
-    const mesh = new TestNavMesh(15, 15);
-    mesh.addObstacle(3, 3, 3, 12);
-    mesh.addObstacle(7, 0, 7, 9);
-    mesh.addObstacle(11, 5, 11, 14);
-
-    // Multiple pathfinding requests
-    const paths = {
-        topLeftToBottomRight: mesh.findPath(0, 224),
-        topRightToBottomLeft: mesh.findPath(14, 210),
-        centerToCorner: mesh.findPath(112, 0)
-    };
-
-    // Run again and verify identical
-    const mesh2 = new TestNavMesh(15, 15);
-    mesh2.addObstacle(3, 3, 3, 12);
-    mesh2.addObstacle(7, 0, 7, 9);
-    mesh2.addObstacle(11, 5, 11, 14);
-
-    const paths2 = {
-        topLeftToBottomRight: mesh2.findPath(0, 224),
-        topRightToBottomLeft: mesh2.findPath(14, 210),
-        centerToCorner: mesh2.findPath(112, 0)
-    };
-
-    for (const key of Object.keys(paths)) {
-        assertEqual(paths[key].success, paths2[key].success, `${key} success`);
-        assertArrayEqual(paths[key].path, paths2[key].path, `${key} path`);
-    }
-});
-
-test('A* is synchronous (no Promise return)', () => {
-    const mesh = new TestNavMesh(10, 10);
-    const result = mesh.findPath(0, 99);
-
-    // Verify result is NOT a Promise
-    const isPromise = result && typeof result.then === 'function';
-    assertEqual(isPromise, false, 'result is not Promise');
-    assertEqual(typeof result.success, 'boolean', 'has success boolean');
-    assertEqual(Array.isArray(result.path), true, 'has path array');
-});
-
-test('ITERATION COUNT: Same inputs = same iteration count', () => {
-    const mesh = new TestNavMesh(20, 20);
-    mesh.addObstacle(8, 0, 8, 18);
-
-    const results = [];
-    for (let i = 0; i < 50; i++) {
-        results.push(mesh.findPath(0, 399));
-    }
-
-    const baseIterations = results[0].iterations;
-    for (let i = 1; i < results.length; i++) {
-        assertEqual(results[i].iterations, baseIterations, `Run ${i} iteration count`);
-    }
-});
-
-// ============ Summary ============
-
-console.log('\n=== Pathfinding Determinism Tests (R009) ===\n');
-
-console.log(`\n${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-    console.error(`\n✗ ${failed} Pathfinding Determinism tests FAILED`);
-} else {
-    console.log('\n✓ All Pathfinding Determinism tests PASS');
-    console.log('\nPROOF OF DETERMINISM:');
-    console.log('  - A* algorithm produces identical paths across 100 runs');
-    console.log('  - Iteration count is consistent (no timing variance)');
-    console.log('  - No Promise/async in return path');
-}

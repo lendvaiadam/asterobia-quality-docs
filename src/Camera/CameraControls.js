@@ -132,10 +132,11 @@ export class CameraControls {
             this.targetHeading = this.dragStartHeading - deltaX * this.rotateSpeed;
             this.targetPitch = this.dragStartPitch - deltaY * this.rotateSpeed;
 
-            // Clamp Pitch
+            // Clamp Pitch with dynamic upper limit based on altitude
             // -90 deg (-PI/2) is top down. 0 is horizon.
-            // Let's allow -89 to -10?
-            this.targetPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(-0.1, this.targetPitch));
+            // When close to planet, restrict more; when far, allow more horizontal.
+            const maxPitch = this.getMaxPitch();
+            this.targetPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(maxPitch, this.targetPitch));
         }
     }
 
@@ -188,6 +189,19 @@ export class CameraControls {
         event.preventDefault();
     }
 
+    // Dynamic pitch upper limit based on altitude.
+    // Close to ground (small radius) -> more restricted (more top-down).
+    // Far out (large radius) -> more freedom to look horizontally.
+    // Returns the maximum (least negative) pitch allowed.
+    getMaxPitch() {
+        const altFraction = Math.min(1.0, Math.max(0.0,
+            (this.targetRadius - this.minAltitude) / (this.maxAltitude - this.minAltitude)
+        ));
+        // At max altitude (altFraction=1): allow up to -0.15 (nearly horizontal)
+        // At min altitude (altFraction=0): restrict to -0.45 (about 26 degrees from horizon)
+        return -0.15 - (1.0 - altFraction) * 0.3;
+    }
+
     update() {
         // Damping
         const dt = this.dampingFactor;
@@ -213,6 +227,15 @@ export class CameraControls {
         this.radius += (this.targetRadius - this.radius) * dt;
         this.heading += (this.targetHeading - this.heading) * dt;
         this.pitch += (this.targetPitch - this.pitch) * dt;
+
+        // Safety: re-clamp pitch after damping in case zoom changed altitude
+        const maxPitch = this.getMaxPitch();
+        if (this.targetPitch > maxPitch) {
+            this.targetPitch = maxPitch;
+        }
+        if (this.pitch > maxPitch) {
+            this.pitch = maxPitch;
+        }
 
         this.updateCameraPosition();
     }

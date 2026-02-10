@@ -21,14 +21,19 @@ export class SeatKeypadOverlay {
         this.game = game;
         this._visible = false;
         this._overlay = null;
+        this._keypadBox = null;
         this._buttonsContainer = null;
         this._feedbackArea = null;
         this._titleElement = null;
+        this._closeButton = null;
         this._cancelButton = null;
         this._countdownInterval = null;
         this._onSubmit = null;
         this._targetUnitId = null;
         this._buttonsDisabled = false;
+
+        // Bound handler for document-level keydown (added on show, removed on hide)
+        this._boundDocKeyDown = this._handleDocKeyDown.bind(this);
 
         this._createOverlay();
     }
@@ -58,6 +63,7 @@ export class SeatKeypadOverlay {
         // Keypad container (centered box)
         const keypadBox = document.createElement('div');
         keypadBox.style.cssText = `
+            position: relative;
             background: rgba(30, 30, 30, 0.95);
             border: 2px solid #444;
             border-radius: 12px;
@@ -65,6 +71,45 @@ export class SeatKeypadOverlay {
             min-width: 220px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
         `;
+        this._keypadBox = keypadBox;
+
+        // Close (X) button in top-right corner
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = '\u00D7'; // multiplication sign, visually an X
+        closeBtn.setAttribute('aria-label', 'Close keypad');
+        closeBtn.style.cssText = `
+            position: absolute;
+            top: 6px;
+            right: 8px;
+            width: 28px;
+            height: 28px;
+            font-size: 20px;
+            line-height: 1;
+            background: transparent;
+            color: #888;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: color 0.15s, background 0.15s;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        `;
+        closeBtn.addEventListener('mouseenter', () => {
+            closeBtn.style.color = '#fff';
+            closeBtn.style.background = 'rgba(255, 80, 80, 0.4)';
+        });
+        closeBtn.addEventListener('mouseleave', () => {
+            closeBtn.style.color = '#888';
+            closeBtn.style.background = 'transparent';
+        });
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.hide();
+        });
+        this._closeButton = closeBtn;
+        keypadBox.appendChild(closeBtn);
 
         // Title
         const title = document.createElement('div');
@@ -152,15 +197,12 @@ export class SeatKeypadOverlay {
         overlay.addEventListener('mouseup', (e) => e.stopPropagation());
         overlay.addEventListener('wheel', (e) => e.stopPropagation());
 
-        // Keyboard support
-        overlay.addEventListener('keydown', (e) => {
-            e.stopPropagation();
-            if (e.key === 'Escape') {
-                this.hide();
-            } else if (e.key >= '1' && e.key <= '9' && !this._buttonsDisabled) {
-                this._handleDigitClick(parseInt(e.key, 10));
-            }
-        });
+        // Make overlay focusable for focus-trap
+        overlay.tabIndex = -1;
+
+        // Note: keyboard handling is done via a document-level listener
+        // that is added/removed in show()/hide() for proper focus trapping
+        // and to intercept keys before Game.js window-level handlers.
 
         document.body.appendChild(overlay);
         this._overlay = overlay;
@@ -230,6 +272,36 @@ export class SeatKeypadOverlay {
     }
 
     /**
+     * Document-level keydown handler - active only while keypad is visible.
+     * Uses capture phase + stopImmediatePropagation to intercept keys before
+     * Game.js window-level handlers (ESC deselect, WASD movement, etc.).
+     * @private
+     * @param {KeyboardEvent} e
+     */
+    _handleDocKeyDown(e) {
+        if (!this._visible) return;
+
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            this.hide();
+            return;
+        }
+
+        if (e.key >= '1' && e.key <= '9') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (!this._buttonsDisabled) {
+                this._handleDigitClick(parseInt(e.key, 10));
+            }
+            return;
+        }
+
+        // Block all other keys from reaching game handlers while keypad is open
+        e.stopImmediatePropagation();
+    }
+
+    /**
      * Shows the keypad overlay
      * @param {string} targetUnitId - ID of the unit being unlocked
      * @param {function} onSubmit - Callback called with digit (1-9) when user clicks a button
@@ -243,8 +315,10 @@ export class SeatKeypadOverlay {
         this._overlay.style.display = 'flex';
         this._visible = true;
 
-        // Focus the overlay for keyboard input
-        this._overlay.tabIndex = -1;
+        // Attach document-level key listener (capture phase to intercept before Game.js)
+        document.addEventListener('keydown', this._boundDocKeyDown, true);
+
+        // Focus the overlay for keyboard input (focus trap)
         this._overlay.focus();
     }
 
@@ -252,6 +326,9 @@ export class SeatKeypadOverlay {
      * Hides the keypad overlay
      */
     hide() {
+        // Remove document-level key listener to prevent leaks
+        document.removeEventListener('keydown', this._boundDocKeyDown, true);
+
         this._overlay.style.display = 'none';
         this._visible = false;
         this._onSubmit = null;
@@ -362,14 +439,20 @@ export class SeatKeypadOverlay {
      * Destroy the overlay and clean up resources
      */
     destroy() {
+        // Remove document-level listener if still active
+        document.removeEventListener('keydown', this._boundDocKeyDown, true);
+
         this._stopCountdown();
         if (this._overlay && this._overlay.parentNode) {
             this._overlay.parentNode.removeChild(this._overlay);
         }
         this._overlay = null;
+        this._keypadBox = null;
         this._buttonsContainer = null;
         this._feedbackArea = null;
+        this._closeButton = null;
         this._onSubmit = null;
+        this._boundDocKeyDown = null;
     }
 }
 

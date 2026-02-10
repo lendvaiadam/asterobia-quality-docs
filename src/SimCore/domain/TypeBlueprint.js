@@ -50,9 +50,10 @@ export const BLUEPRINT_SCHEMA_VERSION = 1;
 export class TypeBlueprint {
     /**
      * @param {Partial<TypeBlueprintData>} data - Initial data
+     * @param {number} [tick=0] - Simulation tick for deterministic timestamps
      */
-    constructor(data = {}) {
-        const now = Date.now();
+    constructor(data = {}, tick = 0) {
+        const now = tick || 0;
         
         /** @type {string} */
         this.id = data.id || generateUUID();
@@ -118,31 +119,33 @@ export class TypeBlueprint {
 
     /**
      * Set a feature allocation
-     * @param {string} featureId 
+     * @param {string} featureId
      * @param {number} allocation - 0.0 to 1.0
+     * @param {number} [tick=0] - Simulation tick for deterministic timestamps
      */
-    setAllocation(featureId, allocation) {
+    setAllocation(featureId, allocation, tick = 0) {
         if (allocation <= 0) {
             delete this.allocations[featureId];
             delete this.subAllocations[featureId];
         } else {
             this.allocations[featureId] = allocation;
         }
-        this.updatedAt = Date.now();
+        this.updatedAt = tick || 0;
     }
 
     /**
      * Set sub-allocation for a feature
-     * @param {string} featureId 
+     * @param {string} featureId
      * @param {Object<string, number>} subAlloc - e.g. { range: 0.33, power: 0.33, rate: 0.34 }
+     * @param {number} [tick=0] - Simulation tick for deterministic timestamps
      */
-    setSubAllocation(featureId, subAlloc) {
+    setSubAllocation(featureId, subAlloc, tick = 0) {
         if (subAlloc && Object.keys(subAlloc).length > 0) {
             this.subAllocations[featureId] = { ...subAlloc };
         } else {
             delete this.subAllocations[featureId];
         }
-        this.updatedAt = Date.now();
+        this.updatedAt = tick || 0;
     }
 
     /**
@@ -185,22 +188,24 @@ export class TypeBlueprint {
 
     /**
      * Create a deep clone
+     * @param {number} [tick=0] - Simulation tick for deterministic timestamps
      * @returns {TypeBlueprint}
      */
-    clone() {
+    clone(tick = 0) {
         const cloned = new TypeBlueprint(this.serialize());
         cloned.id = generateUUID(); // New ID for clone
-        cloned.createdAt = Date.now();
-        cloned.updatedAt = Date.now();
+        cloned.createdAt = tick || 0;
+        cloned.updatedAt = tick || 0;
         cloned.isSeed = false; // Clones are not seeds
         return cloned;
     }
 
     /**
-     * Mark as updated (sets updatedAt to now)
+     * Mark as updated (sets updatedAt to given tick)
+     * @param {number} [tick=0] - Simulation tick for deterministic timestamps
      */
-    touch() {
-        this.updatedAt = Date.now();
+    touch(tick = 0) {
+        this.updatedAt = tick || 0;
     }
 }
 

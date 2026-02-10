@@ -54,10 +54,11 @@
 - **Completed**: M01, M02, M03, M04, M05 (Guest Lobby Discovery) — MERGED
 - **Verified**: M05 HU-TEST PASS (Host appears in list, disappears after 15s prune).
 - **Previous Step**: M06 (Join Request Handshake) — **CLOSED** (HU-TEST PASS)
-- **Current Step**: M07-Slice1 (Transport → Queue) — **IN PROGRESS**
-- **Focus**: Verify `CMD_BATCH` integrity, sequencing, and queuing (No Execution).
-- **Fallback Policy**: M06 (Handshake) closure ACCEPTABLE with Fallback Snapshot. M07 (Game Loop) BLOCKED until Full Snapshot works.
-- **CTO Ping #1**: APPROVED (2026-02-04)
+- **Current Step**: M07-NB0 (Phase 0 Scaffolding) — **VERIFIED** (Audit PASS 2026-02-10)
+- **Next Step**: M07-NB1 (Phase 1 Minimal Loop) — **READY**
+- **Focus**: Implement WebSocket Transport and real-time loop.
+- **Fallback Policy**: M06 (Handshake) closure ACCEPTABLE.
+- **CTO Ping #1**: APPROVED (2026-02-10)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
 - **Test State**: Vitest installed. 101 tests passed. 14 empty suites. M06 relying on HU-TEST.
 

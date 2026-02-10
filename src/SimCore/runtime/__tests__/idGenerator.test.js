@@ -1,11 +1,10 @@
 /**
  * Determinism tests for IdGenerator.
  *
- * Run in browser console:
- *   import('./src/SimCore/runtime/__tests__/idGenerator.test.js')
- *     .then(m => m.runAllTests())
+ * Run: npx vitest run
  */
 
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
     nextEntityId,
     peekEntityId,
@@ -13,134 +12,60 @@ import {
     setEntityIdCounter
 } from '../IdGenerator.js';
 
-/**
- * Test: IDs are sequential integers starting from 1
- */
-function testSequentialIds() {
-    resetEntityIdCounter();
+describe('IdGenerator', () => {
+    beforeEach(() => {
+        resetEntityIdCounter();
+    });
 
-    const id1 = nextEntityId();
-    const id2 = nextEntityId();
-    const id3 = nextEntityId();
+    it('produces sequential integer IDs starting from 1', () => {
+        const id1 = nextEntityId();
+        const id2 = nextEntityId();
+        const id3 = nextEntityId();
 
-    if (id1 !== 1 || id2 !== 2 || id3 !== 3) {
-        throw new Error(`Expected 1,2,3 but got ${id1},${id2},${id3}`);
-    }
+        expect(id1).toBe(1);
+        expect(id2).toBe(2);
+        expect(id3).toBe(3);
+        expect(Number.isInteger(id1)).toBe(true);
+        expect(Number.isInteger(id2)).toBe(true);
+        expect(Number.isInteger(id3)).toBe(true);
+    });
 
-    if (!Number.isInteger(id1) || !Number.isInteger(id2) || !Number.isInteger(id3)) {
-        throw new Error('IDs must be integers');
-    }
+    it('resets counter back to 0 so next ID is 1', () => {
+        nextEntityId();
+        nextEntityId();
 
-    console.log('✓ testSequentialIds passed');
-    return true;
-}
+        resetEntityIdCounter();
+        const afterReset = nextEntityId();
 
-/**
- * Test: Reset counter returns to 0
- */
-function testResetCounter() {
-    resetEntityIdCounter();
-    nextEntityId();
-    nextEntityId();
+        expect(afterReset).toBe(1);
+    });
 
-    resetEntityIdCounter();
-    const afterReset = nextEntityId();
+    it('peek does not increment the counter', () => {
+        nextEntityId(); // 1
+        nextEntityId(); // 2
 
-    if (afterReset !== 1) {
-        throw new Error(`Expected 1 after reset, got ${afterReset}`);
-    }
+        const peek1 = peekEntityId();
+        const peek2 = peekEntityId();
+        const next = nextEntityId(); // 3
 
-    console.log('✓ testResetCounter passed');
-    return true;
-}
+        expect(peek1).toBe(2);
+        expect(peek2).toBe(2);
+        expect(next).toBe(3);
+    });
 
-/**
- * Test: Peek doesn't increment counter
- */
-function testPeekCounter() {
-    resetEntityIdCounter();
-    nextEntityId(); // 1
-    nextEntityId(); // 2
+    it('setCounter advances the counter to a specific value', () => {
+        setEntityIdCounter(100);
 
-    const peek1 = peekEntityId();
-    const peek2 = peekEntityId();
-    const next = nextEntityId(); // 3
+        const id = nextEntityId();
+        expect(id).toBe(101);
+    });
 
-    if (peek1 !== 2 || peek2 !== 2 || next !== 3) {
-        throw new Error(`Peek should not increment: peek=${peek1},${peek2} next=${next}`);
-    }
+    it('produces identical sequences after reset (deterministic replay)', () => {
+        const run1 = [nextEntityId(), nextEntityId(), nextEntityId()];
 
-    console.log('✓ testPeekCounter passed');
-    return true;
-}
+        resetEntityIdCounter();
+        const run2 = [nextEntityId(), nextEntityId(), nextEntityId()];
 
-/**
- * Test: Set counter to specific value
- */
-function testSetCounter() {
-    resetEntityIdCounter();
-    setEntityIdCounter(100);
-
-    const id = nextEntityId();
-    if (id !== 101) {
-        throw new Error(`Expected 101 after setCounter(100), got ${id}`);
-    }
-
-    console.log('✓ testSetCounter passed');
-    return true;
-}
-
-/**
- * Test: Deterministic replay (same sequence after reset)
- */
-function testDeterministicReplay() {
-    resetEntityIdCounter();
-    const run1 = [nextEntityId(), nextEntityId(), nextEntityId()];
-
-    resetEntityIdCounter();
-    const run2 = [nextEntityId(), nextEntityId(), nextEntityId()];
-
-    if (JSON.stringify(run1) !== JSON.stringify(run2)) {
-        throw new Error(`Runs not identical: ${run1} vs ${run2}`);
-    }
-
-    console.log('✓ testDeterministicReplay passed');
-    return true;
-}
-
-/**
- * Run all tests
- */
-export function runAllTests() {
-    console.log('=== IdGenerator Determinism Tests ===');
-    let passed = 0;
-    let failed = 0;
-
-    const tests = [
-        testSequentialIds,
-        testResetCounter,
-        testPeekCounter,
-        testSetCounter,
-        testDeterministicReplay,
-    ];
-
-    for (const test of tests) {
-        try {
-            test();
-            passed++;
-        } catch (err) {
-            console.error(`✗ ${test.name} FAILED:`, err.message);
-            failed++;
-        }
-    }
-
-    // Cleanup
-    resetEntityIdCounter();
-
-    console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
-    return { passed, failed };
-}
-
-if (typeof window !== 'undefined') {
-    console.log('IdGenerator tests loaded. Call runAllTests() to execute.');
-}
+        expect(JSON.stringify(run1)).toBe(JSON.stringify(run2));
+    });
+});

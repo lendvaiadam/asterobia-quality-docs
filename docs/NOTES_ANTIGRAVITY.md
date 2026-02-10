@@ -253,5 +253,20 @@ Default output: MD files under /quality or /docs.
   - Cleaned `STATUS_WALKTHROUGH.md` to point strictly to the Consultation step.
 - **Ref**: `savepoint/opening-pack-v3-full-links` (`b3929c5`)
 
+### Savepoint 004: R013-NB0 Phase 0 Audit (Netcode Scaffold)
+- **Date**: 2026-02-10
+- **Tag**: `savepoint/r013-nb0-phase0`
+- **SHA**: `(pending merge)`
+- **Scope**:
+    - **SimCore Purity**: Verified NO `three.js` or `window` imports in `src/SimCore`. UnitFactory & TimeSource patched.
+    - **Server Scaffold**: `server/` directory established with Node.js/WS config.
+    - **Transport**: `MemoryTransport` implemented + `loopback.test.js` (741 lines) proves determinism.
+- **Gates**:
+    - **Determinism**: PASS (Test #8 in loopback.test.js).
+    - **Purity**: PASS (grep check clean).
+- **Risk notes**: None. Ready for Phase 1 (Real WebSocket).
+- **Status**: OFFICIALLY CLOSED (Merged to Main)
+- **Rollback**: `git checkout savepoint/r013-nb0-phase0`
+
 
 

@@ -273,6 +273,7 @@ describe('SessionManager Discovery (M05)', () => {
       expect(entry).toEqual({
         hostId: 'host-abc',
         sessionName: 'My Game',
+        hostDisplayName: 'My Game',
         playerCount: 2,
         maxPlayers: 6,
         mapSeed: 'seed-xyz',

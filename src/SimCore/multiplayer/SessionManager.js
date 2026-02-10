@@ -10,8 +10,10 @@
 import { SessionState, PlayerStatus } from './SessionState.js';
 import { NetworkRole, canStep, sendsInputsToNetwork, broadcastsState } from './NetworkRole.js';
 import { MSG, PROTOCOL_VERSION } from './MessageTypes.js';
-import { createHostAnnounce, createJoinReq, createJoinAckAccepted, createJoinAckRejected, createCmdBatch, createSeatReq, createSeatAck, createSeatReject } from './MessageSerializer.js';
+import { createHostAnnounce, createJoinReq, createJoinAckAccepted, createJoinAckRejected, createCmdBatch, createSeatReq, createSeatAck, createSeatReject, createSeatRelease, createHostLeave, createGuestLeave } from './MessageSerializer.js';
 import { globalCommandQueue, CommandType } from '../runtime/CommandQueue.js';
+// NOTE: Do NOT import 'three' here - SessionManager runs in Node tests.
+// Vector3 reconstruction happens in Game.js via onPositionSync callback.
 
 /**
  * R013 Constants
@@ -37,6 +39,14 @@ const MAX_QUEUE_SIZE = 200;
 
 // M07 GAP-0: Seat cooldown levels (progressive backoff)
 const SEAT_COOLDOWN_LEVELS = [250, 500, 1000, 2000]; // ms, capped at 2000
+// Tick-based equivalents (50ms/tick): [5, 10, 20, 40] ticks
+const SIM_TICK_MS = 50;
+const SEAT_COOLDOWN_TICKS = SEAT_COOLDOWN_LEVELS.map(ms => Math.round(ms / SIM_TICK_MS));
+
+// Host-leave resilience constants
+const HOST_ABSENCE_TIMEOUT_MS = 15000;  // No HOST_ANNOUNCE for 15s = host absent
+const HOST_MIGRATION_GRACE_MS = 3000;   // Wait 3s grace period before promoting
+const HOST_ABSENCE_CHECK_INTERVAL_MS = 2000; // Check for host absence every 2s
 
 /**
  * SessionManager - Central multiplayer coordinator
@@ -209,6 +219,16 @@ export class SessionManager {
     // Key: `${requesterSlot}_${targetUnitId}`, Value: { until: timestamp, level: 0-3 }
     this._seatCooldowns = new Map();
 
+    // Host-leave resilience state (Guest-side)
+    /** @type {number|null} Timestamp of last HOST_ANNOUNCE received */
+    this._hostLastSeenAt = null;
+    /** @type {boolean} Whether migration grace period is active */
+    this._migrationGraceActive = false;
+    /** @type {number|null} Timestamp when grace period started */
+    this._migrationGraceStartedAt = null;
+    /** @type {number|null} Interval ID for host absence checking */
+    this._hostAbsenceCheckInterval = null;
+
     // Bind methods for callbacks
     this._onTransportMessage = this._onTransportMessage.bind(this);
   }
@@ -263,7 +283,7 @@ export class SessionManager {
     }
 
     // Transition to HOST state
-    this.state.setAsHost(clientId, sessionName);
+    this.state.setAsHost(clientId, sessionName, this.game.playerName);
     this.sessionName = sessionName;
 
     // R013-M04: Join lobby channel and start announcing
@@ -334,9 +354,12 @@ export class SessionManager {
       return;
     }
 
+    // Host-leave resilience: after migration, the Host may not be slot 0
+    const hostPlayer = this.state.getPlayer(this.state.mySlot) || this.state.getPlayer(0);
     const msg = createHostAnnounce({
       hostId: this.state.hostId,
       sessionName: this.sessionName,
+      hostDisplayName: hostPlayer?.displayName || this.game.playerName || 'Host',
       mapSeed: this.game.mapSeed || 'default-seed',
       simTick: this.game.simLoop?.tickCount || 0,
       currentPlayers: this.state.players.length,
@@ -345,6 +368,15 @@ export class SessionManager {
 
     try {
       await this.transport.broadcastToChannel(LOBBY_CHANNEL, msg);
+
+      // Also broadcast HOST_ANNOUNCE on the session channel so in-session
+      // Guests can track host presence for host-leave resilience.
+      // Without this, Guests that are NOT on the lobby channel would never
+      // receive HOST_ANNOUNCE and would falsely trigger host migration.
+      if (this._sessionChannel) {
+        await this.transport.broadcastToChannel(this._sessionChannel, msg);
+      }
+
       console.log(`[SessionManager] HOST_ANNOUNCE sent (tick: ${msg.simTick}, players: ${msg.currentPlayers}/${msg.maxPlayers})`);
     } catch (err) {
       console.error('[SessionManager] Failed to send announce:', err);
@@ -413,7 +445,7 @@ export class SessionManager {
         seq: entry.seq,
         command: entry.command
       })),
-      stateHash: null  // Optional: implement in Slice 2
+      stateHash: this.game._lastStateHash || null  // Slice 2: determinism verification
     });
 
     try {
@@ -440,6 +472,79 @@ export class SessionManager {
       // Retrying logic is complex, for Slice 1 we might skip decrementing seq and just retry sends?
       // Or just drop.
       // Simplest: Don't modify inputBuffer if fail.
+    }
+  }
+
+  /**
+   * Send authoritative unit positions to all guests (Host-side).
+   * Called periodically from SimLoop or game tick to keep guest-side
+   * unit positions in sync with the Host's authoritative state.
+   * @returns {Promise<void>}
+   */
+  async sendPositionSync() {
+    // Only Host sends position sync
+    if (!this.state.isHost()) return;
+    if (!this.transport || !this._sessionChannel) return;
+
+    const units = this.game.units;
+    if (!units || units.length === 0) return;
+
+    const currentTick = this.game.simLoop?.tickCount || 0;
+
+    // Build full state array for all units (position + rotation + path state)
+    const unitStates = [];
+    for (const unit of units) {
+        if (!unit) continue;
+        const entry = {
+            id: unit.id,
+            // Position
+            px: unit.position.x,
+            py: unit.position.y,
+            pz: unit.position.z,
+            // Rotation (mesh quaternion)
+            qx: unit.mesh?.quaternion?.x || 0,
+            qy: unit.mesh?.quaternion?.y || 0,
+            qz: unit.mesh?.quaternion?.z || 0,
+            qw: unit.mesh?.quaternion?.w || 1,
+            // Path-following state
+            fp: unit.isFollowingPath ? 1 : 0,
+            pi: unit.pathIndex || 0,
+            pc: unit.isPathClosed ? 1 : 0,
+            kb: unit.isKeyboardOverriding ? 1 : 0
+        };
+        // Include path points (compact: flat array of x,y,z triples)
+        if (unit.path && unit.path.length > 0) {
+            const flatPath = [];
+            for (const p of unit.path) {
+                flatPath.push(p.x, p.y, p.z);
+            }
+            entry.pp = flatPath;
+        }
+        // Include waypoint commands (compact: type + position)
+        if (unit.commands && unit.commands.length > 0) {
+            entry.cmds = unit.commands.map(c => ({
+                t: c.type,
+                s: c.status,
+                px: c.params?.position?.x,
+                py: c.params?.position?.y,
+                pz: c.params?.position?.z
+            }));
+        }
+        unitStates.push(entry);
+    }
+
+    try {
+        await this.transport.broadcastToChannel(this._sessionChannel, {
+            type: 'POSITION_SYNC',
+            tick: currentTick,
+            units: unitStates,
+            timestamp: Date.now()
+        });
+        this._debugCounters.positionSyncSentCount = (this._debugCounters.positionSyncSentCount || 0) + 1;
+    } catch (err) {
+        if (this.game._isDevMode) {
+            console.warn('[SM] POSITION_SYNC send failed:', err.message);
+        }
     }
   }
 
@@ -573,6 +678,7 @@ export class SessionManager {
     }
 
     console.log(`[SessionManager] Joining host: ${hostId}`);
+    console.log(`[SessionManager] Transport: ${this.transport?.constructor?.name || 'NONE'}, channels: ${this.transport?._channels?.size ?? 'N/A'}`);
 
     // M06: Join host's session channel
     const sessionChannel = `asterobia:session:${hostId}`;
@@ -583,6 +689,14 @@ export class SessionManager {
     } catch (err) {
       console.error('[SessionManager] Failed to join session channel:', err);
       throw err;
+    }
+
+    // R013: Stabilization delay - Supabase Realtime needs a brief moment after
+    // SUBSCRIBED status before broadcast messages reliably propagate to all members.
+    // Without this, JOIN_REQ may be sent before the Host's channel sees the Guest.
+    await new Promise(resolve => setTimeout(resolve, 500));
+    if (this.game._isDevMode) {
+      console.log('[SessionManager] Channel stabilization delay complete, sending JOIN_REQ');
     }
 
     // M06: Create and send JOIN_REQ
@@ -612,10 +726,17 @@ export class SessionManager {
     return new Promise((resolve, reject) => {
       this.pendingJoin = { resolve, reject, hostId, clientId };
 
-      // Timeout after 10s
       const timeoutId = setTimeout(() => {
         if (this.pendingJoin) {
-          console.log('[SessionManager] Join timeout - no response from host');
+          const debugInfo = {
+            hostId: this.pendingJoin.hostId,
+            clientId: this.pendingJoin.clientId,
+            sessionChannel: this._sessionChannel,
+            channelJoined: this.transport?.isJoinedToChannel?.(this._sessionChannel) ?? 'unknown',
+            joinReqsSent: this._debugJoinReqSentCount || 0,
+            joinAcksRecv: this._debugJoinAckRecvCount || 0
+          };
+          console.error('[SessionManager] Join timeout - no response from host. Debug:', debugInfo);
           this.pendingJoin = null;
           // Cleanup session channel
           if (this._sessionChannel) {
@@ -636,7 +757,43 @@ export class SessionManager {
   // ========================================
 
   /**
-   * Leave the current session and reset state
+   * Gracefully leave the current session.
+   * Broadcasts HOST_LEAVE or GUEST_LEAVE to remaining players, then tears down.
+   * Call this from UI instead of leaveGame() so other players are notified immediately.
+   * @returns {Promise<void>}
+   */
+  async gracefulLeaveGame() {
+    // Broadcast leave message BEFORE tearing down channels
+    if (this.transport && this._sessionChannel && typeof this.transport.broadcastToChannel === 'function') {
+      try {
+        if (this.state.isHost()) {
+          const msg = createHostLeave({ hostId: this.state.hostId });
+          await this.transport.broadcastToChannel(this._sessionChannel, msg);
+          if (this.game._isDevMode) {
+            console.log('[SM] HOST_LEAVE broadcast sent');
+          }
+        } else if (this.state.isGuest()) {
+          const msg = createGuestLeave({ slot: this.state.mySlot });
+          await this.transport.broadcastToChannel(this._sessionChannel, msg);
+          if (this.game._isDevMode) {
+            console.log('[SM] GUEST_LEAVE broadcast sent');
+          }
+        }
+      } catch (err) {
+        if (this.game._isDevMode) {
+          console.warn('[SM] Failed to broadcast leave message:', err);
+        }
+      }
+    }
+
+    // Now do the full teardown
+    this.leaveGame();
+  }
+
+  /**
+   * Leave the current session and reset state.
+   * Low-level teardown - does NOT broadcast a leave message.
+   * Use gracefulLeaveGame() from UI to notify other players before disconnecting.
    */
   leaveGame() {
     console.log('[SessionManager] Leaving game...');
@@ -646,6 +803,9 @@ export class SessionManager {
 
     // M05: Stop discovery if active
     this.stopDiscovery();
+
+    // Stop host absence checking
+    this._stopHostAbsenceCheck();
 
     // Clear ping interval
     if (this.pingInterval) {
@@ -683,6 +843,11 @@ export class SessionManager {
       this.pendingJoin = null;
     }
 
+    // Reset host-leave resilience state
+    this._hostLastSeenAt = null;
+    this._migrationGraceActive = false;
+    this._migrationGraceStartedAt = null;
+
     // Reset state
     this.state.reset();
     this.sessionName = null;
@@ -710,6 +875,27 @@ export class SessionManager {
 
     // Update heartbeat timing
     this.state.touch();
+
+    // Host-leave resilience: Track host presence from ANY message type
+    // on the session channel. CMD_BATCH, JOIN_ACK, SEAT_ACK etc. all prove host is alive.
+    if (this.state.isGuest() && this._hostLastSeenAt !== null) {
+      // Only certain message types come from the Host
+      const hostMessageTypes = [
+        MSG.HOST_ANNOUNCE, MSG.JOIN_ACK, MSG.CMD_BATCH,
+        MSG.SNAPSHOT, MSG.RESYNC_ACK, MSG.SEAT_ACK, MSG.SEAT_REJECT
+      ];
+      if (hostMessageTypes.includes(msg.type)) {
+        this._hostLastSeenAt = Date.now();
+        // Cancel grace period if host is back
+        if (this._migrationGraceActive) {
+          this._migrationGraceActive = false;
+          this._migrationGraceStartedAt = null;
+          if (this.game._isDevMode) {
+            console.log('[SM] Host presence restored via message - cancelling migration grace');
+          }
+        }
+      }
+    }
 
     // Route based on message type
     switch (msg.type) {
@@ -770,6 +956,23 @@ export class SessionManager {
         this._handleSeatReject(msg);
         break;
 
+      case MSG.SEAT_RELEASE:
+        this._handleSeatRelease(msg);
+        break;
+
+      // Host-leave resilience
+      case MSG.HOST_LEAVE:
+        this._handleHostLeave(msg);
+        break;
+
+      case MSG.GUEST_LEAVE:
+        this._handleGuestLeave(msg);
+        break;
+
+      case MSG.POSITION_SYNC:
+        this._handlePositionSync(msg);
+        break;
+
       default:
         console.warn(`[SessionManager] Unknown message type: ${msg.type}`);
     }
@@ -787,10 +990,11 @@ export class SessionManager {
 
   /**
    * M05: Handle HOST_ANNOUNCE message for guest discovery
+   * Host presence tracking for in-session guests is handled centrally in onMessage().
    * @param {Object} msg - HOST_ANNOUNCE message
    */
   _handleHostAnnounce(msg) {
-    // Only process if discovery is active
+    // Only process discovery logic if discovery is active
     if (!this._discoveryActive) {
       return;
     }
@@ -820,6 +1024,7 @@ export class SessionManager {
     this.availableHosts.set(msg.hostId, {
       hostId: msg.hostId,
       sessionName: msg.sessionName,
+      hostDisplayName: msg.hostDisplayName || msg.sessionName,
       playerCount: msg.currentPlayers ?? 1,
       maxPlayers: msg.maxPlayers ?? 4,
       mapSeed: msg.mapSeed ?? '',
@@ -882,6 +1087,7 @@ export class SessionManager {
    */
   async _doHandleJoinReq(msg) {
     // 1. Protocol version validation
+    console.log(`[SessionManager] JOIN_REQ version check: msg=${msg.protocolVersion}, expected=${PROTOCOL_VERSION}`);
     if (msg.protocolVersion !== PROTOCOL_VERSION) {
       console.log(`[SessionManager] JOIN_REQ rejected: version mismatch (${msg.protocolVersion} !== ${PROTOCOL_VERSION})`);
       await this._sendJoinAck(msg.guestId, false, null, 'VERSION_MISMATCH');
@@ -997,10 +1203,15 @@ export class SessionManager {
       status: PlayerStatus.ACTIVE
     });
 
-    // 7. Send JOIN_ACK with snapshot
-    await this._sendJoinAck(msg.guestId, true, slot, null, simTick, fullSnapshot);
+    // 7. Send JOIN_ACK with snapshot (include host display name for Guest HUD)
+    const hostPlayer = this.state.getPlayer(0) || this.state.getPlayer(this.state.mySlot);
+    const hostDisplayName = hostPlayer?.displayName || this.game.playerName || 'Host';
+    await this._sendJoinAck(msg.guestId, true, slot, null, simTick, fullSnapshot, hostDisplayName);
 
     console.log(`[SessionManager] Guest ${msg.displayName} joined as slot ${slot}`);
+
+    // Notify Host-side UI that a guest connected (triggers overlay hide, tab refresh)
+    this._notifyConnectionStateChanged('HOSTING');
   }
 
   /**
@@ -1013,7 +1224,7 @@ export class SessionManager {
    * @param {number|null} simTick - Current sim tick (if accepted)
    * @param {Object|null} fullSnapshot - Game state snapshot (if accepted)
    */
-  async _sendJoinAck(guestId, accepted, slot = null, reason = null, simTick = null, fullSnapshot = null) {
+  async _sendJoinAck(guestId, accepted, slot = null, reason = null, simTick = null, fullSnapshot = null, hostDisplayName = null) {
     if (!this.transport || typeof this.transport.broadcastToChannel !== 'function') {
       console.warn('[SessionManager] Cannot send JOIN_ACK: no transport');
       return;
@@ -1029,7 +1240,8 @@ export class SessionManager {
       msg = createJoinAckAccepted({
         assignedSlot: slot,
         simTick,
-        fullSnapshot
+        fullSnapshot,
+        hostDisplayName
       });
     } else {
       msg = createJoinAckRejected(reason);
@@ -1069,8 +1281,8 @@ export class SessionManager {
     const { resolve, reject, hostId, clientId } = this.pendingJoin;
 
     if (msg.accepted) {
-      // M06: Transition to GUEST state
-      this.state.setAsGuest(hostId, msg.assignedSlot, clientId, this.game.playerName || 'Guest');
+      // M06: Transition to GUEST state (pass host display name for HUD)
+      this.state.setAsGuest(hostId, msg.assignedSlot, clientId, this.game.playerName || 'Guest', msg.hostDisplayName);
 
       // M06: Apply snapshot if provided
       if (msg.fullSnapshot && this.game.stateSurface) {
@@ -1084,6 +1296,10 @@ export class SessionManager {
           console.error('[SessionManager] Failed to apply snapshot:', err);
         }
       }
+
+      // Host-leave resilience: Start tracking host presence
+      this._hostLastSeenAt = Date.now();
+      this._startHostAbsenceCheck();
 
       this._notifyConnectionStateChanged('CONNECTED');
       console.log(`[SessionManager] Joined as Guest (slot ${msg.assignedSlot})`);
@@ -1207,11 +1423,13 @@ export class SessionManager {
       // Slice 1: Log warning and continue (M07 spec: "process anyway")
     }
 
-    // 4. Stale batch check: Drop if scheduledTick is too old (ORD-03)
+    // 4. If batch is for current or past tick, execute immediately (don't drop)
     if (msg.scheduledTick <= currentTick) {
-      this._debugCounters.batchDropStaleCount++;
-      console.warn(`[SM] CMD_BATCH dropped (stale): scheduledTick=${msg.scheduledTick} <= currentTick=${currentTick}`);
-      return;
+      // Late batch - reschedule to next tick instead of dropping
+      msg.scheduledTick = currentTick + 1;
+      if (this.game._isDevMode) {
+        console.warn(`[SM] CMD_BATCH late: rescheduled to tick ${msg.scheduledTick}`);
+      }
     }
 
     // 5. Very old batch check: Drop if way behind (ORD-05)
@@ -1229,9 +1447,9 @@ export class SessionManager {
     const commands = msg.commands || [];
 
     // GAP-3: Enforce Queue Limit
-    // Check globalCommandQueue pending count
-    if (globalCommandQueue.pendingCount + commands.length > MAX_QUEUE_SIZE) {
-        console.warn(`[SM] Queue Full! Dropping Batch ${msg.batchSeq} (${commands.length} cmds). Pending: ${globalCommandQueue.pendingCount}`);
+    const cmdQueue = this.game?.commandQueue || globalCommandQueue;
+    if (cmdQueue.pendingCount + commands.length > MAX_QUEUE_SIZE) {
+        console.warn(`[SM] Queue Full! Dropping Batch ${msg.batchSeq} (${commands.length} cmds). Pending: ${cmdQueue.pendingCount}`);
         this._debugCounters.batchDroppedQueueFull++;
         return;
     }
@@ -1250,12 +1468,20 @@ export class SessionManager {
         _fromHost: true           // Mark as Host-authoritative
       };
 
-      globalCommandQueue.enqueue(enrichedCmd, msg.scheduledTick);
+      cmdQueue.enqueue(enrichedCmd, msg.scheduledTick);
       this._debugCounters.cmdEnqueuedCount++;
     }
 
-    // 8. Log for HU-TEST evidence
-    console.log(`[SM] CMD_BATCH recv: seq=${msg.batchSeq}, tick=${msg.simTick}->${msg.scheduledTick}, cmds=${commands.length}, queueSize=${globalCommandQueue.pendingCount}`);
+    // 8. Slice 2: State hash comparison for determinism verification
+    if (msg.stateHash && this.game._lastStateHash) {
+      const match = msg.stateHash === this.game._lastStateHash;
+      if (!match && this.game._isDevMode) {
+        console.warn(`[SessionManager] StateHash MISMATCH at tick ${msg.simTick}! Host: ${msg.stateHash.substring(0, 30)} vs Local: ${this.game._lastStateHash.substring(0, 30)}`);
+      }
+    }
+
+    // 9. Log for HU-TEST evidence
+    console.log(`[SM] CMD_BATCH recv: seq=${msg.batchSeq}, tick=${msg.simTick}->${msg.scheduledTick}, cmds=${commands.length}, queueSize=${cmdQueue.pendingCount}`);
   }
 
   _handleSnapshot(msg) {
@@ -1319,7 +1545,16 @@ export class SessionManager {
       return;
     }
 
-    // 2. FIRST CHECK: OCCUPIED - If unit has a driver and it's not the requester, reject immediately
+    // 2a. ALREADY SEATED: short-circuit (M07 B2-fix: idempotent re-request)
+    if (unit.selectedBySlot === requesterSlot) {
+      if (this.game._isDevMode) {
+        console.log(`[SM] SEAT_REQ: slot=${requesterSlot} already seated on unit ${targetUnitId} (noop)`);
+      }
+      this._grantSeat(unit, requesterSlot);
+      return;
+    }
+
+    // 2b. OCCUPIED CHECK - If unit has a driver and it's not the requester, reject immediately
     // M07 Unit Authority v0: OCCUPIED denial takes priority (no keypad shown)
     if (unit.selectedBySlot !== null && unit.selectedBySlot !== requesterSlot) {
       if (this.game._isDevMode) {
@@ -1331,14 +1566,15 @@ export class SessionManager {
     }
 
     // 3. Check cooldown (progressive backoff for PIN failures)
+    // Uses tick-based timing for determinism (Issue 9).
     const cooldownKey = `${requesterSlot}_${targetUnitId}`;
     const cooldownEntry = this._seatCooldowns.get(cooldownKey);
-    const now = Date.now();
+    const currentTick = this._getSimTick();
 
-    if (cooldownEntry && now < cooldownEntry.until) {
+    if (cooldownEntry && currentTick < cooldownEntry.untilTick) {
       // Still in cooldown
       this._debugCounters.seatCooldownHitCount++;
-      const retryAfterMs = cooldownEntry.until - now;
+      const retryAfterMs = (cooldownEntry.untilTick - currentTick) * SIM_TICK_MS;
       if (this.game._isDevMode) {
         console.log(`[SM] SEAT_REQ rejected: cooldown (${retryAfterMs}ms remaining)`);
       }
@@ -1348,6 +1584,16 @@ export class SessionManager {
 
     // 4. Check seat policy
     const seatPolicy = unit.seatPolicy || 'OPEN';
+
+    // 4a. OWNER RE-ENTRY: Owner doesn't need to re-authenticate
+    if (unit.ownerSlot === requesterSlot) {
+      if (this.game._isDevMode) {
+        console.log(`[SM] SEAT_REQ: owner re-entry (slot=${requesterSlot} owns unit ${targetUnitId})`);
+      }
+      this._grantSeat(unit, requesterSlot);
+      this._seatCooldowns.delete(cooldownKey);
+      return;
+    }
 
     if (seatPolicy === 'OPEN') {
       // No challenge required - grant immediately (may be takeover)
@@ -1386,7 +1632,8 @@ export class SessionManager {
         }
         this._applySeatCooldown(cooldownKey, cooldownEntry);
         const newCooldown = this._seatCooldowns.get(cooldownKey);
-        this._sendSeatReject(targetUnitId, requesterSlot, 'BAD_PIN', newCooldown ? (newCooldown.until - now) : SEAT_COOLDOWN_LEVELS[0]);
+        const retryMs = newCooldown ? (newCooldown.untilTick - currentTick) * SIM_TICK_MS : SEAT_COOLDOWN_LEVELS[0];
+        this._sendSeatReject(targetUnitId, requesterSlot, 'BAD_PIN', retryMs);
         return;
       }
     }
@@ -1397,20 +1644,37 @@ export class SessionManager {
   }
 
   /**
-   * Apply progressive cooldown for seat requests
+   * Get current simulation tick for deterministic timing.
+   * Uses real simLoop tickCount in production; falls back to
+   * Date.now()-derived pseudo-tick for tests/standalone (Issue 9).
+   * @private
+   * @returns {number} Current tick
+   */
+  _getSimTick() {
+    const simLoop = this.game?.simLoop;
+    if (simLoop && typeof simLoop.fixedDtMs === 'number') {
+      return simLoop.tickCount || 0;
+    }
+    // Fallback: derive pseudo-tick from wall clock (compatible with vi.useFakeTimers)
+    return Math.floor(Date.now() / SIM_TICK_MS);
+  }
+
+  /**
+   * Apply progressive cooldown for seat requests.
+   * Uses tick-based timing for determinism (Issue 9).
    * @private
    */
   _applySeatCooldown(cooldownKey, currentEntry) {
-    const now = Date.now();
+    const currentTick = this._getSimTick();
     let level = 0;
 
     if (currentEntry) {
       level = Math.min(currentEntry.level + 1, SEAT_COOLDOWN_LEVELS.length - 1);
     }
 
-    const cooldownMs = SEAT_COOLDOWN_LEVELS[level];
+    const cooldownTicks = SEAT_COOLDOWN_TICKS[level];
     this._seatCooldowns.set(cooldownKey, {
-      until: now + cooldownMs,
+      untilTick: currentTick + cooldownTicks,
       level
     });
   }
@@ -1418,18 +1682,38 @@ export class SessionManager {
   /**
    * Grant seat to requester and broadcast SEAT_ACK
    * M07 Unit Authority v0: Handles takeover - sets BOTH ownerSlot and selectedBySlot.
+   *
+   * DETERMINISM NOTE (Audit Issue #5):
+   * Direct mutation of unit.selectedBySlot and unit.ownerSlot outside the
+   * CommandQueue is intentional and determinism-safe for these reasons:
+   *
+   * - selectedBySlot: Per-client visual/authority state (like SELECT/DESELECT).
+   *   The Host sets it locally here, then broadcasts SEAT_ACK to ALL clients.
+   *   All clients apply the identical mutation in _handleSeatAck(), so state
+   *   converges across all peers.
+   *
+   * - ownerSlot (takeover case): Economic/authority state change. The Host is
+   *   the single authority that decides takeover. The SEAT_ACK broadcast
+   *   includes newOwnerSlot, and ALL clients apply the same ownerSlot mutation
+   *   in _handleSeatAck(). Since only the Host can grant seats (SEAT_REQ is
+   *   Host-only), there is no race condition - all clients see the same
+   *   SEAT_ACK and converge to the same state.
+   *
    * @private
    */
   async _grantSeat(unit, requesterSlot) {
     const prevOwner = unit.ownerSlot;
     const isTakeover = unit.selectedBySlot === null && unit.ownerSlot !== requesterSlot;
 
-    // M07: On successful seat grant, update BOTH fields
+    // M07: On successful seat grant, update BOTH fields (Host-authoritative, broadcast below)
     unit.selectedBySlot = requesterSlot;
 
     // M07: If this is a takeover (empty seat + different owner), transfer ownership
     if (isTakeover) {
       unit.ownerSlot = requesterSlot;
+      if (unit.recordOwnershipChange) {
+        unit.recordOwnershipChange(requesterSlot, prevOwner, this.game.simLoop?.tickCount || 0, 'PIN_CAPTURE');
+      }
       this._logOwnershipChange(unit, prevOwner, requesterSlot, 'TAKEOVER');
     }
 
@@ -1521,6 +1805,16 @@ export class SessionManager {
   /**
    * Handle SEAT_ACK message (Both sides)
    * M07 Unit Authority v0: Updates unit.selectedBySlot and unit.ownerSlot
+   *
+   * DETERMINISM NOTE (Audit Issue #5):
+   * This handler runs on ALL clients (Host + all Guests) when SEAT_ACK is
+   * broadcast. Every client applies the identical selectedBySlot and ownerSlot
+   * mutations from the same authoritative message, ensuring state convergence.
+   * This is analogous to how SELECT/DESELECT are per-client visual state -
+   * the difference is that seat state is synchronized via broadcast rather
+   * than being purely local. The Host is the single authority (via _grantSeat)
+   * so there are no conflicting mutations.
+   *
    * @param {Object} msg - SEAT_ACK message
    */
   _handleSeatAck(msg) {
@@ -1531,10 +1825,16 @@ export class SessionManager {
     const unit = this.game.units?.find(u => u && u.id === targetUnitId);
 
     if (unit) {
+      // Direct mutation from network handler - determinism-safe because ALL
+      // clients receive the same SEAT_ACK and apply the same values.
       unit.selectedBySlot = effectiveSelectedBy;
       // M07: Update ownerSlot if newOwnerSlot is provided (takeover case)
       if (newOwnerSlot !== undefined && newOwnerSlot !== null) {
+        const prevOwner = unit.ownerSlot;
         unit.ownerSlot = newOwnerSlot;
+        if (prevOwner !== newOwnerSlot && unit.recordOwnershipChange) {
+          unit.recordOwnershipChange(newOwnerSlot, prevOwner, this.game.simLoop?.tickCount || 0, 'PIN_CAPTURE');
+        }
       }
       if (this.game._isDevMode) {
         console.log(`[SM] SEAT_ACK recv: unit ${targetUnitId} -> selectedBySlot=${effectiveSelectedBy}, ownerSlot=${unit.ownerSlot}`);
@@ -1565,6 +1865,12 @@ export class SessionManager {
                        reason === 'COOLDOWN' ? 'Too fast!' :
                        reason === 'OCCUPIED' ? 'Occupied' : 'Locked';
       this.game.seatKeypadOverlay.showError(errorMsg, retryAfterMs || 0);
+    } else {
+      // Keypad not visible - show toast feedback so rejection isn't silent
+      const unit = this.game.units?.find(u => u && u.id === targetUnitId);
+      if (this.game.interactionManager && unit) {
+        this.game.interactionManager._showOccupiedFeedback(unit, reason);
+      }
     }
   }
 
@@ -1598,17 +1904,407 @@ export class SessionManager {
   }
 
   /**
+   * Broadcast seat claim to all clients when a player selects a unit.
+   * Called from Game.selectUnit() so other clients see OCCUPIED.
+   * Re-uses SEAT_ACK message format (same effect: sets selectedBySlot on all clients).
+   * @param {Object} unit - The unit being claimed
+   * @param {number} slot - The slot claiming the seat
+   */
+  async broadcastSeatClaim(unit, slot) {
+    if (!unit || !this.transport || !this._sessionChannel) return;
+
+    const ack = createSeatAck({
+      targetUnitId: unit.id,
+      selectedBySlot: slot,
+      newOwnerSlot: unit.ownerSlot
+    });
+
+    try {
+      await this.transport.broadcastToChannel(this._sessionChannel, ack);
+      if (this.game._isDevMode) {
+        console.log(`[SM] broadcastSeatClaim: unit=${unit.id}, slot=${slot}`);
+      }
+    } catch (err) {
+      console.error('[SM] Failed to broadcast seat claim:', err);
+    }
+  }
+
+  /**
+   * Release seat on a unit and broadcast SEAT_RELEASE to all clients.
+   * Called from Game.deselectUnit() when a player exits a unit.
+   *
+   * DETERMINISM NOTE (Audit Issue #5):
+   * selectedBySlot is per-client visual/authority state. The releasing client
+   * clears it locally and broadcasts SEAT_RELEASE. All other clients apply
+   * the same null-assignment in _handleSeatRelease(), so state converges.
+   * ownerSlot is NOT changed on release (economic identity persists).
+   *
+   * @param {Object} unit - The unit to release
+   */
+  async releaseSeat(unit) {
+    if (!unit) return;
+    const mySlot = this.state.mySlot;
+
+    // Only release if we actually hold the seat
+    if (unit.selectedBySlot !== mySlot) return;
+
+    // Clear locally first (broadcast below ensures all clients converge)
+    unit.selectedBySlot = null;
+
+    if (this.game._isDevMode) {
+      console.log(`[SM] SEAT_RELEASE: slot=${mySlot} releasing unit ${unit.id}`);
+    }
+
+    // Broadcast to all clients
+    if (this.transport && this._sessionChannel) {
+      const msg = createSeatRelease({
+        targetUnitId: unit.id,
+        releasedBySlot: mySlot
+      });
+      try {
+        await this.transport.broadcastToChannel(this._sessionChannel, msg);
+      } catch (err) {
+        console.error('[SM] Failed to broadcast SEAT_RELEASE:', err);
+      }
+    }
+
+    // Notify game for tab refresh
+    if (this.game.onSeatReleased) {
+      this.game.onSeatReleased(unit.id, mySlot);
+    }
+  }
+
+  /**
+   * Handle SEAT_RELEASE message (All clients)
+   * Clears selectedBySlot on the target unit.
+   *
+   * DETERMINISM NOTE (Audit Issue #5):
+   * All clients receive SEAT_RELEASE and apply the same null-assignment,
+   * guarded by the releasedBySlot match check. This ensures convergence.
+   * Only selectedBySlot is cleared - ownerSlot persists (economic identity).
+   *
+   * @param {Object} msg - SEAT_RELEASE message
+   */
+  _handleSeatRelease(msg) {
+    const { targetUnitId, releasedBySlot } = msg;
+    const unit = this.game.units?.find(u => u && u.id === targetUnitId);
+
+    if (unit && unit.selectedBySlot === releasedBySlot) {
+      // Direct mutation from network handler - determinism-safe because ALL
+      // clients receive the same SEAT_RELEASE and apply the same null value.
+      unit.selectedBySlot = null;
+      if (this.game._isDevMode) {
+        console.log(`[SM] SEAT_RELEASE recv: unit ${targetUnitId} freed by slot ${releasedBySlot}`);
+      }
+    }
+
+    // Notify game for tab refresh
+    if (this.game.onSeatReleased) {
+      this.game.onSeatReleased(targetUnitId, releasedBySlot);
+    }
+  }
+
+  /**
+   * Handle POSITION_SYNC message (Guest-side).
+   * Applies authoritative unit positions from the Host, skipping the
+   * Guest's own currently controlled unit to avoid overriding local movement.
+   * @param {Object} msg - POSITION_SYNC message
+   */
+  _handlePositionSync(msg) {
+    if (!this.state.isGuest()) return;
+
+    const units = msg.units;
+    if (!units || !Array.isArray(units)) return;
+
+    // Delegate to Game.js which has THREE.Vector3 for path reconstruction
+    if (this.game?.applyPositionSync) {
+        this.game.applyPositionSync(msg);
+    }
+
+    // Track for diagnostics
+    this._debugCounters.positionSyncRecvCount = (this._debugCounters.positionSyncRecvCount || 0) + 1;
+  }
+
+  /**
    * M07 Unit Authority v0: Check if local client has seat on a unit
    * @param {Object} unit - Unit to check
    * @returns {boolean}
    */
   hasSeatedUnit(unit) {
     if (!unit) return false;
+    // Offline: always has authority (single player)
+    if (this.state.isOffline()) return true;
     const mySlot = this.state.mySlot;
-    // Host (slot 0) or offline always has authority
-    if (this.state.isOffline() || this.state.isHost()) return true;
-    // Guest: check selectedBySlot (canonical field)
+    // OCCUPIED by someone else -> no authority (applies to Host too)
+    if (unit.selectedBySlot !== null && unit.selectedBySlot !== mySlot) return false;
+    // Host: has authority on free or own-seated units
+    if (this.state.isHost()) return true;
+    // Guest: only if actually seated
     return unit.selectedBySlot === mySlot;
+  }
+
+  // ========================================
+  // HOST-LEAVE RESILIENCE
+  // ========================================
+
+  /**
+   * Handle HOST_LEAVE message (Guest-side).
+   * Immediately starts migration without waiting for the 15s absence timeout.
+   * @param {Object} msg - HOST_LEAVE message
+   */
+  _handleHostLeave(msg) {
+    // Only guests process HOST_LEAVE
+    if (!this.state.isGuest()) {
+      return;
+    }
+
+    // Verify this is from our Host
+    if (msg.hostId !== this.state.hostId) {
+      return;
+    }
+
+    console.log(`[SM] HOST_LEAVE received from ${msg.hostId} - starting immediate migration`);
+
+    // Remove Host (slot 0) from player list
+    this.state.removePlayer(0);
+
+    // Release any units seated by the departing host (slot 0)
+    this._releaseSeatsForSlot(0);
+
+    // Skip grace period, go straight to migration evaluation
+    this._evaluateMigration();
+  }
+
+  /**
+   * Handle GUEST_LEAVE message (Host-side and Guest-side).
+   * Removes the departing guest from the player list and releases their seats.
+   * @param {Object} msg - GUEST_LEAVE message
+   */
+  _handleGuestLeave(msg) {
+    // Don't process our own leave messages
+    if (msg.slot === this.state.mySlot) {
+      return;
+    }
+
+    // Only process if we're in a session
+    if (this.state.isOffline()) {
+      return;
+    }
+
+    if (this.game._isDevMode) {
+      console.log(`[SM] GUEST_LEAVE received: slot=${msg.slot}`);
+    }
+
+    // Remove player from session
+    this.state.removePlayer(msg.slot);
+
+    // Release any units seated by the departing guest
+    this._releaseSeatsForSlot(msg.slot);
+
+    // Check if session is now empty (game end condition)
+    if (this.state.players.length === 0) {
+      console.log('[SM] All players left - ending session');
+      this.leaveGame();
+      return;
+    }
+
+    // Notify UI of player count change
+    if (this.state.isHost()) {
+      this._notifyConnectionStateChanged('HOSTING');
+    }
+  }
+
+  /**
+   * Release all unit seats held by a departing player slot.
+   * Clears selectedBySlot on units controlled by the given slot.
+   *
+   * DETERMINISM NOTE: Called from HOST_LEAVE / GUEST_LEAVE handlers which
+   * are broadcast to all clients. All clients apply the same seat release
+   * for the departing slot, so state converges.
+   *
+   * @private
+   * @param {number} slot - Slot of the departing player
+   */
+  _releaseSeatsForSlot(slot) {
+    if (!this.game.units) return;
+
+    for (const unit of this.game.units) {
+      if (unit && unit.selectedBySlot === slot) {
+        unit.selectedBySlot = null;
+        if (this.game._isDevMode) {
+          console.log(`[SM] Released seat on unit ${unit.id} (was held by departing slot ${slot})`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Start periodic check for host absence (Guest-side).
+   * Called when a guest successfully joins a session.
+   * @private
+   */
+  _startHostAbsenceCheck() {
+    // Stop any existing check first
+    this._stopHostAbsenceCheck();
+
+    this._hostAbsenceCheckInterval = setInterval(() => {
+      this._checkHostAbsence();
+    }, HOST_ABSENCE_CHECK_INTERVAL_MS);
+
+    if (this.game._isDevMode) {
+      console.log('[SM] Host absence check started');
+    }
+  }
+
+  /**
+   * Stop the host absence check interval.
+   * @private
+   */
+  _stopHostAbsenceCheck() {
+    if (this._hostAbsenceCheckInterval) {
+      clearInterval(this._hostAbsenceCheckInterval);
+      this._hostAbsenceCheckInterval = null;
+    }
+  }
+
+  /**
+   * Check if Host has been absent for too long (Guest-side).
+   * If HOST_ANNOUNCE hasn't been received for HOST_ABSENCE_TIMEOUT_MS,
+   * enters a 3-second grace period before triggering migration.
+   * @private
+   */
+  _checkHostAbsence() {
+    // Only check if we're a Guest in a session
+    if (!this.state.isGuest()) {
+      this._stopHostAbsenceCheck();
+      return;
+    }
+
+    // No timestamp yet means we haven't received any HOST_ANNOUNCE since joining
+    if (!this._hostLastSeenAt) {
+      return;
+    }
+
+    const now = Date.now();
+    const timeSinceLastSeen = now - this._hostLastSeenAt;
+
+    // Host is still present - nothing to do
+    if (timeSinceLastSeen < HOST_ABSENCE_TIMEOUT_MS) {
+      return;
+    }
+
+    // Host is absent - start or check grace period
+    if (!this._migrationGraceActive) {
+      // Enter grace period
+      this._migrationGraceActive = true;
+      this._migrationGraceStartedAt = now;
+      console.log(`[SM] Host absent for ${timeSinceLastSeen}ms - entering ${HOST_MIGRATION_GRACE_MS}ms grace period`);
+      return;
+    }
+
+    // Check if grace period has elapsed
+    const graceElapsed = now - this._migrationGraceStartedAt;
+    if (graceElapsed < HOST_MIGRATION_GRACE_MS) {
+      return;
+    }
+
+    // Grace period expired - time to migrate
+    console.log('[SM] Host absent and grace period expired - evaluating migration');
+    this._migrationGraceActive = false;
+    this._migrationGraceStartedAt = null;
+
+    // Remove Host from player list (they're gone)
+    this.state.removePlayer(0);
+
+    // Release any units seated by the departed host
+    this._releaseSeatsForSlot(0);
+
+    this._evaluateMigration();
+  }
+
+  /**
+   * Evaluate whether this client should promote to Host.
+   * The Guest with the lowest active slot number becomes the new Host.
+   * @private
+   */
+  _evaluateMigration() {
+    // Stop the absence check - we're about to resolve this
+    this._stopHostAbsenceCheck();
+
+    const lowestSlot = this.state.getLowestActiveSlot();
+
+    if (lowestSlot === null) {
+      // No active players left - session is dead
+      console.log('[SM] No active players remaining - ending session');
+      this.leaveGame();
+      return;
+    }
+
+    if (lowestSlot === this.state.mySlot) {
+      // We are the lowest slot - promote to Host
+      console.log(`[SM] Promoting self to HOST (mySlot=${this.state.mySlot} is lowest active slot)`);
+      this._promoteToHost();
+    } else {
+      // Another Guest has lower slot - they should promote
+      // Re-start absence check to wait for the new Host's announces
+      console.log(`[SM] Waiting for slot ${lowestSlot} to become new Host (mySlot=${this.state.mySlot})`);
+      this._hostLastSeenAt = Date.now(); // Reset timer for new Host detection
+      this._startHostAbsenceCheck();
+    }
+  }
+
+  /**
+   * Promote this Guest to HOST role.
+   * Starts announcing on lobby channel, accepts JOIN_REQ, notifies UI.
+   * @private
+   */
+  async _promoteToHost() {
+    // Transition state from GUEST to HOST
+    this.state.promoteToHost();
+
+    // Update sessionName if available
+    if (!this.sessionName) {
+      this.sessionName = `Migrated Session`;
+    }
+
+    // Join lobby channel to start announcing (if not already on it)
+    if (this.transport && typeof this.transport.joinChannel === 'function') {
+      try {
+        await this.transport.joinChannel(LOBBY_CHANNEL, (msg) => this.onMessage(msg));
+        if (this.game._isDevMode) {
+          console.log('[SM] Promoted Host joined lobby channel');
+        }
+      } catch (err) {
+        console.error('[SM] Promoted Host failed to join lobby:', err);
+        // Continue anyway - local hosting still works
+      }
+    }
+
+    // Start periodic announcing
+    try {
+      await this.sendAnnounce();
+    } catch (err) {
+      if (this.game._isDevMode) {
+        console.warn('[SM] Promoted Host first announce failed:', err);
+      }
+    }
+
+    this.announceInterval = setInterval(() => {
+      if (this.game._isDevMode) {
+        this._debugAnnounceTickCount++;
+        this._debugLastAnnounceAt = Date.now();
+      }
+      this.sendAnnounce().catch(err => {
+        if (this.game._isDevMode) {
+          console.error('[SM] Promoted Host announce failed:', err);
+        }
+      });
+    }, ANNOUNCE_INTERVAL_MS);
+
+    // Notify UI of role change
+    this._notifyConnectionStateChanged('HOSTING');
+
+    console.log(`[SM] Host migration complete. Now hosting as slot ${this.state.mySlot}`);
   }
 
   // ========================================
@@ -1727,7 +2423,8 @@ export class SessionManager {
    * @returns {Object} JSON-safe evidence object
    */
   getNetEvidence() {
-    return {
+    try {
+      return {
       role: this.state.role,
       mySlot: this.state.mySlot,
       units: this.game.units?.filter(u => u).map(u => ({
@@ -1744,7 +2441,10 @@ export class SessionManager {
       inputBufferSize: this.inputBuffer?.length || 0,
       discoveryActive: this._discoveryActive,
       availableHostsCount: this.availableHosts?.size || 0
-    };
+      };
+    } catch (err) {
+      return { error: err.message, role: this.state?.role || 'UNKNOWN' };
+    }
   }
 
   /**
@@ -1777,7 +2477,7 @@ export class SessionManager {
       batchSeqCounter: this._batchSeqCounter,
       lastReceivedBatchSeq: this._lastReceivedBatchSeq,
       inputBufferSize: this.inputBuffer?.length || 0,
-      queuePendingCount: globalCommandQueue.pendingCount,
+      queuePendingCount: (this.game?.commandQueue || globalCommandQueue)?.pendingCount ?? 0,
       // M07: Debug counters (spread)
       ...this._debugCounters
     };

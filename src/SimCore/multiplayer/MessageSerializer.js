@@ -179,6 +179,21 @@ export function validateMessage(msg) {
         errors.push('retryAfterMs must be a number if provided');
       }
       break;
+
+    // Host-leave resilience messages
+    case MSG.HOST_LEAVE:
+      if (typeof msg.hostId !== 'string') errors.push('hostId must be a string');
+      break;
+
+    case MSG.GUEST_LEAVE:
+      if (typeof msg.slot !== 'number') errors.push('slot must be a number');
+      break;
+
+    // Position sync messages
+    case MSG.POSITION_SYNC:
+      if (typeof msg.tick !== 'number') errors.push('tick must be a number');
+      if (!Array.isArray(msg.units)) errors.push('units must be an array');
+      break;
   }
 
   // Validate timestamp is a number
@@ -261,11 +276,12 @@ export function createHello(clientId) {
  * @param {Object} params
  * @returns {Object}
  */
-export function createHostAnnounce({ hostId, sessionName, mapSeed, simTick, currentPlayers, maxPlayers }) {
+export function createHostAnnounce({ hostId, sessionName, hostDisplayName, mapSeed, simTick, currentPlayers, maxPlayers }) {
   return {
     type: MSG.HOST_ANNOUNCE,
     hostId,
     sessionName,
+    hostDisplayName: hostDisplayName || sessionName,
     mapSeed,
     simTick,
     currentPlayers,
@@ -295,7 +311,7 @@ export function createJoinReq({ guestId, displayName }) {
  * @param {Object} params
  * @returns {Object}
  */
-export function createJoinAckAccepted({ assignedSlot, simTick, fullSnapshot }) {
+export function createJoinAckAccepted({ assignedSlot, simTick, fullSnapshot, hostDisplayName }) {
   return {
     type: MSG.JOIN_ACK,
     accepted: true,
@@ -303,6 +319,7 @@ export function createJoinAckAccepted({ assignedSlot, simTick, fullSnapshot }) {
     assignedSlot,
     simTick,
     fullSnapshot,
+    hostDisplayName: hostDisplayName || null,
     timestamp: Date.now()
   };
 }
@@ -508,4 +525,76 @@ export function createSeatReject({ targetUnitId, reason, retryAfterMs }) {
     msg.retryAfterMs = retryAfterMs;
   }
   return msg;
+}
+
+/**
+ * Creates a SEAT_RELEASE message (Any player -> Broadcast)
+ * Sent when a player deselects/exits a unit, freeing the seat for others.
+ * @param {Object} params
+ * @param {number} params.targetUnitId - Unit being released
+ * @param {number} params.releasedBySlot - Slot of the player releasing
+ * @returns {Object}
+ */
+export function createSeatRelease({ targetUnitId, releasedBySlot }) {
+  return {
+    type: MSG.SEAT_RELEASE,
+    targetUnitId,
+    releasedBySlot,
+    timestamp: Date.now()
+  };
+}
+
+// ========================================
+// Position Sync Messages
+// ========================================
+
+/**
+ * Creates a POSITION_SYNC message (Host -> Broadcast)
+ * Periodic authoritative unit positions from the host for reconciliation.
+ * @param {Object} params
+ * @param {number} params.tick - The simulation tick this sync corresponds to
+ * @param {Array} params.units - Array of unit position data
+ * @returns {Object}
+ */
+export function createPositionSync({ tick, units }) {
+  return {
+    type: MSG.POSITION_SYNC,
+    tick,
+    units,
+    timestamp: Date.now()
+  };
+}
+
+// ========================================
+// Host-Leave Resilience Messages
+// ========================================
+
+/**
+ * Creates a HOST_LEAVE message (Host -> Broadcast)
+ * Sent by the Host when it gracefully leaves the session.
+ * @param {Object} params
+ * @param {string} params.hostId - The departing host's ID
+ * @returns {Object}
+ */
+export function createHostLeave({ hostId }) {
+  return {
+    type: MSG.HOST_LEAVE,
+    hostId,
+    timestamp: Date.now()
+  };
+}
+
+/**
+ * Creates a GUEST_LEAVE message (Guest -> Broadcast)
+ * Sent by a Guest when it gracefully leaves the session.
+ * @param {Object} params
+ * @param {number} params.slot - The departing guest's slot
+ * @returns {Object}
+ */
+export function createGuestLeave({ slot }) {
+  return {
+    type: MSG.GUEST_LEAVE,
+    slot,
+    timestamp: Date.now()
+  };
 }

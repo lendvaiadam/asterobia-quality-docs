@@ -82,7 +82,7 @@ export class SessionState {
    * @param {string} clientId - This client's ID (becomes hostId)
    * @param {string} sessionName - Session display name
    */
-  setAsHost(clientId, sessionName) {
+  setAsHost(clientId, sessionName, displayName) {
     this.role = NetworkRole.HOST;
     this.hostId = clientId;
     this.sessionId = clientId;
@@ -92,7 +92,7 @@ export class SessionState {
     this.players = [{
       slot: 0,
       userId: clientId,
-      displayName: 'Host',
+      displayName: displayName || 'Host',
       status: PlayerStatus.ACTIVE
     }];
     this.lastSeenSeq = {};
@@ -106,14 +106,19 @@ export class SessionState {
    * @param {number} assignedSlot - Slot assigned by host
    * @param {string} clientId - This client's ID
    * @param {string} displayName - This client's display name
+   * @param {string} [hostDisplayName] - Host's display name (from JOIN_ACK)
    */
-  setAsGuest(hostId, assignedSlot, clientId, displayName) {
+  setAsGuest(hostId, assignedSlot, clientId, displayName, hostDisplayName) {
     this.role = NetworkRole.GUEST;
     this.hostId = hostId;
     this.sessionId = hostId;
     this.mySlot = assignedSlot;
     this.seqCounter = 0;
-    this.players = []; // Will be populated from snapshot
+    // Populate with host (slot 0) and self so HUD displays correctly
+    this.players = [
+      { slot: 0, userId: hostId, displayName: hostDisplayName || 'Host', status: PlayerStatus.ACTIVE },
+      { slot: assignedSlot, userId: clientId, displayName: displayName || 'Guest', status: PlayerStatus.ACTIVE }
+    ];
     this.lastSeenSeq = {};
     this.connected = true;
     this.lastMessageTime = Date.now();
@@ -284,6 +289,33 @@ export class SessionState {
    */
   isOffline() {
     return this.role === NetworkRole.OFFLINE;
+  }
+
+  /**
+   * Promote this client from GUEST to HOST.
+   * Used during host migration when the original Host disconnects.
+   * Keeps existing hostId (session identity stays the same),
+   * existing players list, and mySlot (the promoted guest keeps its slot).
+   */
+  promoteToHost() {
+    this.role = NetworkRole.HOST;
+    // hostId, sessionId, players, mySlot all remain unchanged
+    // The session identity is preserved so other guests don't need to rejoin
+    this.connected = true;
+    this.lastMessageTime = Date.now();
+  }
+
+  /**
+   * Get the lowest active slot number in the session.
+   * Used to determine which Guest should promote to Host during migration.
+   * @returns {number|null} Lowest active slot, or null if no active players
+   */
+  getLowestActiveSlot() {
+    const activePlayers = this.players
+      .filter(p => p.status === PlayerStatus.ACTIVE)
+      .sort((a, b) => a.slot - b.slot);
+
+    return activePlayers.length > 0 ? activePlayers[0].slot : null;
   }
 
   /**

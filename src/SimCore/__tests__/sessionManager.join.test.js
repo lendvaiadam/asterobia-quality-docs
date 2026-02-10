@@ -662,4 +662,58 @@ describe('SessionManager Join Flow (M06)', () => {
       }
     });
   });
+
+  // ========================================
+  // Host connection state notification on guest join
+  // ========================================
+
+  describe('Host onConnectionStateChanged after guest join', () => {
+    beforeEach(async () => {
+      await sessionManager.hostGame('Test Session');
+      // Clear the callback mock after hostGame() which fires HOSTING once on init
+    });
+
+    it('fires onConnectionStateChanged("HOSTING") when guest joins', async () => {
+      const stateChangeSpy = vi.fn();
+      sessionManager.onConnectionStateChanged = stateChangeSpy;
+
+      sessionManager.onMessage(createJoinReq({ guestId: 'guest-notify', displayName: 'NotifyGuest' }));
+      await flushJoinQueue();
+
+      // Should have been called with 'HOSTING' after the guest was accepted
+      expect(stateChangeSpy).toHaveBeenCalledWith('HOSTING');
+      expect(stateChangeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('has playerCount > 1 when HOSTING notification fires after guest join', async () => {
+      let playerCountAtNotification = 0;
+
+      sessionManager.onConnectionStateChanged = (state) => {
+        if (state === 'HOSTING') {
+          // Capture the player count at the moment the notification fires
+          playerCountAtNotification = sessionManager.state.players.length;
+        }
+      };
+
+      sessionManager.onMessage(createJoinReq({ guestId: 'guest-count', displayName: 'CountGuest' }));
+      await flushJoinQueue();
+
+      // Guest should already be in the players list when notification fires
+      expect(playerCountAtNotification).toBeGreaterThan(1);
+      // Specifically: Host (slot 0) + Guest (slot 1) = 2
+      expect(playerCountAtNotification).toBe(2);
+    });
+
+    it('does NOT fire onConnectionStateChanged on rejected join', async () => {
+      const stateChangeSpy = vi.fn();
+      sessionManager.onConnectionStateChanged = stateChangeSpy;
+
+      // Send a join request with wrong protocol version (will be rejected)
+      sessionManager.onMessage(createJoinReq({ guestId: 'guest-bad', protocolVersion: '0.0.0' }));
+      await flushJoinQueue();
+
+      // Should NOT have been called - rejections should not trigger HOSTING notification
+      expect(stateChangeSpy).not.toHaveBeenCalled();
+    });
+  });
 });

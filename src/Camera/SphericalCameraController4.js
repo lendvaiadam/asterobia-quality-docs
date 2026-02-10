@@ -35,8 +35,8 @@ export class SphericalCameraController4 {
             zoomMinVelocity: 0.0005,     // Stop later for longer tail (was 0.001)
             zoomTimeout: 500,            // Longer reset time (was 300)
             // Chase Config
-            chaseDistance: 12.0, // Was 8.0 - Further back
-            chaseHeight: 2.5,    // Was 4.0 - Lower down (TPS view)
+            chaseDistance: 15.0, // Behind the unit (third-person)
+            chaseHeight: 1.0,    // Just slightly above unit level
             chaseResponsiveness: 0.015, // Ultra smooth, heavy balloon-like inertia
             // Collision Config
             minRockDistance: 2.0,      // Min distance from rock surface
@@ -119,6 +119,9 @@ export class SphericalCameraController4 {
         // Dynamic Chase State
         this.currentChaseDistance = this.config.chaseDistance;
         this.lastObstructionCheckPos = new THREE.Vector3();
+
+        // Keep-in-view constraint (set by Game.js when unit selected)
+        this.keepInViewUnit = null;
 
         // Orbit Alignment State
         this.orbitPivotNormal = null;
@@ -323,23 +326,6 @@ export class SphericalCameraController4 {
         const startPos = this.camera.position.clone();
         const startQuat = this.camera.quaternion.clone();
 
-        // Calculate third-person target position (behind and slightly above unit)
-        const strictUp = unit.position.clone().normalize();
-        const rawForward = new THREE.Vector3(0, 0, 1);
-        if (unit.headingQuaternion) rawForward.applyQuaternion(unit.headingQuaternion);
-
-        const strictRight = new THREE.Vector3().crossVectors(strictUp, rawForward).normalize();
-        const strictForward = new THREE.Vector3().crossVectors(strictRight, strictUp).normalize();
-
-        // Target: behind and above
-        const targetPos = unit.position.clone()
-            .addScaledVector(strictForward, -this.config.chaseDistance)
-            .addScaledVector(strictUp, this.config.chaseHeight);
-
-        // Look at unit
-        const lookAt = unit.position.clone();
-        const endUp = strictUp.clone();
-
         // SLOW transition for balloon-like feel
         const duration = 2.5;
         let elapsed = 0;
@@ -348,41 +334,57 @@ export class SphericalCameraController4 {
             elapsed += dt;
             const t = Math.min(1.0, elapsed / duration);
 
-            // Smooth cubic ease-in-out (softer than quintic for balloon feel)
-            // Position ease - starts immediately
+            // Smooth cubic ease-in-out
             const ease = t < 0.5
                 ? 4 * t * t * t
                 : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-            // POI/Look-at ease - starts 0.15s LATER for cinematic camera-leads-focus effect
-            const poiDelay = 0.15 / duration; // Delay as fraction of duration
+            // POI ease with delay for cinematic feel
             const poiT = Math.max(0, Math.min(1.0, (elapsed - 0.15) / (duration - 0.15)));
             const poiEase = poiT < 0.5
                 ? 4 * poiT * poiT * poiT
                 : 1 - Math.pow(-2 * poiT + 2, 3) / 2;
 
-            // Interpolate position (starts first)
+            // Recalculate target from CURRENT unit state each frame
+            // This prevents jump when fly ends and updateChaseMode takes over
+            const strictUp = unit.position.clone().normalize();
+            const rawForward = new THREE.Vector3(0, 0, 1);
+            if (unit.headingQuaternion) rawForward.applyQuaternion(unit.headingQuaternion);
+
+            const strictRight = new THREE.Vector3().crossVectors(strictUp, rawForward).normalize();
+            const strictForward = new THREE.Vector3().crossVectors(strictRight, strictUp).normalize();
+
+            const targetPos = unit.position.clone()
+                .addScaledVector(strictForward, -this.config.chaseDistance)
+                .addScaledVector(strictUp, this.config.chaseHeight);
+
+            // Interpolate position
             const currentPos = new THREE.Vector3().lerpVectors(startPos, targetPos, ease);
             this.camera.position.copy(currentPos);
             this.targetPosition.copy(currentPos);
 
-            // Track unit position for look-at (unit may have moved)
-            // Use delayed poiEase for orientation
+            // Look-at with delayed ease
             const currentLookAt = unit.position.clone();
             const currentUp = unit.position.clone().normalize();
 
-            // Build look-at matrix
             const lookM = new THREE.Matrix4();
             lookM.lookAt(currentPos, currentLookAt, currentUp);
             const targetQuat = new THREE.Quaternion().setFromRotationMatrix(lookM);
 
-            // Slerp quaternion with DELAYED ease (camera look trails position)
             this.camera.quaternion.slerpQuaternions(startQuat, targetQuat, poiEase);
             this.targetQuaternion.copy(this.camera.quaternion);
 
             if (t >= 1.0) {
                 this.isFlying = false;
                 this.isTransitioningMode = false;
+                // Sync chase state so updateChaseMode starts seamlessly
+                this.chaseAzimuthOffset = 0;
+                this.chaseElevationOffset = 0.3;
+                this.lastUnitPosition = unit.position.clone();
+                this.unitWasStationary = false;
+                this.balloonDriftTimer = 0;
+                this.currentObstructionHeight = 0;
+                this.targetObstructionHeight = 0;
                 return true;
             }
             return false;
@@ -462,10 +464,14 @@ export class SphericalCameraController4 {
         }
 
         // === ORBIT ALIGNMENT UPDATE ===
-        // === ORBIT ALIGNMENT UPDATE ===
-        // Restored Orbit Alignment (Auto-leveling) per user request to avoid "broken" feel.
-        // This gently aligns the camera up-vector to the orbit pivot normal.
-        if (this.isOrbiting && this.orbitPivot && this.orbitPivotNormal) {
+        // Aligns camera up-vector. When keepInViewUnit is set, use its sphere normal
+        // as the reference "up" for ALL camera modes (not just orbit).
+        if (this.keepInViewUnit) {
+            // Override pivot to unit position with sphere normal as up
+            this.orbitPivot = this.keepInViewUnit.position.clone();
+            this.orbitPivotNormal = this.keepInViewUnit.position.clone().normalize();
+            this.updateOrbitAlignment(dt);
+        } else if (this.isOrbiting && this.orbitPivot && this.orbitPivotNormal) {
             this.updateOrbitAlignment(dt);
         }
 
@@ -488,6 +494,9 @@ export class SphericalCameraController4 {
 
         // Quaternion Slerp
         this.camera.quaternion.slerp(this.targetQuaternion, damping);
+
+        // === KEEP UNIT IN VIEW ===
+        this.enforceUnitInView();
 
         // === CAMERA SHAKE (from rock collision) ===
         // Read cameraShakeIntensity from chaseTarget and apply shake
@@ -1386,8 +1395,10 @@ export class SphericalCameraController4 {
         // Calculate new target quaternion
         const newQuat = this.targetQuaternion.clone().premultiply(qRot).normalize();
 
-        // Pitch Clamp check (relative to planet up)
-        const planetUp = this.targetPosition.clone().normalize();
+        // Pitch Clamp check (relative to planet up at UNIT position if selected)
+        const planetUp = this.keepInViewUnit
+            ? this.keepInViewUnit.position.clone().normalize()
+            : this.targetPosition.clone().normalize();
         const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(newQuat);
         const dot = forward.dot(planetUp);
         const angle = Math.asin(dot);
@@ -1412,6 +1423,43 @@ export class SphericalCameraController4 {
         // NEW: Capture Surface Normal for Alignment
         this.orbitPivotNormal = this.planet.terrain.getNormalAt(hitPoint);
         this.orbitAlignWeight = 0; // Reset easing
+    }
+
+    /**
+     * Keeps the selected unit on screen during all camera operations.
+     * If unit approaches screen edges, zooms camera out (moves backwards).
+     */
+    enforceUnitInView() {
+        if (!this.keepInViewUnit) return;
+
+        const unit = this.keepInViewUnit;
+        if (!unit.position) return;
+
+        // Must update matrices for accurate projection
+        this.camera.updateMatrixWorld();
+
+        // Project unit world position to NDC (-1 to +1)
+        const ndc = unit.position.clone().project(this.camera);
+
+        // Unit is behind camera - pull back aggressively toward unit
+        if (ndc.z > 1) {
+            const toUnit = unit.position.clone().sub(this.camera.position).normalize();
+            this.targetPosition.addScaledVector(toUnit, -5.0);
+            return;
+        }
+
+        // Safe zone: 80% of screen
+        const margin = 0.80;
+        const excessX = Math.max(0, Math.abs(ndc.x) - margin);
+        const excessY = Math.max(0, Math.abs(ndc.y) - margin);
+        const excess = Math.max(excessX, excessY);
+
+        if (excess > 0) {
+            // Zoom out: move camera backwards along view direction
+            const viewDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+            const zoomStrength = excess * 5.0;
+            this.targetPosition.addScaledVector(viewDir, -zoomStrength);
+        }
     }
 
     endOrbit() {
@@ -1611,12 +1659,6 @@ export class SphericalCameraController4 {
         this.raycaster.setFromCamera(mouseNDC, this.camera);
 
         const intersects = this.raycaster.intersectObject(this.planet.mesh, false);
-        console.log('pickSurfacePoint:', {
-            intersectsCount: intersects.length,
-            firstHit: intersects[0] ? intersects[0].point.toArray() : null,
-            firstDistance: intersects[0] ? intersects[0].distance : null,
-            cameraPos: this.camera.position.toArray()
-        });
         if (intersects.length > 0) return intersects[0].point.clone();
 
         // --- Off-Planet Logic (Horizon Point) ---
@@ -1704,29 +1746,14 @@ export class SphericalCameraController4 {
      * Updates camera target position/rotation to follow the chase target.
      */
     updateChaseMode() {
-        // DEBUG: Confirm this function is called
-        console.log("[UCM START]", { hasChaseTarget: !!this.chaseTarget });
-
         if (!this.chaseTarget) return;
 
         const unit = this.chaseTarget;
-        // DEBUG: Check for early return
-        console.log("[UCM UNIT]", { hasHeadingQuat: !!unit.headingQuaternion, unitName: unit.name });
 
         // Ensure unit has headingQuaternion
         if (!unit.headingQuaternion) return;
 
-        // Logic 1s check (User Request)
-        // Logic 1s check OR Distance check
         const now = performance.now();
-
-        // DEBUG: Check throttle conditions
-        const timeSinceLastCheck = now - (this.lastObstructionCheck || 0);
-        console.log("[OBSTRUCTION THROTTLE]", {
-            cooldown: this.postFlyToCooldown,
-            timeSinceLastCheck: timeSinceLastCheck,
-            willRun: timeSinceLastCheck > 500 && !(this.postFlyToCooldown > 0)
-        });
 
         // Skip occlusion check during post-flyTo cooldown
         if (this.postFlyToCooldown && this.postFlyToCooldown > 0) {
@@ -1764,14 +1791,6 @@ export class SphericalCameraController4 {
             }
 
             this.targetObstructionHeight = foundClear ? clearOffset : 20.0;
-
-            // DEBUG: Log obstruction detection
-            console.log("[OBSTRUCTION]", {
-                foundClear,
-                clearOffset,
-                target: this.targetObstructionHeight,
-                current: this.currentObstructionHeight
-            });
         }
 
         // Smooth obstruction height with ease-out/ease-in curves
@@ -1869,9 +1888,8 @@ export class SphericalCameraController4 {
         // Enforce terrain
         this.enforceTerrainDistance(this.targetPosition);
 
-        // Look At: Unit Position slightly below for better view
-        // Must match flyTo endFocus to prevent jerk when transitioning
-        const lookTarget = unit.position.clone().add(strictUp.clone().multiplyScalar(-0.3));
+        // Look At: Slightly ABOVE unit so unit appears in the lower third of screen
+        const lookTarget = unit.position.clone().add(strictUp.clone().multiplyScalar(1.5));
 
         const lookMatrix = new THREE.Matrix4();
         // Up vector: AVERAGE of sphere normal + terrain normal

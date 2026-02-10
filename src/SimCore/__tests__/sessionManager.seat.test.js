@@ -646,8 +646,9 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
             expect(ack).toBeDefined();
             expect(ack.msg.controllerSlot).toBe(2);
 
-            // Release seat for next test
+            // Release seat and reset ownership for cooldown test
             mockGame.units[1].selectedBySlot = null;
+            mockGame.units[1].ownerSlot = 0; // Reset ownership so PIN check applies again
             mockTransport.clearSentMessages();
 
             // Now another BAD_PIN should have reset cooldown to 250ms
@@ -662,6 +663,273 @@ describe('SessionManager Seat Acquisition (GAP-0)', () => {
             const sentMsgs2 = mockTransport.getSentMessages();
             const reject = sentMsgs2.find(m => m.msg.type === 'SEAT_REJECT');
             expect(reject.msg.retryAfterMs).toBe(250); // Reset to initial
+
+            vi.useRealTimers();
+        });
+    });
+
+    // ========================================
+    // Ownership Model (owner re-entry + ownerSlot)
+    // Tests for M07 Unit Authority v0 ownership semantics:
+    //   - Owner re-entry bypass (no PIN needed if ownerSlot === requesterSlot)
+    //   - Non-owner still gated by seatPolicy
+    //   - ownerSlot persists after SEAT_RELEASE (only selectedBySlot cleared)
+    //   - Takeover transfers ownerSlot
+    //   - OPEN units grant to any slot regardless of ownerSlot
+    // ========================================
+    describe('Ownership Model (owner re-entry + ownerSlot)', () => {
+        // Test 1: Owner re-entry without PIN
+        it('should grant seat to owner without PIN even when seatPolicy is PIN_1DIGIT', () => {
+            // Setup: Unit 2 has seatPolicy='PIN_1DIGIT', seatPinDigit=5
+            // Set ownerSlot to match the requester (slot 2)
+            const unit = mockGame.units.find(u => u.id === 2);
+            unit.ownerSlot = 2;
+            unit.selectedBySlot = null; // Not currently occupied
+
+            const seatReq = {
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 2,
+                auth: null // No PIN provided
+            };
+
+            // Act
+            sessionManager._handleSeatReq(seatReq);
+
+            // Assert: Should be granted (owner re-entry bypass)
+            expect(unit.selectedBySlot).toBe(2);
+
+            const sentMsgs = mockTransport.getSentMessages();
+            const ack = sentMsgs.find(m => m.msg.type === 'SEAT_ACK');
+            expect(ack).toBeDefined();
+            expect(ack.msg.controllerSlot).toBe(2);
+            expect(ack.msg.targetUnitId).toBe(2);
+
+            // Should NOT have a SEAT_REJECT
+            const reject = sentMsgs.find(m => m.msg.type === 'SEAT_REJECT');
+            expect(reject).toBeUndefined();
+        });
+
+        // Test 2: Non-owner still needs PIN
+        it('should reject non-owner SEAT_REQ without auth on PIN_1DIGIT unit', () => {
+            // Setup: Unit 2 has seatPolicy='PIN_1DIGIT', ownerSlot=0 (default)
+            // Requester is slot 2 (not the owner)
+            const unit = mockGame.units.find(u => u.id === 2);
+            expect(unit.ownerSlot).toBe(0); // Precondition: owner is slot 0
+            unit.selectedBySlot = null;
+
+            const seatReq = {
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 2,
+                auth: null // No PIN provided
+            };
+
+            // Act
+            sessionManager._handleSeatReq(seatReq);
+
+            // Assert: Should be rejected with LOCKED (no auth for PIN unit)
+            expect(unit.selectedBySlot).toBeNull();
+
+            const sentMsgs = mockTransport.getSentMessages();
+            const reject = sentMsgs.find(m => m.msg.type === 'SEAT_REJECT');
+            expect(reject).toBeDefined();
+            expect(reject.msg.reason).toBe('LOCKED');
+        });
+
+        // Test 3: Owner re-entry after SEAT_RELEASE
+        it('should grant owner re-entry after SEAT_RELEASE', () => {
+            // Step 1: Grant seat via correct PIN (this sets ownerSlot via takeover)
+            const unit = mockGame.units.find(u => u.id === 2);
+            unit.selectedBySlot = null;
+            unit.ownerSlot = 0; // Initially owned by slot 0
+
+            sessionManager._handleSeatReq({
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 2,
+                auth: { method: 'PIN_1DIGIT', guess: 5 } // Correct PIN
+            });
+
+            // Verify seat was granted and ownerSlot transferred
+            expect(unit.selectedBySlot).toBe(2);
+            expect(unit.ownerSlot).toBe(2); // Takeover should have transferred ownership
+
+            // Step 2: Simulate SEAT_RELEASE (selectedBySlot cleared, ownerSlot stays)
+            unit.selectedBySlot = null;
+            // ownerSlot stays 2 (release doesn't clear it)
+            expect(unit.ownerSlot).toBe(2);
+
+            mockTransport.clearSentMessages();
+
+            // Step 3: Send SEAT_REQ without auth (owner re-entry)
+            sessionManager._handleSeatReq({
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 2,
+                auth: null // No PIN - owner re-entry
+            });
+
+            // Assert: Should be granted (owner can re-enter without PIN)
+            expect(unit.selectedBySlot).toBe(2);
+
+            const sentMsgs = mockTransport.getSentMessages();
+            const ack = sentMsgs.find(m => m.msg.type === 'SEAT_ACK');
+            expect(ack).toBeDefined();
+            expect(ack.msg.controllerSlot).toBe(2);
+        });
+
+        // Test 4: Takeover transfers ownership
+        it('should transfer ownerSlot on takeover', () => {
+            // Setup: Unit starts with ownerSlot=0, selectedBySlot=null
+            const unit = mockGame.units.find(u => u.id === 2);
+            unit.ownerSlot = 0;
+            unit.selectedBySlot = null;
+
+            // Act: Slot 2 sends correct PIN -> granted (takeover: ownerSlot 0 -> 2)
+            sessionManager._handleSeatReq({
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 2,
+                auth: { method: 'PIN_1DIGIT', guess: 5 }
+            });
+
+            // Assert: Both selectedBySlot and ownerSlot should be 2
+            expect(unit.selectedBySlot).toBe(2);
+            expect(unit.ownerSlot).toBe(2);
+
+            // Verify SEAT_ACK includes newOwnerSlot
+            const sentMsgs = mockTransport.getSentMessages();
+            const ack = sentMsgs.find(m => m.msg.type === 'SEAT_ACK');
+            expect(ack).toBeDefined();
+            expect(ack.msg.controllerSlot).toBe(2);
+        });
+
+        // Test 5: OPEN units always grant (no owner check needed)
+        it('should grant OPEN unit to any slot regardless of ownerSlot', () => {
+            // Setup: OPEN unit (id=1), ownerSlot=0
+            const unit = mockGame.units.find(u => u.id === 1);
+            expect(unit.seatPolicy).toBe('OPEN'); // Precondition
+            unit.ownerSlot = 0;
+            unit.selectedBySlot = null;
+
+            // Act: Slot 2 sends SEAT_REQ without auth
+            sessionManager._handleSeatReq({
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 1,
+                auth: null
+            });
+
+            // Assert: Should be granted (OPEN policy)
+            expect(unit.selectedBySlot).toBe(2);
+
+            const sentMsgs = mockTransport.getSentMessages();
+            const ack = sentMsgs.find(m => m.msg.type === 'SEAT_ACK');
+            expect(ack).toBeDefined();
+            expect(ack.msg.controllerSlot).toBe(2);
+            expect(ack.msg.targetUnitId).toBe(1);
+        });
+
+        // Test 6: OPEN takeover transfers ownerSlot
+        it('should transfer ownerSlot on OPEN unit takeover', () => {
+            // Setup: OPEN unit owned by slot 0, seat is empty
+            const unit = mockGame.units.find(u => u.id === 1);
+            unit.ownerSlot = 0;
+            unit.selectedBySlot = null;
+
+            // Act: Slot 2 takes over
+            sessionManager._handleSeatReq({
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 1,
+                auth: null
+            });
+
+            // Assert: ownerSlot should transfer to 2 (takeover)
+            expect(unit.ownerSlot).toBe(2);
+            expect(unit.selectedBySlot).toBe(2);
+        });
+
+        // Test 7: Owner re-entry does NOT re-trigger takeover (ownerSlot stays)
+        it('should not change ownerSlot on owner re-entry (not a takeover)', () => {
+            // Setup: Unit owned by slot 2, seat is empty
+            const unit = mockGame.units.find(u => u.id === 1);
+            unit.ownerSlot = 2;
+            unit.selectedBySlot = null;
+            unit.seatPolicy = 'OPEN';
+
+            // Act: Slot 2 re-enters (owner re-entry, not takeover)
+            sessionManager._handleSeatReq({
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 1,
+                auth: null
+            });
+
+            // Assert: ownerSlot stays 2 (no change, no takeover)
+            expect(unit.ownerSlot).toBe(2);
+            expect(unit.selectedBySlot).toBe(2);
+        });
+
+        // Test 8: Owner re-entry clears cooldown
+        it('should clear cooldown when owner re-enters', () => {
+            vi.useFakeTimers();
+
+            const unit = mockGame.units.find(u => u.id === 2);
+            unit.ownerSlot = 0; // Not owned by slot 2 initially
+            unit.selectedBySlot = null;
+
+            // Step 1: Trigger a BAD_PIN to create a cooldown entry
+            sessionManager._handleSeatReq({
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 2,
+                auth: { method: 'PIN_1DIGIT', guess: 3 } // Wrong PIN
+            });
+            vi.advanceTimersByTime(300); // Wait for cooldown to expire
+
+            // Step 2: Correct PIN -> grants, sets ownerSlot=2
+            mockTransport.clearSentMessages();
+            sessionManager._handleSeatReq({
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 2,
+                auth: { method: 'PIN_1DIGIT', guess: 5 }
+            });
+            expect(unit.ownerSlot).toBe(2);
+            expect(unit.selectedBySlot).toBe(2);
+
+            // Step 3: Release seat (selectedBySlot = null, ownerSlot stays)
+            unit.selectedBySlot = null;
+
+            // Step 4: Immediate re-entry as owner (should NOT be cooldown-blocked)
+            mockTransport.clearSentMessages();
+            sessionManager._handleSeatReq({
+                type: 'SEAT_REQ',
+                senderId: 'guest-id',
+                requesterSlot: 2,
+                targetUnitId: 2,
+                auth: null // Owner re-entry, no PIN
+            });
+
+            // Assert: Granted, not rejected by cooldown
+            expect(unit.selectedBySlot).toBe(2);
+            const sentMsgs = mockTransport.getSentMessages();
+            const ack = sentMsgs.find(m => m.msg.type === 'SEAT_ACK');
+            expect(ack).toBeDefined();
+            const reject = sentMsgs.find(m => m.msg.type === 'SEAT_REJECT');
+            expect(reject).toBeUndefined();
 
             vi.useRealTimers();
         });

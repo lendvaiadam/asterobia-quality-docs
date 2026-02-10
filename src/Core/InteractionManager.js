@@ -105,6 +105,14 @@ export class InteractionManager {
             this.mouseDownTerrain = null;
             this.mouseDownMarker = null;
             // Potential Select or Path Draw
+
+            // FIX: When Shift is held and a unit is already selected, the user
+            // intends to place a waypoint at the terrain behind the clicked unit,
+            // NOT to select that other unit. Raycast terrain now so the point is
+            // available in onMouseUp for waypoint placement.
+            if (event.shiftKey && this.game.selectedUnit) {
+                this.mouseDownTerrain = this.raycastTerrain();
+            }
         } else {
             // 2. Raycast Terrain
             const hitTerrain = this.raycastTerrain();
@@ -153,7 +161,7 @@ export class InteractionManager {
                 if (this.mouseDownMarker) {
                     // Drag on Marker -> Marker Drag
                     this.state = 'DRAGGING_MARKER';
-                    console.log("Started dragging marker:", this.mouseDownMarker.userData.waypointNumber);
+                    if (this.game._isDevMode) console.log("Started dragging marker:", this.mouseDownMarker.userData.waypointNumber);
                 } else if (this.mouseDownUnit) {
                     // M07 GAP-0: Check seat authority before allowing path draw
                     if (!this._hasSeatAuthority(this.mouseDownUnit)) {
@@ -245,19 +253,47 @@ export class InteractionManager {
                         unit.waypointControlPoints.length >= 3 &&
                         !unit.isPathClosed) {
                         // Close the path loop!
-                        this.game.closePath();
+                        // R006: Route through InputFactory for deterministic command
+                        // (was: this.game.closePath() - direct sim-state mutation)
+                        this.inputFactory.closePath(unit.id);
                     }
                     // Clear marker reference (no drag happened)
                     this.mouseDownMarker = null;
                 } else if (this.mouseDownUnit) {
-                    // M07: Check seat authority BEFORE selection
-                    if (this._hasSeatAuthority(this.mouseDownUnit)) {
-                        // Already seated - allow normal selection
-                        // R006: Use InputFactory for deterministic command
-                        this.inputFactory.select(this.mouseDownUnit.id, { skipCamera: true });
+                    // FIX: Shift+Click on another unit while a unit is selected
+                    // should place a waypoint at the terrain behind that unit,
+                    // NOT select the clicked unit.
+                    if (event.shiftKey && this.game.selectedUnit) {
+                        const terrainPoint = this.mouseDownTerrain || this.raycastTerrain();
+                        if (terrainPoint) {
+                            const unit = this.game.selectedUnit;
+
+                            // M07 GAP-0: Check seat authority before allowing waypoint
+                            if (!this._hasSeatAuthority(unit)) {
+                                if (this.game._isDevMode) {
+                                    console.warn('[InteractionManager] Cannot add waypoint: not seated on unit');
+                                }
+                            } else {
+                                const capabilities = unit.capabilities || this.game.pathPlanner?.defaultCapabilities;
+
+                                if (this.game.pathPlanner && !this.game.pathPlanner.isValidDestination(terrainPoint, capabilities)) {
+                                    console.warn('[InteractionManager] Cannot place waypoint in FORBIDDEN zone (obstacle/water)');
+                                } else {
+                                    // R006: Use InputFactory for deterministic command
+                                    this.inputFactory.move(unit.id, terrainPoint);
+                                }
+                            }
+                        }
                     } else {
-                        // Not seated - trigger seat flow, DON'T select yet
-                        this._triggerSeatFlow(this.mouseDownUnit);
+                        // Normal click on unit - M07: Check seat authority BEFORE selection
+                        if (this._hasSeatAuthority(this.mouseDownUnit)) {
+                            // Already seated - allow normal selection
+                            // R006: Use InputFactory for deterministic command
+                            this.inputFactory.select(this.mouseDownUnit.id, { skipCamera: true });
+                        } else {
+                            // Not seated - trigger seat flow, DON'T select yet
+                            this._triggerSeatFlow(this.mouseDownUnit);
+                        }
                     }
                 } else if (this.mouseDownTerrain) {
                     // (2) Click on Terrain
@@ -315,7 +351,7 @@ export class InteractionManager {
                             this.mouseDownMarker.userData.lastHex = null;
                             this.mouseDownMarker.userData.lastOpacity = null;
                         }
-                        console.log("Waypoint placement rejected: invalid position (water/rock)");
+                        if (this.game._isDevMode) console.log("Waypoint placement rejected: invalid position (water/rock)");
                         // Call updateWaypointCurve to restore proper colors
                         this.game.updateWaypointCurve();
                         this.mouseDownMarker = null;
@@ -326,9 +362,34 @@ export class InteractionManager {
                     const cpIndex = this.mouseDownMarker.userData.controlPointIndex;
                     const newPos = this.mouseDownMarker.position.clone();
 
+                    // ============================================================
+                    // DETERMINISM GAP (Audit Issue #4):
+                    // Marker-drag path mutations bypass InputFactory/CommandQueue.
+                    //
+                    // The following fields are mutated directly from the UI handler:
+                    //   - unit.waypointControlPoints[i], unit.waypoints[i].position
+                    //   - unit.lastCommittedControlPointCount, unit.path
+                    //   - unit.isFollowingPath, unit.pausedByCommand, unit.waitTimer
+                    //   - unit.isInTransition, unit.transitionPath
+                    //
+                    // WHY THIS IS ACCEPTABLE FOR NOW:
+                    // 1. Marker drag is a LOCAL-ONLY UI interaction - only the client
+                    //    that performed the drag executes this code path.
+                    // 2. In multiplayer, sim-mutating commands (MOVE, SET_PATH,
+                    //    CLOSE_PATH) are gated by ENABLE_COMMAND_EXECUTION and routed
+                    //    through InputFactory. Marker drag is single-player only today.
+                    // 3. Proper fix: Emit a SET_PATH command via InputFactory after
+                    //    drag completion (inputFactory.setPath(unit.id, newControlPoints)).
+                    //    This is deferred to the determinism hardening milestone.
+                    //
+                    // RISK: If marker drag is used in multiplayer without routing
+                    // through the command queue, other clients will NOT see the
+                    // updated path, causing state divergence.
+                    // ============================================================
+
                     if (unit.waypointControlPoints[cpIndex]) {
                         unit.waypointControlPoints[cpIndex] = newPos;
-                        
+
                         // CRITICAL FIX: Sync the LOGICAL waypoint object too!
                         // Unit.js uses unit.waypoints[i].position for strict arrival checks.
                         // If we don't update this, the unit continues targeting the OLD position.
@@ -337,45 +398,26 @@ export class InteractionManager {
                         }
                     }
 
+                    // Force path regeneration (direct mutation - see DETERMINISM GAP above)
                     unit.lastCommittedControlPointCount = 0;
                     unit.path = [];
-                    if (this.mouseDownMarker.userData) {
-                        this.mouseDownMarker.userData.lastHex = null;
-                        this.mouseDownMarker.userData.lastOpacity = null;
-                    }
-                    
-                    this.game.updateWaypointCurve();
 
-                    // === SIMPLIFIED DRAG RELEASE ===
-                    // Trust Game.js to handle path regeneration and index re-projection.
-                    
-                    if (unit.waypoints && unit.waypoints[cpIndex]) {
-                         unit.waypoints[cpIndex].position.copy(newPos);
-                    }
-                    
-                    // Force path regeneration
-                    unit.lastCommittedControlPointCount = 0;
-                    unit.path = []; // Clears dense path
-                    
                     if (this.mouseDownMarker.userData) {
                         this.mouseDownMarker.userData.lastHex = null;
                         this.mouseDownMarker.userData.lastOpacity = null;
                     }
-                    
+
                     // Regenerate visual curve & Re-project Unit Index (Game.js logic)
                     this.game.updateWaypointCurve();
 
-                    // === RESUME MOVEMENT ===
+                    // Resume movement (direct mutation - see DETERMINISM GAP above)
                     // Ensure unit is ready to follow the new path structure immediately
                     if (unit.path && unit.path.length > 0) {
                         unit.isFollowingPath = true;
                         unit.pausedByCommand = false;
                         unit.waitTimer = 0;
-                        unit.isInTransition = false; // Safety: Clear any transition state
+                        unit.isInTransition = false;
                         unit.transitionPath = null;
-                        
-                        // NOTE: unit.pathIndex is already fixed by Game.js inside updateWaypointCurve
-                        // console.log('[Interaction] Drag complete. Resumed at index:', unit.pathIndex);
                     }
 
                     if (this.game.isFocusMode && this.game.focusedUnit) {
@@ -405,7 +447,12 @@ export class InteractionManager {
         this.updateMouseNDC(event.clientX, event.clientY);
         const hitUnit = this.raycastUnit();
         if (hitUnit) {
-            this.game.onUnitDoubleClicked(hitUnit);
+            // M07 B4-fix: Gate double-click by seat authority
+            if (this._hasSeatAuthority(hitUnit)) {
+                this.game.onUnitDoubleClicked(hitUnit);
+            } else {
+                this._triggerSeatFlow(hitUnit);
+            }
         }
     }
 
@@ -600,48 +647,39 @@ export class InteractionManager {
         const sm = this.game.sessionManager;
         const mySlot = sm?.state?.mySlot;
 
-        // W2 DEBUG: Log seat flow trigger
-        console.log('[InteractionManager] _triggerSeatFlow:', {
-            unitId: unit.id,
-            seatPolicy: unit.seatPolicy,
-            selectedBySlot: unit.selectedBySlot,
-            ownerSlot: unit.ownerSlot,
-            mySlot,
-            hasKeypad: !!this.game.seatKeypadOverlay
-        });
-
-        // Offline or Host - should never reach here, but safety fallback
-        if (!sm || sm.state.isOffline() || sm.state.isHost()) {
-            // Fallback: allow selection (offline/host always has authority)
+        // Offline mode - bypass seat flow entirely (single player)
+        if (!sm || sm.state.isOffline()) {
             this.inputFactory.select(unit.id, { skipCamera: true });
             return;
         }
 
         // M07: OCCUPIED CHECK - Another player already has the seat
+        // Applies to ALL roles including Host
         if (unit.selectedBySlot !== null && unit.selectedBySlot !== mySlot) {
-            // Show OCCUPIED feedback, NO keypad, NO selection
             this._showOccupiedFeedback(unit);
             return;
         }
 
-        // M07: Check if this is my own unit (ownerSlot == mySlot)
+        // Host on own free units: auto-seat (no PIN needed, but still sets selectedBySlot)
+        if (sm.state.isHost()) {
+            this.inputFactory.select(unit.id, { skipCamera: true });
+            return;
+        }
+
+        // Guest: Check if this is my own unit (ownerSlot == mySlot)
         if (unit.ownerSlot === mySlot) {
-            // My unit - auto-seat via SEAT_REQ (Host confirms)
             sm.sendSeatReq({
                 targetUnitId: unit.id
             });
             return;
         }
 
-        // Foreign unit with empty seat - apply seat policy
+        // Guest: Foreign unit with empty seat - apply seat policy
         const seatPolicy = unit.seatPolicy || 'OPEN';
 
         if (seatPolicy === 'PIN_1DIGIT') {
-            // M07: Show keypad ONLY if unit is empty and PIN-protected
-            // Selection happens AFTER successful seat acquisition (via SEAT_ACK handler)
             if (this.game.seatKeypadOverlay) {
                 this.game.seatKeypadOverlay.show(unit.id, (digit) => {
-                    // On digit submit, send SEAT_REQ with PIN auth
                     sm.sendSeatReq({
                         targetUnitId: unit.id,
                         auth: { method: 'PIN_1DIGIT', guess: digit }
@@ -651,8 +689,6 @@ export class InteractionManager {
                 console.warn('[InteractionManager] No keypad overlay - cannot acquire PIN seat');
             }
         } else if (seatPolicy === 'OPEN') {
-            // Send SEAT_REQ directly for OPEN units
-            // Selection happens AFTER successful seat acquisition (via SEAT_ACK handler)
             sm.sendSeatReq({
                 targetUnitId: unit.id
             });
@@ -661,29 +697,54 @@ export class InteractionManager {
     }
 
     /**
-     * M07: Show "OCCUPIED" feedback when attempting to click a unit
-     * that another player is currently controlling.
-     * @param {Object} unit - The occupied unit
+     * M07: Show feedback toast when attempting to interact with a blocked unit.
+     * Separate overlay - does NOT use the keypad.
+     * @param {Object} unit - The blocked unit
+     * @param {string} [reason] - Optional reason ('OCCUPIED', 'LOCKED', etc.)
      */
-    _showOccupiedFeedback(unit) {
+    _showOccupiedFeedback(unit, reason) {
         if (!unit) return;
 
         if (this.game._isDevMode) {
-            console.log(`[InteractionManager] Unit ${unit.id} is OCCUPIED by slot ${unit.selectedBySlot}`);
+            console.log(`[InteractionManager] Unit ${unit.id} blocked: ${reason || 'OCCUPIED'} (slot ${unit.selectedBySlot})`);
         }
 
-        // Show temporary OCCUPIED feedback via keypad overlay's error display
-        if (this.game.seatKeypadOverlay) {
-            // Briefly show overlay with OCCUPIED message, then auto-hide
-            this.game.seatKeypadOverlay.show(unit.id, () => {});
-            this.game.seatKeypadOverlay.showError('OCCUPIED', 0);
-            // Auto-hide after 1.5 seconds
-            setTimeout(() => {
-                if (this.game.seatKeypadOverlay.isVisible &&
-                    this.game.seatKeypadOverlay.targetUnitId === unit.id) {
-                    this.game.seatKeypadOverlay.hide();
-                }
-            }, 1500);
+        // Create or reuse a simple toast overlay
+        let overlay = document.getElementById('occupied-toast');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'occupied-toast';
+            overlay.style.cssText = `
+                position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%);
+                background: rgba(180, 40, 40, 0.92); color: #fff; padding: 18px 38px;
+                border-radius: 10px; font-size: 22px; font-weight: 600;
+                letter-spacing: 2px; z-index: 10000; pointer-events: none;
+                border: 2px solid rgba(255,100,100,0.6);
+                text-align: center; font-family: 'Inter', 'Segoe UI', sans-serif;
+                opacity: 0; transition: opacity 0.2s;
+            `;
+            document.body.appendChild(overlay);
         }
+
+        // Build message with player name if occupied
+        const effectiveReason = reason || 'OCCUPIED';
+        if (effectiveReason === 'OCCUPIED' && unit.selectedBySlot !== null) {
+            const sm = this.game.sessionManager;
+            const player = sm?.state?.getPlayer?.(unit.selectedBySlot);
+            const name = player?.displayName || (unit.selectedBySlot === 0 ? 'Host' : `Player ${unit.selectedBySlot}`);
+            overlay.textContent = `OCCUPIED by ${name}`;
+        } else if (effectiveReason === 'LOCKED') {
+            overlay.textContent = 'LOCKED';
+        } else {
+            overlay.textContent = effectiveReason;
+        }
+
+        overlay.style.opacity = '1';
+
+        // Auto-hide after 1.5s
+        clearTimeout(this._occupiedToastTimer);
+        this._occupiedToastTimer = setTimeout(() => {
+            overlay.style.opacity = '0';
+        }, 1500);
     }
 }

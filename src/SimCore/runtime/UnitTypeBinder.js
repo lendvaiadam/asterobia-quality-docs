@@ -36,12 +36,13 @@ function getStatsEngine() {
 /**
  * Bind a UnitModel to a TypeBlueprint.
  * Computes stats and applies movement speed immediately.
- * 
+ *
  * @param {UnitModel} unitModel - The unit model to bind
  * @param {string} blueprintId - The blueprint ID to bind to
+ * @param {number} [tick=0] - Simulation tick for deterministic timestamps
  * @returns {BindingRecord|null} The binding record, or null if blueprint not found
  */
-export function bindUnitToBlueprint(unitModel, blueprintId) {
+export function bindUnitToBlueprint(unitModel, blueprintId, tick = 0) {
     const blueprint = getBlueprint(blueprintId);
     if (!blueprint) {
         console.warn(`[UnitTypeBinder] Blueprint not found: ${blueprintId}`);
@@ -76,7 +77,7 @@ export function bindUnitToBlueprint(unitModel, blueprintId) {
         unitId: unitModel.id,
         blueprintId: blueprintId,
         typeName: blueprint.name,
-        boundAt: Date.now(),
+        boundAt: tick || 0,
         computedStats: { ...computedStats }
     };
 
