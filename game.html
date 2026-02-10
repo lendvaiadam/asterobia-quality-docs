@@ -46,25 +46,24 @@
 
 <body>
 
-    <!-- Visibility indicator -->
-    <div id="visibility-indicator">
+    <!-- Visibility indicator (hidden by default, shown in DEV mode) -->
+    <div id="visibility-indicator" style="display:none;"
         <span class="visibility-dot"></span>
         <span class="visibility-text">VISIBLE</span>
     </div>
 
-    <!-- Start Screen -->
-    <div id="start-screen">
+    <!-- Start Screen (shown after JoinOverlay closes, before game begins) -->
+    <div id="start-screen" style="display:none;">
         <div class="start-content">
             <div class="mode-selection">
-                <h2>SELECT GRAPHICS MODE</h2>
                 <div class="mode-buttons">
-                    <button id="start-btn-basic" class="mode-btn basic">
-                        <span class="btn-title">BASIC</span>
-                        <span class="btn-desc">Low Spec (Faster)</span>
+                    <button id="start-btn-dev" class="mode-btn dev">
+                        <span class="btn-title">DEV</span>
+                        <span class="btn-desc">settings console</span>
                     </button>
-                    <button id="start-btn-high" class="mode-btn high">
-                        <span class="btn-title">HIGH</span>
-                        <span class="btn-desc">Full Quality</span>
+                    <button id="start-btn-game" class="mode-btn game">
+                        <span class="btn-title">GAME</span>
+                        <span class="btn-desc">user experience</span>
                     </button>
                 </div>
             </div>

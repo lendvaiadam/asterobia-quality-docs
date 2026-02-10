@@ -34,7 +34,7 @@ export class PathPlanner {
             maxLocalNodes: 1000,          // STABLE: original value
             
             // Debug
-            debugEnabled: true,
+            debugEnabled: false,
             debugPoints: [],
             debugMesh: null
         };
@@ -527,11 +527,12 @@ export class PathPlanner {
             }
 
             // Find node with lowest fScore in openSet
+            // Deterministic tie-breaking: when fScores are equal, prefer lower node index (Issue 7).
             let current = null;
             let lowestF = Infinity;
             for (const idx of openSet) {
                 const f = fScore.get(idx) || Infinity;
-                if (f < lowestF) {
+                if (f < lowestF || (f === lowestF && idx < current)) {
                     lowestF = f;
                     current = idx;
                 }

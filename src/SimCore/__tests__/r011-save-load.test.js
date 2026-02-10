@@ -7,8 +7,10 @@
  * 3. Simulation continues deterministically after load
  * 4. Hash matches between original and loaded runs
  *
- * Run: node src/SimCore/__tests__/r011-save-load.test.js
+ * Run: npx vitest run src/SimCore/__tests__/r011-save-load.test.js
  */
+
+import { describe, it, expect } from 'vitest';
 
 // ============ Inline Dependencies (No Three.js) ============
 
@@ -319,411 +321,352 @@ class TestGame {
     }
 }
 
-// ============ Test Framework ============
-
-let passed = 0;
-let failed = 0;
-
-function test(name, fn) {
-    try {
-        fn();
-        console.log(`✓ ${name}`);
-        passed++;
-    } catch (err) {
-        console.log(`✗ ${name}`);
-        console.log(`  Error: ${err.message}`);
-        failed++;
-    }
-}
-
-function assertEqual(actual, expected, msg = '') {
-    if (actual !== expected) {
-        throw new Error(`${msg} Expected ${expected}, got ${actual}`);
-    }
-}
-
-function assertDeepEqual(actual, expected, msg = '') {
-    const actualStr = JSON.stringify(actual);
-    const expectedStr = JSON.stringify(expected);
-    if (actualStr !== expectedStr) {
-        throw new Error(`${msg}\n  Expected: ${expectedStr}\n  Got: ${actualStr}`);
-    }
-}
-
 // ============ Tests ============
 
-console.log('=== R011 Save/Load Determinism Tests ===\n');
+describe('R011: Save/Load Determinism', () => {
 
-test('Save creates valid envelope with all state', () => {
-    const game = new TestGame(12345);
-    const storage = new MemoryStorageAdapter();
-    const saveManager = new TestSaveManager(game, storage);
+    it('Save creates valid envelope with all state', () => {
+        const game = new TestGame(12345);
+        const storage = new MemoryStorageAdapter();
+        const saveManager = new TestSaveManager(game, storage);
 
-    // Setup game state
-    game.createUnit(0, 0, 0);
-    game.createUnit(10, 0, 10);
-    for (let i = 0; i < 10; i++) game.tick();
+        // Setup game state
+        game.createUnit(0, 0, 0);
+        game.createUnit(10, 0, 10);
+        for (let i = 0; i < 10; i++) game.tick();
 
-    // Save
-    const result = saveManager.save('test1');
-    assertEqual(result.success, true, 'save succeeds');
+        // Save
+        const result = saveManager.save('test1');
+        expect(result.success).toBe(true);
 
-    // Verify envelope structure
-    const loadResult = storage.load('test1');
-    assertEqual(loadResult.success, true, 'load raw succeeds');
+        // Verify envelope structure
+        const loadResult = storage.load('test1');
+        expect(loadResult.success).toBe(true);
 
-    const envelope = loadResult.data;
-    assertEqual(envelope.format, 'asterobia-save', 'format');
-    assertEqual(envelope.schemaVersion, 1, 'schema version');
-    assertEqual(envelope.state.simLoop.tickCount, 10, 'tick count');
-    assertEqual(envelope.state.game.units.length, 2, 'unit count');
-    assertEqual(envelope.state.rng.callCount > 0, true, 'RNG was used');
-    assertEqual(envelope.state.entityIdCounter, 3, 'entity ID counter');
-});
+        const envelope = loadResult.data;
+        expect(envelope.format).toBe('asterobia-save');
+        expect(envelope.schemaVersion).toBe(1);
+        expect(envelope.state.simLoop.tickCount).toBe(10);
+        expect(envelope.state.game.units.length).toBe(2);
+        expect(envelope.state.rng.callCount > 0).toBe(true);
+        expect(envelope.state.entityIdCounter).toBe(3);
+    });
 
-test('Load restores state exactly', () => {
-    const game = new TestGame(12345);
-    const storage = new MemoryStorageAdapter();
-    const saveManager = new TestSaveManager(game, storage);
+    it('Load restores state exactly', () => {
+        const game = new TestGame(12345);
+        const storage = new MemoryStorageAdapter();
+        const saveManager = new TestSaveManager(game, storage);
 
-    // Setup and advance
-    game.createUnit(5, 0, 5);
-    for (let i = 0; i < 20; i++) game.tick();
+        // Setup and advance
+        game.createUnit(5, 0, 5);
+        for (let i = 0; i < 20; i++) game.tick();
 
-    // Capture state before save
-    const hashBeforeSave = hashState(game);
-    const positionBeforeSave = { ...game.units[0].position };
+        // Capture state before save
+        const hashBeforeSave = hashState(game);
+        const positionBeforeSave = { ...game.units[0].position };
 
-    // Save
-    saveManager.save('test2');
+        // Save
+        saveManager.save('test2');
 
-    // Advance more (corrupt current state)
-    for (let i = 0; i < 50; i++) game.tick();
+        // Advance more (corrupt current state)
+        for (let i = 0; i < 50; i++) game.tick();
 
-    // Verify state changed
-    const hashAfterChange = hashState(game);
-    if (hashBeforeSave === hashAfterChange) {
-        throw new Error('State should have changed');
-    }
+        // Verify state changed
+        const hashAfterChange = hashState(game);
+        expect(hashBeforeSave).not.toBe(hashAfterChange);
 
-    // Load
-    const result = saveManager.load('test2');
-    assertEqual(result.success, true, 'load succeeds');
+        // Load
+        const result = saveManager.load('test2');
+        expect(result.success).toBe(true);
 
-    // Verify restoration
-    const hashAfterLoad = hashState(game);
-    assertEqual(hashAfterLoad, hashBeforeSave, 'hash matches after load');
+        // Verify restoration
+        const hashAfterLoad = hashState(game);
+        expect(hashAfterLoad).toBe(hashBeforeSave);
 
-    assertEqual(game.simLoop.tickCount, 20, 'tick count restored');
-    assertEqual(game.units[0].position.x, positionBeforeSave.x, 'position.x restored');
-    assertEqual(game.units[0].position.z, positionBeforeSave.z, 'position.z restored');
-});
+        expect(game.simLoop.tickCount).toBe(20);
+        expect(game.units[0].position.x).toBe(positionBeforeSave.x);
+        expect(game.units[0].position.z).toBe(positionBeforeSave.z);
+    });
 
-test('DETERMINISM: Loaded game continues identically to original', () => {
-    // Run A: Fresh game
-    const gameA = new TestGame(12345);
-    gameA.createUnit(0, 0, 0);
-    gameA.createUnit(5, 0, 5);
+    it('DETERMINISM: Loaded game continues identically to original', () => {
+        // Run A: Fresh game
+        const gameA = new TestGame(12345);
+        gameA.createUnit(0, 0, 0);
+        gameA.createUnit(5, 0, 5);
 
-    // Advance to tick 30
-    for (let i = 0; i < 30; i++) gameA.tick();
+        // Advance to tick 30
+        for (let i = 0; i < 30; i++) gameA.tick();
 
-    // Save at tick 30
-    const storage = new MemoryStorageAdapter();
-    const saveManagerA = new TestSaveManager(gameA, storage);
-    saveManagerA.save('checkpoint');
+        // Save at tick 30
+        const storage = new MemoryStorageAdapter();
+        const saveManagerA = new TestSaveManager(gameA, storage);
+        saveManagerA.save('checkpoint');
 
-    // Continue A to tick 100
-    const hashesA = [];
-    for (let i = 30; i < 100; i++) {
-        gameA.tick();
-        hashesA.push(hashState(gameA));
-    }
-
-    // Run B: Load from checkpoint, continue to tick 100
-    const gameB = new TestGame(99999); // Different seed (will be overwritten)
-    gameB.createUnit(999, 999, 999); // Garbage data (will be cleared)
-    for (let i = 0; i < 5; i++) gameB.tick(); // Advance (will be reset)
-
-    const saveManagerB = new TestSaveManager(gameB, storage);
-    const loadResult = saveManagerB.load('checkpoint');
-    assertEqual(loadResult.success, true, 'B loads successfully');
-
-    // Verify B starts at tick 30
-    assertEqual(gameB.simLoop.tickCount, 30, 'B starts at tick 30');
-
-    // Continue B to tick 100
-    const hashesB = [];
-    for (let i = 30; i < 100; i++) {
-        gameB.tick();
-        hashesB.push(hashState(gameB));
-    }
-
-    // Compare every tick hash
-    for (let i = 0; i < hashesA.length; i++) {
-        if (hashesA[i] !== hashesB[i]) {
-            throw new Error(`Tick ${i + 31} diverged:\n  A: ${hashesA[i]}\n  B: ${hashesB[i]}`);
+        // Continue A to tick 100
+        const hashesA = [];
+        for (let i = 30; i < 100; i++) {
+            gameA.tick();
+            hashesA.push(hashState(gameA));
         }
-    }
-});
 
-test('DETERMINISM: Multiple save/load cycles maintain determinism', () => {
-    const storage = new MemoryStorageAdapter();
-    const hashes = [];
+        // Run B: Load from checkpoint, continue to tick 100
+        const gameB = new TestGame(99999); // Different seed (will be overwritten)
+        gameB.createUnit(999, 999, 999); // Garbage data (will be cleared)
+        for (let i = 0; i < 5; i++) gameB.tick(); // Advance (will be reset)
 
-    // Run 1: Fresh start, save at 50, continue to 100
-    const game1 = new TestGame(54321);
-    game1.createUnit(1, 0, 1);
-    game1.createUnit(2, 0, 2);
-    game1.createUnit(3, 0, 3);
+        const saveManagerB = new TestSaveManager(gameB, storage);
+        const loadResult = saveManagerB.load('checkpoint');
+        expect(loadResult.success).toBe(true);
 
-    for (let i = 0; i < 50; i++) game1.tick();
-    new TestSaveManager(game1, storage).save('slot');
+        // Verify B starts at tick 30
+        expect(gameB.simLoop.tickCount).toBe(30);
 
-    for (let i = 50; i < 100; i++) {
-        game1.tick();
-        hashes.push(hashState(game1));
-    }
-
-    // Run 2: Load at 50, continue to 100
-    const game2 = new TestGame(0);
-    new TestSaveManager(game2, storage).load('slot');
-
-    for (let i = 50; i < 100; i++) {
-        game2.tick();
-        const hash2 = hashState(game2);
-        if (hash2 !== hashes[i - 50]) {
-            throw new Error(`Divergence at tick ${i + 1}`);
+        // Continue B to tick 100
+        const hashesB = [];
+        for (let i = 30; i < 100; i++) {
+            gameB.tick();
+            hashesB.push(hashState(gameB));
         }
-    }
+
+        // Compare every tick hash
+        for (let i = 0; i < hashesA.length; i++) {
+            expect(hashesB[i]).toBe(hashesA[i]);
+        }
+    });
+
+    it('DETERMINISM: Multiple save/load cycles maintain determinism', () => {
+        const storage = new MemoryStorageAdapter();
+        const hashes = [];
+
+        // Run 1: Fresh start, save at 50, continue to 100
+        const game1 = new TestGame(54321);
+        game1.createUnit(1, 0, 1);
+        game1.createUnit(2, 0, 2);
+        game1.createUnit(3, 0, 3);
+
+        for (let i = 0; i < 50; i++) game1.tick();
+        new TestSaveManager(game1, storage).save('slot');
+
+        for (let i = 50; i < 100; i++) {
+            game1.tick();
+            hashes.push(hashState(game1));
+        }
+
+        // Run 2: Load at 50, continue to 100
+        const game2 = new TestGame(0);
+        new TestSaveManager(game2, storage).load('slot');
+
+        for (let i = 50; i < 100; i++) {
+            game2.tick();
+            const hash2 = hashState(game2);
+            expect(hash2).toBe(hashes[i - 50]);
+        }
+    });
+
+    it('RNG state is correctly preserved', () => {
+        const game = new TestGame(11111);
+        const storage = new MemoryStorageAdapter();
+        const saveManager = new TestSaveManager(game, storage);
+
+        game.createUnit(0, 0, 0);
+
+        // Use RNG a specific number of times
+        for (let i = 0; i < 25; i++) game.tick();
+
+        const rngStateBefore = game.rng.getState();
+        saveManager.save('rng_test');
+
+        // Corrupt RNG
+        for (let i = 0; i < 100; i++) game.rng.next();
+
+        // Load
+        saveManager.load('rng_test');
+
+        const rngStateAfter = game.rng.getState();
+
+        expect(rngStateAfter.seed).toBe(rngStateBefore.seed);
+        expect(rngStateAfter.state).toBe(rngStateBefore.state);
+        expect(rngStateAfter.callCount).toBe(rngStateBefore.callCount);
+    });
+
+    it('Entity ID counter is preserved', () => {
+        const game = new TestGame(22222);
+        const storage = new MemoryStorageAdapter();
+        const saveManager = new TestSaveManager(game, storage);
+
+        // Create 5 units
+        for (let i = 0; i < 5; i++) {
+            game.createUnit(i, 0, i);
+        }
+
+        const counterBefore = game.idGenerator.peekEntityId();
+        expect(counterBefore).toBe(6);
+
+        saveManager.save('id_test');
+
+        // Create more units (corrupt counter)
+        for (let i = 0; i < 10; i++) {
+            game.createUnit(i, 0, i);
+        }
+        expect(game.idGenerator.peekEntityId()).toBe(16);
+
+        // Load
+        saveManager.load('id_test');
+
+        const counterAfter = game.idGenerator.peekEntityId();
+        expect(counterAfter).toBe(6);
+
+        // New unit should get ID 6
+        const newUnit = game.createUnit(0, 0, 0);
+        expect(newUnit.id).toBe(6);
+    });
+
+    it('Save/load with zero units works', () => {
+        const game = new TestGame(33333);
+        const storage = new MemoryStorageAdapter();
+        const saveManager = new TestSaveManager(game, storage);
+
+        // No units, just advance ticks
+        for (let i = 0; i < 10; i++) game.tick();
+
+        saveManager.save('empty');
+
+        // Add units (corrupt)
+        game.createUnit(0, 0, 0);
+        game.createUnit(1, 0, 1);
+
+        // Load
+        saveManager.load('empty');
+
+        expect(game.units.length).toBe(0);
+        expect(game.simLoop.tickCount).toBe(10);
+    });
+
+    it('Invalid save data is rejected', () => {
+        const game = new TestGame(44444);
+        const storage = new MemoryStorageAdapter();
+        const saveManager = new TestSaveManager(game, storage);
+
+        // Save garbage data directly
+        storage.save('bad1', { garbage: true });
+        storage.save('bad2', { format: 'wrong-format', state: {} });
+        storage.save('bad3', { format: 'asterobia-save' }); // missing state
+
+        const result1 = saveManager.load('bad1');
+        expect(result1.success).toBe(false);
+
+        const result2 = saveManager.load('bad2');
+        expect(result2.success).toBe(false);
+
+        const result3 = saveManager.load('bad3');
+        expect(result3.success).toBe(false);
+    });
+
+    it('Load nonexistent save fails gracefully', () => {
+        const game = new TestGame(55555);
+        const storage = new MemoryStorageAdapter();
+        const saveManager = new TestSaveManager(game, storage);
+
+        const result = saveManager.load('does_not_exist');
+        expect(result.success).toBe(false);
+        expect(typeof result.error).toBe('string');
+    });
+
+    it('Load with getter-only selectedUnit does not throw', () => {
+        // Simulate game adapter with getter-only selectedUnit (like real Game.js)
+        const baseGame = new TestGame(66666);
+        baseGame.createUnit(0, 0, 0);
+        baseGame.selectedUnit = baseGame.units[0]; // Set selection
+
+        // Create adapter with getter-only selectedUnit (no setter)
+        let selectionRestored = false;
+        const gameWithGetterOnly = {
+            simLoop: baseGame.simLoop,
+            units: baseGame.units,
+            get selectedUnit() { return baseGame.selectedUnit; },
+            set selectedUnit(unit) {
+                // Setter exists but delegates to method (like real Game adapter)
+                selectionRestored = true;
+                baseGame.selectedUnit = unit;
+            },
+            rng: baseGame.rng,
+            idGenerator: baseGame.idGenerator
+        };
+
+        const storage = new MemoryStorageAdapter();
+        const saveManager = new TestSaveManager(gameWithGetterOnly, storage);
+
+        // Save with selection
+        for (let i = 0; i < 5; i++) baseGame.tick();
+        saveManager.save('with_selection');
+
+        // Clear selection
+        baseGame.selectedUnit = null;
+        selectionRestored = false;
+
+        // Load - should not throw
+        let loadError = null;
+        try {
+            const result = saveManager.load('with_selection');
+            expect(result.success).toBe(true);
+        } catch (e) {
+            loadError = e;
+        }
+
+        expect(loadError).toBe(null);
+        expect(selectionRestored).toBe(true);
+    });
+
+    it('Quaternion/heading is restored (not identity) after save/load', () => {
+        const game = new TestGame(77777);
+        const storage = new MemoryStorageAdapter();
+        const saveManager = new TestSaveManager(game, storage);
+
+        // Create unit and let it turn/move
+        const unit = game.createUnit(0, 0, 0);
+
+        // Run several ticks to accumulate rotation
+        for (let i = 0; i < 20; i++) game.tick();
+
+        // Capture quaternion state before save
+        const quatBeforeSave = { ...unit.quaternion };
+
+        // Verify quaternion is NOT identity (unit has turned)
+        const isIdentity = (
+            Math.abs(quatBeforeSave.x) < 0.001 &&
+            Math.abs(quatBeforeSave.y) < 0.001 &&
+            Math.abs(quatBeforeSave.z) < 0.001 &&
+            Math.abs(quatBeforeSave.w - 1) < 0.001
+        );
+        expect(isIdentity).toBe(false);
+
+        // Save
+        saveManager.save('rotation_test');
+
+        // Corrupt quaternion (set to identity)
+        unit.quaternion = { x: 0, y: 0, z: 0, w: 1 };
+        unit.headingQuaternion = { x: 0, y: 0, z: 0, w: 1 };
+
+        // Load
+        const result = saveManager.load('rotation_test');
+        expect(result.success).toBe(true);
+
+        // Verify quaternion restored (matches before save)
+        const restoredUnit = game.units[0];
+        expect(
+            Math.abs(restoredUnit.quaternion.x - quatBeforeSave.x) < 0.0001
+        ).toBe(true);
+        expect(
+            Math.abs(restoredUnit.quaternion.y - quatBeforeSave.y) < 0.0001
+        ).toBe(true);
+        expect(
+            Math.abs(restoredUnit.quaternion.w - quatBeforeSave.w) < 0.0001
+        ).toBe(true);
+
+        // Verify headingQuaternion also restored
+        expect(
+            Math.abs(restoredUnit.headingQuaternion.y - quatBeforeSave.y) < 0.0001
+        ).toBe(true);
+    });
+
 });
-
-test('RNG state is correctly preserved', () => {
-    const game = new TestGame(11111);
-    const storage = new MemoryStorageAdapter();
-    const saveManager = new TestSaveManager(game, storage);
-
-    game.createUnit(0, 0, 0);
-
-    // Use RNG a specific number of times
-    for (let i = 0; i < 25; i++) game.tick();
-
-    const rngStateBefore = game.rng.getState();
-    saveManager.save('rng_test');
-
-    // Corrupt RNG
-    for (let i = 0; i < 100; i++) game.rng.next();
-
-    // Load
-    saveManager.load('rng_test');
-
-    const rngStateAfter = game.rng.getState();
-
-    assertEqual(rngStateAfter.seed, rngStateBefore.seed, 'RNG seed');
-    assertEqual(rngStateAfter.state, rngStateBefore.state, 'RNG internal state');
-    assertEqual(rngStateAfter.callCount, rngStateBefore.callCount, 'RNG call count');
-});
-
-test('Entity ID counter is preserved', () => {
-    const game = new TestGame(22222);
-    const storage = new MemoryStorageAdapter();
-    const saveManager = new TestSaveManager(game, storage);
-
-    // Create 5 units
-    for (let i = 0; i < 5; i++) {
-        game.createUnit(i, 0, i);
-    }
-
-    const counterBefore = game.idGenerator.peekEntityId();
-    assertEqual(counterBefore, 6, 'counter after 5 units');
-
-    saveManager.save('id_test');
-
-    // Create more units (corrupt counter)
-    for (let i = 0; i < 10; i++) {
-        game.createUnit(i, 0, i);
-    }
-    assertEqual(game.idGenerator.peekEntityId(), 16, 'counter corrupted');
-
-    // Load
-    saveManager.load('id_test');
-
-    const counterAfter = game.idGenerator.peekEntityId();
-    assertEqual(counterAfter, 6, 'counter restored');
-
-    // New unit should get ID 6
-    const newUnit = game.createUnit(0, 0, 0);
-    assertEqual(newUnit.id, 6, 'new unit gets correct ID');
-});
-
-test('Save/load with zero units works', () => {
-    const game = new TestGame(33333);
-    const storage = new MemoryStorageAdapter();
-    const saveManager = new TestSaveManager(game, storage);
-
-    // No units, just advance ticks
-    for (let i = 0; i < 10; i++) game.tick();
-
-    saveManager.save('empty');
-
-    // Add units (corrupt)
-    game.createUnit(0, 0, 0);
-    game.createUnit(1, 0, 1);
-
-    // Load
-    saveManager.load('empty');
-
-    assertEqual(game.units.length, 0, 'units cleared');
-    assertEqual(game.simLoop.tickCount, 10, 'tick restored');
-});
-
-test('Invalid save data is rejected', () => {
-    const game = new TestGame(44444);
-    const storage = new MemoryStorageAdapter();
-    const saveManager = new TestSaveManager(game, storage);
-
-    // Save garbage data directly
-    storage.save('bad1', { garbage: true });
-    storage.save('bad2', { format: 'wrong-format', state: {} });
-    storage.save('bad3', { format: 'asterobia-save' }); // missing state
-
-    const result1 = saveManager.load('bad1');
-    assertEqual(result1.success, false, 'rejects garbage');
-
-    const result2 = saveManager.load('bad2');
-    assertEqual(result2.success, false, 'rejects wrong format');
-
-    const result3 = saveManager.load('bad3');
-    assertEqual(result3.success, false, 'rejects missing state');
-});
-
-test('Load nonexistent save fails gracefully', () => {
-    const game = new TestGame(55555);
-    const storage = new MemoryStorageAdapter();
-    const saveManager = new TestSaveManager(game, storage);
-
-    const result = saveManager.load('does_not_exist');
-    assertEqual(result.success, false, 'fails');
-    assertEqual(typeof result.error, 'string', 'has error message');
-});
-
-test('Load with getter-only selectedUnit does not throw', () => {
-    // Simulate game adapter with getter-only selectedUnit (like real Game.js)
-    const baseGame = new TestGame(66666);
-    baseGame.createUnit(0, 0, 0);
-    baseGame.selectedUnit = baseGame.units[0]; // Set selection
-
-    // Create adapter with getter-only selectedUnit (no setter)
-    let selectionRestored = false;
-    const gameWithGetterOnly = {
-        simLoop: baseGame.simLoop,
-        units: baseGame.units,
-        get selectedUnit() { return baseGame.selectedUnit; },
-        set selectedUnit(unit) {
-            // Setter exists but delegates to method (like real Game adapter)
-            selectionRestored = true;
-            baseGame.selectedUnit = unit;
-        },
-        rng: baseGame.rng,
-        idGenerator: baseGame.idGenerator
-    };
-
-    const storage = new MemoryStorageAdapter();
-    const saveManager = new TestSaveManager(gameWithGetterOnly, storage);
-
-    // Save with selection
-    for (let i = 0; i < 5; i++) baseGame.tick();
-    saveManager.save('with_selection');
-
-    // Clear selection
-    baseGame.selectedUnit = null;
-    selectionRestored = false;
-
-    // Load - should not throw
-    let loadError = null;
-    try {
-        const result = saveManager.load('with_selection');
-        assertEqual(result.success, true, 'load succeeds');
-    } catch (e) {
-        loadError = e;
-    }
-
-    assertEqual(loadError, null, 'no exception thrown');
-    assertEqual(selectionRestored, true, 'setter was called');
-});
-
-test('Quaternion/heading is restored (not identity) after save/load', () => {
-    const game = new TestGame(77777);
-    const storage = new MemoryStorageAdapter();
-    const saveManager = new TestSaveManager(game, storage);
-
-    // Create unit and let it turn/move
-    const unit = game.createUnit(0, 0, 0);
-
-    // Run several ticks to accumulate rotation
-    for (let i = 0; i < 20; i++) game.tick();
-
-    // Capture quaternion state before save
-    const quatBeforeSave = { ...unit.quaternion };
-
-    // Verify quaternion is NOT identity (unit has turned)
-    const isIdentity = (
-        Math.abs(quatBeforeSave.x) < 0.001 &&
-        Math.abs(quatBeforeSave.y) < 0.001 &&
-        Math.abs(quatBeforeSave.z) < 0.001 &&
-        Math.abs(quatBeforeSave.w - 1) < 0.001
-    );
-    assertEqual(isIdentity, false, 'quaternion is not identity before save');
-
-    // Save
-    saveManager.save('rotation_test');
-
-    // Corrupt quaternion (set to identity)
-    unit.quaternion = { x: 0, y: 0, z: 0, w: 1 };
-    unit.headingQuaternion = { x: 0, y: 0, z: 0, w: 1 };
-
-    // Load
-    const result = saveManager.load('rotation_test');
-    assertEqual(result.success, true, 'load succeeds');
-
-    // Verify quaternion restored (matches before save)
-    const restoredUnit = game.units[0];
-    assertEqual(
-        Math.abs(restoredUnit.quaternion.x - quatBeforeSave.x) < 0.0001,
-        true,
-        'quaternion.x restored'
-    );
-    assertEqual(
-        Math.abs(restoredUnit.quaternion.y - quatBeforeSave.y) < 0.0001,
-        true,
-        'quaternion.y restored'
-    );
-    assertEqual(
-        Math.abs(restoredUnit.quaternion.w - quatBeforeSave.w) < 0.0001,
-        true,
-        'quaternion.w restored'
-    );
-
-    // Verify headingQuaternion also restored
-    assertEqual(
-        Math.abs(restoredUnit.headingQuaternion.y - quatBeforeSave.y) < 0.0001,
-        true,
-        'headingQuaternion.y restored'
-    );
-});
-
-// ============ Summary ============
-
-console.log(`\n${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-    process.exit(1);
-} else {
-    console.log('\n✓ All R011 Save/Load tests PASS');
-    console.log('\nPROOF OF DETERMINISM:');
-    console.log('  - Save captures all determinism-critical state');
-    console.log('  - Load restores state exactly (hash match)');
-    console.log('  - Post-load simulation matches original (tick-by-tick)');
-    console.log('  - RNG state, entity IDs, tick count all preserved');
-    process.exit(0);
-}

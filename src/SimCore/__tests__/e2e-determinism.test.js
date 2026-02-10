@@ -7,17 +7,14 @@
  * - same command stream
  * produce identical authoritative state after N ticks.
  *
- * Run via Node.js:
- *   node --experimental-vm-modules src/SimCore/__tests__/e2e-determinism.test.js
- *
- * Or in browser console:
- *   import('./src/SimCore/__tests__/e2e-determinism.test.js').then(m => m.runTest())
+ * Run: npx vitest run src/SimCore/__tests__/e2e-determinism.test.js
  *
  * Position comparison: EXACT equality (no epsilon).
  * Rationale: Deterministic sim with same seed + same inputs MUST produce
  * bit-identical results. Any floating-point divergence indicates a bug.
  */
 
+import { describe, it, expect } from 'vitest';
 import { SimLoop } from '../runtime/SimLoop.js';
 import { resetGlobalRNG, rngNext } from '../runtime/SeededRNG.js';
 import { resetEntityIdCounter, nextEntityId } from '../runtime/IdGenerator.js';
@@ -236,7 +233,7 @@ class HeadlessSim {
     }
 }
 
-// ============ Test Runner ============
+// ============ Snapshot Comparison ============
 
 /**
  * Compare two state snapshots for exact equality.
@@ -281,145 +278,102 @@ function compareSnapshots(snap1, snap2) {
     };
 }
 
-/**
- * Run the end-to-end determinism test.
- */
-export function runTest() {
-    console.log('=== E2E Determinism Verification Test ===\n');
+// ============ Tests ============
 
-    const SEED = 42;
-    const TICKS = 100;
+describe('E2E Determinism Verification', () => {
+    it('dual-run produces identical state after 100 ticks', () => {
+        const SEED = 42;
+        const TICKS = 100;
 
-    // Create two independent sim instances with same seed
-    const sim1 = new HeadlessSim(SEED);
-    const sim2 = new HeadlessSim(SEED);
+        // Create two independent sim instances with same seed
+        const sim1 = new HeadlessSim(SEED);
+        const sim2 = new HeadlessSim(SEED);
 
-    // Schedule identical command streams for both sims
-    const commands = [
-        { tick: 1, type: CommandTypes.SPAWN, payload: { x: 0, y: 10, z: 0 } },
-        { tick: 1, type: CommandTypes.SPAWN, payload: { x: 5, y: 10, z: 0 } },
-        { tick: 5, type: CommandTypes.MOVE, payload: { unitId: 1, dx: 1, dy: 0, dz: 0 } },
-        { tick: 5, type: CommandTypes.MOVE, payload: { unitId: 2, dx: 0, dy: 0, dz: 1 } },
-        { tick: 30, type: CommandTypes.MOVE, payload: { unitId: 1, dx: 0, dy: 0, dz: -1 } },
-        { tick: 50, type: CommandTypes.STOP, payload: { unitId: 2 } },
-        { tick: 70, type: CommandTypes.MOVE, payload: { unitId: 2, dx: -1, dy: 0, dz: 0 } },
-        { tick: 90, type: CommandTypes.STOP, payload: { unitId: 1 } },
-    ];
+        // Schedule identical command streams for both sims
+        const commands = [
+            { tick: 1, type: CommandTypes.SPAWN, payload: { x: 0, y: 10, z: 0 } },
+            { tick: 1, type: CommandTypes.SPAWN, payload: { x: 5, y: 10, z: 0 } },
+            { tick: 5, type: CommandTypes.MOVE, payload: { unitId: 1, dx: 1, dy: 0, dz: 0 } },
+            { tick: 5, type: CommandTypes.MOVE, payload: { unitId: 2, dx: 0, dy: 0, dz: 1 } },
+            { tick: 30, type: CommandTypes.MOVE, payload: { unitId: 1, dx: 0, dy: 0, dz: -1 } },
+            { tick: 50, type: CommandTypes.STOP, payload: { unitId: 2 } },
+            { tick: 70, type: CommandTypes.MOVE, payload: { unitId: 2, dx: -1, dy: 0, dz: 0 } },
+            { tick: 90, type: CommandTypes.STOP, payload: { unitId: 1 } },
+        ];
 
-    for (const cmd of commands) {
-        sim1.scheduleCommand(cmd.type, cmd.payload, cmd.tick);
-        sim2.scheduleCommand(cmd.type, cmd.payload, cmd.tick);
-    }
-
-    console.log(`Seed: ${SEED}`);
-    console.log(`Ticks: ${TICKS}`);
-    console.log(`Commands: ${commands.length}`);
-    console.log('');
-
-    // Run both sims for 100 ticks
-    console.log('Running Sim 1...');
-    // CRITICAL: Reset globals before execution logic starts
-    resetGlobalRNG(SEED);
-    resetEntityIdCounter();
-    sim1.runTicks(TICKS);
-    const snap1 = sim1.getStateSnapshot();
-
-    console.log('Running Sim 2...');
-    // CRITICAL: Reset globals again for the second instance
-    resetGlobalRNG(SEED);
-    resetEntityIdCounter();
-    sim2.runTicks(TICKS);
-    const snap2 = sim2.getStateSnapshot();
-
-    // Compare
-    console.log('\nComparing states...');
-    const result = compareSnapshots(snap1, snap2);
-
-    if (result.equal) {
-        console.log('\n✓ PASS: States are IDENTICAL');
-        console.log(`  - ${snap1.units.length} units`);
-        console.log(`  - ${snap1.tickCount} ticks completed`);
-
-        // Show final positions for verification
-        console.log('\nFinal unit states:');
-        for (const u of snap1.units) {
-            console.log(`  Unit ${u.id}: (${u.position.x.toFixed(6)}, ${u.position.y.toFixed(6)}, ${u.position.z.toFixed(6)})`);
-        }
-
-        return { passed: true, snapshot: snap1 };
-    } else {
-        console.log('\n✗ FAIL: States DIFFER');
-        console.log('Differences:');
-        for (const diff of result.differences) {
-            console.log(`  - ${diff}`);
-        }
-
-        return { passed: false, differences: result.differences, snap1, snap2 };
-    }
-}
-
-/**
- * Run multiple iterations to verify consistency.
- */
-export function runStressTest(iterations = 10) {
-    console.log(`=== Stress Test: ${iterations} iterations ===\n`);
-
-    let passed = 0;
-    let failed = 0;
-
-    for (let i = 0; i < iterations; i++) {
-        // Use different seeds to test various scenarios
-        const seed = 1000 + i;
-
-        const sim1 = new HeadlessSim(seed);
-        const sim2 = new HeadlessSim(seed);
-
-        // Random but deterministic command generation
-        resetGlobalRNG(seed * 100);
-        const commands = [];
-        for (let t = 1; t <= 50; t += 5) {
-            commands.push({
-                tick: t,
-                type: CommandTypes.SPAWN,
-                payload: { x: rngNext() * 10, y: 10, z: rngNext() * 10 }
-            });
-        }
-
-        // Reset RNG and apply to both sims
-        resetGlobalRNG(seed * 100);
         for (const cmd of commands) {
             sim1.scheduleCommand(cmd.type, cmd.payload, cmd.tick);
-        }
-        resetGlobalRNG(seed * 100);
-        for (const cmd of commands) {
             sim2.scheduleCommand(cmd.type, cmd.payload, cmd.tick);
         }
 
-        sim1.runTicks(100);
-        sim2.runTicks(100);
+        // Run both sims for 100 ticks
+        // CRITICAL: Reset globals before execution logic starts
+        resetGlobalRNG(SEED);
+        resetEntityIdCounter();
+        sim1.runTicks(TICKS);
+        const snap1 = sim1.getStateSnapshot();
 
-        const result = compareSnapshots(sim1.getStateSnapshot(), sim2.getStateSnapshot());
+        // CRITICAL: Reset globals again for the second instance
+        resetGlobalRNG(SEED);
+        resetEntityIdCounter();
+        sim2.runTicks(TICKS);
+        const snap2 = sim2.getStateSnapshot();
 
-        if (result.equal) {
-            passed++;
-        } else {
-            failed++;
-            console.log(`  Iteration ${i + 1} (seed ${seed}): FAILED`);
+        // Compare
+        const result = compareSnapshots(snap1, snap2);
+
+        expect(result.equal).toBe(true);
+        expect(snap1.units.length).toBe(2);
+    });
+
+    it('stress test: 10 seeds produce identical state', () => {
+        const iterations = 10;
+        let passedCount = 0;
+        let failedCount = 0;
+
+        for (let i = 0; i < iterations; i++) {
+            // Use different seeds to test various scenarios
+            const seed = 1000 + i;
+
+            const sim1 = new HeadlessSim(seed);
+            const sim2 = new HeadlessSim(seed);
+
+            // Random but deterministic command generation
+            resetGlobalRNG(seed * 100);
+            const commands = [];
+            for (let t = 1; t <= 50; t += 5) {
+                commands.push({
+                    tick: t,
+                    type: CommandTypes.SPAWN,
+                    payload: { x: rngNext() * 10, y: 10, z: rngNext() * 10 }
+                });
+            }
+
+            // Apply commands to both sims (commands already generated above)
+            for (const cmd of commands) {
+                sim1.scheduleCommand(cmd.type, cmd.payload, cmd.tick);
+                sim2.scheduleCommand(cmd.type, cmd.payload, cmd.tick);
+            }
+
+            // CRITICAL: Reset globals before each run (same pattern as dual-run test)
+            resetGlobalRNG(seed);
+            resetEntityIdCounter();
+            sim1.runTicks(100);
+
+            resetGlobalRNG(seed);
+            resetEntityIdCounter();
+            sim2.runTicks(100);
+
+            const result = compareSnapshots(sim1.getStateSnapshot(), sim2.getStateSnapshot());
+
+            if (result.equal) {
+                passedCount++;
+            } else {
+                failedCount++;
+            }
         }
-    }
 
-    console.log(`\nResults: ${passed} passed, ${failed} failed`);
-    return { passed, failed };
-}
-
-// ============ Auto-run if executed directly ============
-
-// Node.js detection
-const isNode = typeof process !== 'undefined' && process.versions && process.versions.node;
-
-if (isNode) {
-    const result = runTest();
-    process.exit(result.passed ? 0 : 1);
-} else if (typeof window !== 'undefined') {
-    console.log('E2E Determinism Test loaded. Call runTest() to execute.');
-}
+        expect(failedCount).toBe(0);
+        expect(passedCount).toBe(iterations);
+    });
+});

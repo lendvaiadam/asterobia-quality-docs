@@ -17,8 +17,24 @@ export class CommandDebugOverlay {
         this._element = null;
         this._updateInterval = null;
 
-        this._createOverlay();
-        this._bindToggle();
+        // W2: Only create UI elements in dev mode
+        this._isDevMode = this._checkDevMode();
+
+        if (this._isDevMode) {
+            this._createOverlay();
+            this._bindToggle();
+        }
+    }
+
+    /**
+     * W2: Check if dev mode is enabled via URL parameter.
+     * @private
+     * @returns {boolean}
+     */
+    _checkDevMode() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const hash = window.location.hash;
+        return urlParams.has('dev') || hash.includes('dev=1');
     }
 
     _createOverlay() {
@@ -37,7 +53,7 @@ export class CommandDebugOverlay {
             padding: 10px;
             border: 1px solid #0f0;
             border-radius: 4px;
-            z-index: 10000;
+            z-index: 15000;
             overflow-y: auto;
             display: none;
         `;
@@ -66,7 +82,7 @@ export class CommandDebugOverlay {
             font-family: monospace;
             font-size: 10px;
             cursor: pointer;
-            z-index: 10001;
+            z-index: 15001;
         `;
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -88,6 +104,9 @@ export class CommandDebugOverlay {
     }
 
     toggle() {
+        // W2: No-op if not in dev mode
+        if (!this._isDevMode || !this._element) return;
+
         this._visible = !this._visible;
 
         if (this._visible) {
@@ -100,12 +119,18 @@ export class CommandDebugOverlay {
     }
 
     show() {
+        // W2: No-op if not in dev mode
+        if (!this._isDevMode || !this._element) return;
+
         this._visible = true;
         this._element.style.display = 'block';
         this._startUpdates();
     }
 
     hide() {
+        // W2: No-op if not in dev mode
+        if (!this._isDevMode || !this._element) return;
+
         this._visible = false;
         this._element.style.display = 'none';
         this._stopUpdates();

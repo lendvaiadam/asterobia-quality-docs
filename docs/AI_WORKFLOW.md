@@ -1,0 +1,402 @@
+# AI WORKFLOW & PROTOCOLS
+
+**Purpose:** Defines HOW the hierarchy executes tasks, ensuring strict authority and quality control.
+**Operator Model:** Human acts as Router. Mailbox is AI-only.
+**Replaces:** `PLANNING_PROTOCOL.md`
+
+---
+
+## 0. Operator Communication Standard (BINDING)
+
+Humans do NOT read `docs/MAILBOX.md`. Agents must output this block to trigger action:
+
+```text
+[ROUTING]
+TO: <Agent/Terminal Name>
+PASTE: <exact text to paste or file path to copy>
+CONTEXT: <1 sentence why>
+[/ROUTING]
+```
+
+### 0.b Context Threshold Rule (70k Tokens)
+**Trigger**: If Context > 70,000 tokens OR "High Context" warning appears.
+**Action**: Agent MUST output a Routing Block:
+```text
+[ROUTING]
+TO: Current Chat
+PASTE: /compact
+CONTEXT: Context threshold (70k) exceeded. Preventing brain fog.
+[/ROUTING]
+```
+
+---
+
+## 1. The Work Cycle
+
+### Step 1: Definition (Antigravity)
+- **Input**: User Request or Roadmap Item.
+- **Action**: Antigravity reviews `master_plan` and `specs`.
+- **Output**: Validated Requirement / Spec Gap Analysis.
+
+### Step 2: Orchestration (Claude Orchestrator)
+- **Input**: Validated Requirement.
+- **Action**: Breakdown into `Work Orders`.
+- **Action**: Create Branch `feature/task-name`.
+- **Output**: Markdown Plan + Branch.
+
+### Step 3: Execution (Fixed Roster)
+- **Setup**: 5 Fixed Windows (Orchestrator + 4 Workers).
+- **Input**: Single Work Order.
+- **Action**: Implement code + unit tests.
+- **Check**: Trigger "Antigravity Escalation" if risks detected.
+- **Output**: Code Commit on Feature Branch + Test Result.
+
+### Step 4: Integration (Claude Orchestrator)
+- **Input**: Worker Commits.
+- **Action**: Run Integration Tests. Resolve Conflicts.
+- **Output**: "Ready for Review" PR candidate.
+
+### Step 5: Audit & Merge (Antigravity + Ádám)
+- **Input**: PR Candidate.
+- **Action (Antigravity)**: Check against `IMPLEMENTATION_GATES.md`.
+- **Action (Ádám)**: Run HU Test Scenario.
+- **Decision**: PASS / FAIL.
+- **Output**: Merge to `main` (if PASS).
+
+---
+
+## 2. Authority & Decision Rights (BINDING)
+
+| Activity | Who Proposes? | Who Decides (Veto)? | Who Executes? |
+| :--- | :--- | :--- | :--- |
+| **New Feature Scope** | Orchestrator / User | **Ádám (Owner)** | Antigravity (Docs) |
+| **Architecture Change** | Orchestrator | **Antigravity (CTO)** | Workers |
+| **Code Implementation** | Workers | **Orchestrator (Lead)** | Workers |
+| **Merge to Main** | Orchestrator | **Antigravity + Ádám** | **Antigravity Only** |
+| **Release Tagging** | Antigravity | **Ádám** | Antigravity |
+
+### Conflict Resolution
+1.  **Code Conflict**: Orchestrator resolves worker conflicts.
+2.  **Spec Conflict**: Antigravity rules on Canonical constraints.
+3.  **Vision Conflict**: Ádám has final say.
+
+### Mid-flight Antigravity Escalation (MANDATORY)
+Workers/Orchestrator MUST pause and summon Antigravity if:
+- Scope ambiguity / unclear spec interpretation.
+- Potential architecture impact (e.g. adding dependencies).
+- Determinism or authority concerns.
+- Any "unknown unknown" risk flagged.
+
+**Mechanics:**
+1. Post to `docs/MAILBOX.md` with: `[ESCALATION] [WO-XXX] [Reason]`.
+2. Antigravity responds with: `[DECISION] [APPROVE/REJECT/MODIFY]`.
+3. Work resumes only after decision is logged in Work Order.
+
+### Human Absence Protocol
+- No autonomous merge without explicit human PASS.
+- If Ádám unavailable >4h: Orchestrator + Workers may continue up to “PR Candidate ready”.
+- Work pauses at final merge/release gate until Ádám returns OR explicit delegation is documented in DECISIONS_LOG.
+
+### Decision Tiebreaker
+- If Antigravity PASS and Ádám FAIL: Ádám wins (product authority).
+- If Antigravity FAIL and Ádám PASS: Antigravity wins (quality gate / safety).
+
+---
+
+## 3. Branching Strategy
+
+- **`main`**: Protected. Production-ready. **NO DIRECT PUSH.**
+- **Parent (Orchestrator)**: `work/WO-XXX` (Integration branch).
+- **Worker (Worker)**: `work/WO-XXX-[backend|frontend|qa|refactor]`.
+
+**Rule**: Orchestrator creates Parent; Worker creates Worker branch.
+**Rule**: Only Antigravity performs the final merge to `main`.
+
+---
+
+---
+
+## 4. The "Work Order" Protocol (Orchestrator -> Worker)
+
+### 4.A Pre-Issue Gate (Mandatory Checks)
+**Before issuing ANY Work Order**, Orchestrator MUST:
+1.  **De-Dup Check**: Read `docs/STATUS_WALKTHROUGH.md` & `git log`. If done, SKIP.
+2.  **Double-Check (CTO Ping #1)**:
+    - **Trigger**: Before finalizing the plan.
+    - **Action**: Ask Antigravity **5–8 targeted questions** regarding:
+      - *Best practices / Patterns*
+      - *Performance risks*
+      - *Determinism constraints*
+      - *Documentation alignment*
+    - **Wait**: Do not proceed until Antigravity responds with `[ACK]`.
+3.  **Result**: Proceed only after De-Dup PASS and Antigravity ACK.
+
+### 4.0 Parallel Execution Policy (Safe-by-Default)
+
+**Policy**: Orchestrator MUST decompose suitable Work Orders into **Parallel Tasks** for W1–W4.
+**Default**: Parallel execution is the standard, not the exception.
+
+**Independence Criteria (Must all be true)**:
+1.  **No Shared Files**: Tasks touch disjoint file sets (or Orchestrator explicitly partitions ownership).
+2.  **No Shared API Churn**: Contracts are stable or defined upfront.
+3.  **No Architecture Risk**: No new dependencies or structural changes (otherwise: CTO Ping first).
+4.  **Determinism**: Network/Visuals must not mutually corrupt SimCore state.
+
+**Safety Constraints**:
+- **Integration**: Serialized by Orchestrator (Merge A -> Merge B).
+- **Merge to Main**: Antigravity Only.
+- **Artifact**: Orchestrator MUST publish a "Parallelization Map" in `STATUS_WALKTHROUGH.md` or the Work Order, listing which Worker owns which files.
+
+---
+
+### 4.1 Fixed 5-Window Roster (Binding)
+This roster is **IMMUTABLE**. Even if idle, these 5 agents always exist.
+
+| Role | Window | Specialization |
+| :--- | :--- | :--- |
+| **Orchestrator** | Terminal 1 | Manager, Integrator, Planner. |
+| **Worker (BE)** | Terminal 2 | Backend, Supabase, SQL (BA). |
+| **Worker (FE)** | Terminal 3 | Frontend, UI, Three.js, CSS. |
+| **Worker (QA)** | Terminal 4 | Test Writing, Regression, Verification. |
+| **Worker (RF)** | Terminal 5 | Refactor, Review, Generalist. |
+
+### 4.2 Role Header Requirement (No Starter Prompts)
+> "You are **[Role Name]**. Read `docs/ROLES_AND_AGENTS.md` **Role Registry** and follow it.
+> Your Registry Key is: `ROLES_[KEY]`.
+> Required Skills: `[List from docs/SKILLS_GOVERNANCE.md]`."
+
+### 4.B Skill Loading Enforcement (Binding)
+1.  **Orchestrator**: MUST list specific `docs/skills/skill-*.md` files in the "Required Skills" section of every WO.
+2.  **Worker**: MUST ACK by confirming "Read loadout and [Skill Files]".
+3.  **Reject**: If Worker fails to ACK skills, Orchestrator REJECTS the handoff.
+
+### 4.C Worker Liveness / Progress Gate (Hard Gate)
+**Goal**: No "assumed" work. Explicit progress tracking only.
+
+1.  **Definitions**:
+    - **ASSIGNED**: Orchestrator issued `[ROUTING]`.
+    - **ACKED**: Worker replied with explicit ACK + Branch Name.
+    - **IN-FLIGHT**: Worker produced artifact (Commit SHA or File Path).
+
+2.  **Deadlines (Binding)**:
+    - **ACK Deadline**: 30 minutes after Assignment.
+    - **Progress Deadline**: 2 hours after Assignment (must show SHA or Staged File).
+
+3.  **Enforcement**:
+    - If **ACK missed**: Orchestrator runs "Status Inquiry". Status = `ASSIGNED (NO ACK)`.
+    - If **Progress missed**: Orchestrator runs "Status Inquiry". Re-assign or Block.
+    - **CRITICAL**: Orchestrator MUST NOT integrate or advance without valid Progress Artifacts.
+
+4.  **Status Inquiry Template**:
+    > 1. What are you currently working on?
+    > 2. What concrete output do you already have (commit SHA / file path)?
+    > 3. Are you blocked? If yes, on what?
+    > 4. What is the highest-value next task right now?
+
+### 4.D Closure Receipt Gate (Hard Gate)
+**Goal**: User never hunts for SHAs. Auditable receipt in-chat is MANDATORY.
+
+1.  **Trigger**: Milestone marked as `CLOSED` or `VERIFIED` in `STATUS_WALKTHROUGH.md`.
+2.  **Action**: Antigravity/Orchestrator MUST output a "Closure Receipt" Block:
+    ```
+    === CLOSURE RECEIPT: [RXX MXX] ===
+    1. Branch: [Name] (Pushed to Origin)
+    2. Commit SHA: [Exact SHA]
+    3. Tag: [Tag Name] -> [Tag SHA]
+    4. Evidence Links:
+       - [STATUS_WALKTHROUGH](raw-link)
+       - [NOTES_ANTIGRAVITY](raw-link)
+    ```
+3.  **Constraint/Format**: 
+    - NO PLACEHOLDERS. NO "See git log".
+    - Evidence Links MUST be `raw.githubusercontent.com` URLs (SHA-pinned).
+    - **Example**:
+      `[STATUS_WALKTHROUGH](https://raw.githubusercontent.com/lendvaiadam/asterobia-quality-docs/[SHA]/docs/STATUS_WALKTHROUGH.md)`
+
+### 4.E Worker Utilization Gate (Hard Gate)
+**Goal**: Maximize parallelism. Idle workers must be justified.
+
+1.  **Trigger**: Before issuing any Milestone Work Order (e.g. M06).
+2.  **Requirement**: Orchestrator MUST publish a **Utilization Table**:
+    ```
+    | Worker | Task | Status | Justification if IDLE |
+    | W1 (BE)| ...  | ...    | ... |
+    | W2 (FE)| ...  | ...    | ... |
+    | W3 (QA)| ...  | ...    | ... |
+    | W4 (RF)| ...  | ...    | ... |
+    ```
+3.  **Constraint**: If ≥2 Workers are IDLE, Orchestrator MUST explain why no parallel tasks (docs, review, edge-cases) are possible.
+4.  **No Implicit Status**: "Already Routed" is INVALID without ACK evidence.
+
+### 4.F Parallel Pack Rule (Binding)
+**Goal**: Never waste a cycle.
+
+- **Rule**: For every Milestone WO, Orchestrator MUST attach at least one **Parallel-Safe Doc-Only Task**:
+  - **QA**: HU-TEST scenario expansion (docs only).
+  - **RF**: Risk-Audit or Refactor Plan (docs only).
+  - **FE**: UI Contract / Mockup specs (docs only).
+- **Constraint**: These tasks MUST NOT share code files with the critical path to avoid merge conflicts.
+
+### 4.G File Ownership Gate (Hard Gate)
+**Goal**: Protect Canonical Governance from Accidental Drift.
+
+1.  **Rule**: **Antigravity-Owned Files** are READ-ONLY for Orchestrator/Workers.
+2.  **List**: See `docs/GOVERNANCE_FILE_OWNERSHIP.md` (STATUS, NOTES, WORKFLOW, RUNBOOK, TEMPLATE).
+3.  **Protocol**:
+    - **FORBIDDEN**: Direct edits by Workers.
+    - **REQUIRED**: Submit `[ROUTING]` proposal to Antigravity.
+    - **REQUIRED**: Submit `[ROUTING]` proposal to Antigravity.
+    - **EXCEPTION**: Status updates *explicitly* delegated (e.g. updating Role Map), but preferred via Routing.
+
+4.  **Canonical File Ownership Matrix**:
+
+| File/Folder | Owner | Edit Policy | Propose Policy | Merge Authority |
+|---|---|---|---|---|
+| `docs/STATUS_WALKTHROUGH.md` | **Antigravity** | **Antigravity** | Orchestrator/Workers via `[ROUTING]` | Antigravity |
+| `docs/NOTES_ANTIGRAVITY.md` | **Antigravity** | **Antigravity** | **NOBODY** | Antigravity |
+| `docs/AI_WORKFLOW.md` | **Antigravity** | **Antigravity** | Orchestrator via `[ROUTING]` | Antigravity |
+| `docs/WORKER_POOL_RUNBOOK.md`| **Antigravity** | **Antigravity** | Orchestrator via `[ROUTING]` | Antigravity |
+| `docs/work_orders/*` | **Orchestrator** | Orchestrator (Draft) | Workers (Feedback) | Antigravity (Audit) |
+| `docs/TEST_LOGS/*` | **QA Worker** | QA (Draft) | Orchestrator (Append) | Antigravity (Audit) |
+
+5.  **Violation & Recovery**:
+    - **Trigger**: Orchestrator edits an Antigravity file.
+    - **Status**: GOVERNANCE VIOLATION.
+    - **Recovery**:
+      ```bash
+      git checkout -- docs/STATUS_WALKTHROUGH.md
+      # or
+      git reset --hard HEAD
+      ```
+   - **Action**: STOP. Route proposal instead.
+
+### 4.H Test Runner Capability Gate (Hard Gate)
+**Goal**: No blind test commands. Verify `npm test` exists first.
+
+1.  **Rule**: Before verifying/running tests, Worker MUST check for a Test Runner.
+2.  **Action**: Run `npm run` (or list `package.json` scripts).
+    - **IF EXISTS**: Proceed with `npm test`.
+    - **IF MISSING**: 
+        - **STOP** trying to run unit tests.
+        - **FALLBACK**: "HU-TEST only" MUST be stated. No worker may claim "tests run".
+        - **LOG**: Receipt MUST include line `TEST_RUNNER: NOT CONFIGURED (Evidence: No test script)`.
+
+### 4.I No Self-Routing Rule (Hard Gate)
+**Goal**: No fake actions or loops.
+
+1.  **Rule**: A `[ROUTING]` block addressed to **Terminal 1** is **NOT** a valid action.
+2.  **Definition**: Orchestrator Actions must be:
+    - **A**: Routing to a Worker (External).
+    - **B**: Updating Antigravity Governance Docs (Internal/Governance).
+3.  **Enforcement**: If Orchestrator routes to self, Operator intercepts and demands real action.
+
+### 4.J Ping SLA & ACK Enforcement (Hard Gate)
+**Goal**: No zombie tasks.
+
+1.  **Tracking**: Orchestrator MUST track Pings in `NOTES_ORCHESTRATOR.md` (or scratchpad).
+2.  **SLA**: 
+    - **Ping #1**: At Assignment (Start).
+    - **Ping #2**: At T+30m (if no ACK).
+3.  **Termination**: If no ACK after Ping #2, Orchestrator **MUST**:
+    - Mark Status: `BLOCKED (No ACK)`.
+    - **Reassign** or **Cancel** payload.
+
+### 4.K Public API Surface Regression Check (Hard Gate)
+**Goal**: Prevent "Disappearing API" bugs.
+
+1.  **Rule**: ANY Milestone closure MUST verify public API methods exist at runtime.
+2.  **Implementation**: HU-TEST scenario MUST include `typeof` checks for key methods.
+    - *Example*: `if (typeof game.sessionManager.startDiscovery === 'undefined') FAIL("Regression")`
+3.  **Enforcement**:
+    - If a method disappears: **STOP**.
+    - **MANDATORY HOTFIX** required before proceeding.
+    - Do NOT close the milestone.
+
+### 4.L Handshake "No-Stub" Evidence (Hard Gate)
+**Goal**: Prove real network traffic, not just internal state changes.
+
+1.  **Rule**: Verify Handshake using Traffic Evidence, not just Role State.
+2.  **Requirement**: `getDebugNetStatus()` (or equivalent) MUST show:
+    - **JOIN_REQ**: Sent/Received count > 0.
+    - **JOIN_ACK**: Sent/Received count > 0.
+3.  **Forbidden Closure**:
+    - "Role is GUEST" is **NOT ENOUGH**.
+    - If traffic counts are 0, the handshake is a **STUB** and fail.
+
+### 4.3 Worker Execution Protocol (BINDING)
+
+1.  **ACK**: Worker reads Header, verifies Role Registry, and confirms.
+2.  **CHECKOUT**: `git checkout -b [Worker Branch] [Parent Branch]`
+3.  **EXECUTE**:
+    - Write Code.
+    - Write/Update Unit Tests (MANDATORY).
+    - Run `npm test`.
+4.  **COMMIT**: `git commit -m "feat(WO-XXX): [Description]"`
+5.  **PUSH**: `git push origin [Worker Branch]`
+6.  **HANDOFF**: Post to `docs/MAILBOX.md`:
+    - `[Date] [WO-XXX] [Worker] [Branch] [PASS] [Notes]`
+
+---
+
+## 5. Branch Management Rules
+
+- **Orchestrator** creates the `parent` branch (`work/feature-x`).
+- **Worker** creates `child` branch (`work/feature-x-fe`) off the parent.
+- **Orchestrator** merges child -> parent.
+- **Antigravity** merges parent -> `main`.
+
+---
+
+## 6. Production-Ready Review Gate (MANDATORY)
+
+**When**: Before "Ping #3 (Pre-Merge)".
+**Who**: Orchestrator.
+
+**Checklist**:
+1. **Determinism**: Does the change preserve simulation determinism?
+2. **Tests**: Are unit tests included and passing?
+3. **Observability**: Are errors logged correctly (no silent failures)?
+4. **Docs**: Is `docs/specs/` or `System Overview` updated?
+5. **Edge Cases**: Checked boundary conditions (empty lists, disconnects)?
+6. **Ops**: Any new Environment Variables or DB Migrations?
+
+**Output**: Orchestrator summarizes this checklist in the Handoff Note.
+
+---
+
+## 7. Operator Test Scenario Check-ins (Mandatory)
+
+**Trigger**: Orchestrator MUST report short **HU Test Scenarios** to Ádám:
+1.  After **each integration merge** into parent branch.
+2.  Before **CTO Ping #3 (Pre-Merge)**.
+3.  When a Worker completes a logic-impacting Work Order.
+
+**Gate Rule**: If this block is missing after integration, the process enters **STOP** state. The next output MUST be the HU block.
+
+**Format (Copy-Paste Friendly)**:
+```text
+[ROUTING]
+TO: Current Chat
+PASTE:
+**HU-TEST REQUEST**:
+- **Pre**: [e.g. Clean save, 2 clients open]
+- **Step**: [e.g. Move unit A to (10,10)]
+- **Expected**: [e.g. Unit moves on both screens, no lag]
+**DECISION REQUIRED**: PASS / FAIL?
+[/ROUTING]
+```
+
+---
+
+---
+
+## 7. Quality Gates
+
+---
+
+## 5. Quality Gates
+Reference: `docs/IMPLEMENTATION_GATES.md`
+**Every PR must pass:**
+- Determinism Check.
+- Lint/Syntax Check.
+- HU Test Scenario (Human Verification).

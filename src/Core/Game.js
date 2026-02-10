@@ -23,10 +23,16 @@ import { rngNext, getGlobalRNG } from '../SimCore/runtime/SeededRNG.js';
 import { globalCommandQueue, CommandType } from '../SimCore/runtime/CommandQueue.js';
 import { initializeTransport, SupabaseTransport } from '../SimCore/transport/index.js';
 import { SaveManager, MemoryStorageAdapter, LocalStorageAdapter, SupabaseStorageAdapter } from '../SimCore/persistence/index.js';
-import { serializeState } from '../SimCore/runtime/StateSurface.js';
+import { serializeState, hashState } from '../SimCore/runtime/StateSurface.js';
+import { SessionManager } from '../SimCore/multiplayer/SessionManager.js';
 
 import { WaypointDebugOverlay } from '../UI/WaypointDebugOverlay.js';
 import { globalCommandDebugOverlay } from '../UI/CommandDebugOverlay.js';
+import { initNetworkDebugPanel } from '../UI/NetworkDebugPanel.js';
+import { SeatKeypadOverlay } from '../UI/SeatKeypadOverlay.js';
+import { JoinOverlay } from '../UI/JoinOverlay.js';
+import { MultiplayerHUD } from '../UI/MultiplayerHUD.js';
+import { AdaptivePerformance } from './AdaptivePerformance.js';
 
 export class Game {
     constructor() {
@@ -35,13 +41,18 @@ export class Game {
         const hash = window.location.hash;
         this._isDevMode = urlParams.has('dev') || hash.includes('dev=1');
 
-        // R012: Create unified dev HUD FIRST (so transport init can update it)
+        // Debug console toggle state (default: hidden)
+        this._debugConsoleVisible = false;
+
+        // Create unified NetworkDebugPanel early (so transport init can update it)
         if (this._isDevMode) {
-            this._createDevHUD();
+            this.networkDebugPanel = initNetworkDebugPanel(this);
+            // Panel starts hidden; user toggles with the console button
         }
 
         // R007/R012: Transport Initialization
         const netMode = urlParams.get('net');
+        this._netMode = netMode; // Store for MultiplayerHUD visibility check
 
         if (netMode === 'supabase') {
             const configObj = window.ASTEROBIA_CONFIG;
@@ -132,6 +143,199 @@ export class Game {
         // R008: Hook render callback for interpolation
         this.simLoop.onRender = (alpha) => this._applyInterpolatedRender(alpha);
 
+        // R013: State surface for multiplayer snapshot serialization
+        // Wraps StateSurface functions with Game context for SessionManager
+        this.stateSurface = {
+            /**
+             * Serialize current game state for multiplayer snapshot.
+             * Returns plain JSON-safe object (no circular refs, no Three.js objects).
+             * @returns {Object} Serialized state
+             */
+            serialize: () => {
+                return serializeState(this);
+            },
+
+            /**
+             * Apply a received snapshot to restore game state.
+             * Used by guests when joining a session.
+             * @param {Object} snapshot - Serialized state from host
+             */
+            deserialize: (snapshot) => {
+                if (!snapshot) return;
+
+                // Restore tick count
+                if (typeof snapshot.tickCount === 'number' && this.simLoop) {
+                    this.simLoop.tickCount = snapshot.tickCount;
+                }
+
+                // Restore unit states
+                if (snapshot.units && Array.isArray(snapshot.units)) {
+                    this._restoreUnitsFromSave(snapshot.units);
+                }
+            }
+        };
+
+        // R013 M07: Expose command queue on game instance for cross-module access
+        this.commandQueue = globalCommandQueue;
+
+        // R013: Multiplayer session manager
+        this.sessionManager = new SessionManager(this);
+        // R013: Wire up transport for multiplayer channels
+        if (this._supabaseTransport) {
+            this.sessionManager.setTransport(this._supabaseTransport);
+        }
+
+        // R013: Multiplayer join UI (only when net=supabase)
+        // R013: Multiplayer status HUD (created but hidden until overlay closes)
+        this.multiplayerHUD = null;
+        if (netMode === 'supabase') {
+            this.multiplayerHUD = new MultiplayerHUD(this);
+            this.joinOverlay = new JoinOverlay();
+            this.joinOverlay.onHost = async (roomCode, username) => {
+                if (!this.sessionManager.transport) {
+                    this.joinOverlay.showError('No network transport available. Check Supabase config.');
+                    return;
+                }
+                this.playerName = username || 'Host';
+                this.clientId = 'room-' + roomCode;
+                try {
+                    await this.sessionManager.hostGame('Room ' + roomCode);
+                    // Don't hide overlay - host stays on screen showing room code
+                    // Host clicks START GAME to dismiss (handled by onStart)
+                } catch (err) {
+                    this.joinOverlay.showError('Failed to host: ' + err.message);
+                }
+            };
+            this.joinOverlay.onStart = () => {
+                // Host clicked START GAME - overlay hides itself, refresh tabs
+                this._showMultiplayerHUD();
+                this.generateUnitTabs();
+                window.showModeSelection?.();
+            };
+            this.joinOverlay.onGuest = async (roomCode, username) => {
+                if (!this.sessionManager.transport) {
+                    this.joinOverlay.showError('No network transport available. Check Supabase config.');
+                    return;
+                }
+                this.playerName = username || 'Guest';
+                const hostId = 'room-' + roomCode;
+                try {
+                    await this.sessionManager.joinGame(hostId);
+                    this.joinOverlay.hide();
+                    // Show multiplayer HUD now that game is active
+                    this._showMultiplayerHUD();
+
+                    // R013: Spawn a unit for the Guest and focus camera on it
+                    const mySlot = this.sessionManager.getMySlot();
+                    const guestUnit = this._spawnUnitForPlayer(mySlot);
+                    if (guestUnit) {
+                        // Select the unit (seats us + flies camera to it)
+                        this.selectUnit(guestUnit);
+                        // Defense-in-depth: explicitly fly camera to guest's unit
+                        // selectUnit→zoomCameraToPath should handle this, but ensure
+                        // the camera ends up above the guest's unit even if path zoom
+                        // logic is bypassed for any reason.
+                        if (this.cameraControls && this.cameraControls.flyTo) {
+                            this.cameraControls.flyTo(guestUnit);
+                        }
+                        if (this._isDevMode) {
+                            console.log(`[Game] Guest spawned and selected unit ${guestUnit.id} (slot ${mySlot})`);
+                        }
+                    }
+
+                    this.generateUnitTabs(); // Refresh tabs after joining
+                    window.showModeSelection?.();
+                } catch (err) {
+                    this.joinOverlay.showError('Failed to join: ' + err.message);
+                }
+            };
+            this.joinOverlay.onSinglePlayer = () => {
+                // Single player - no network, no HUD, just play
+                this.generateUnitTabs();
+                window.showModeSelection?.();
+            };
+            this.joinOverlay.show();
+        }
+
+        // M07 GAP-0: Seat keypad overlay for PIN-protected units
+        this.seatKeypadOverlay = new SeatKeypadOverlay(this);
+
+        // M07: Callback from SessionManager when seat is granted
+        // Called after SEAT_ACK is received - triggers unit selection
+        this.onSeatGranted = (targetUnitId, controllerSlot) => {
+            // Hide keypad if it was showing for this unit
+            if (this.seatKeypadOverlay &&
+                this.seatKeypadOverlay.isVisible &&
+                this.seatKeypadOverlay.targetUnitId === targetUnitId) {
+                this.seatKeypadOverlay.hide();
+            }
+
+            // If this grant is for us, select the unit (skip if already selected to prevent loop)
+            const mySlot = this.sessionManager?.state?.mySlot;
+            if (controllerSlot === mySlot) {
+                const unit = this.units.find(u => u && u.id === targetUnitId);
+                if (unit && this.selectedUnit !== unit) {
+                    // Now we have the seat - select the unit
+                    this.selectUnit(unit); // camera flies to unit on seat grant
+                    if (this._isDevMode) {
+                        console.log(`[Game] Seat granted: unit ${targetUnitId} -> selecting`);
+                    }
+                }
+            }
+
+            // Refresh tabs for all clients (seat state changed)
+            this.generateUnitTabs();
+        };
+
+        // Callback when a seat is released (unit freed)
+        this.onSeatReleased = (targetUnitId, releasedBySlot) => {
+            // Refresh tabs for all clients
+            this.generateUnitTabs();
+        };
+
+        // Callback when connection state changes (HOST/GUEST/OFFLINE)
+        // Regenerate tabs so Guest starts with correct (empty) tab set
+        this.sessionManager.onConnectionStateChanged = (state) => {
+            // R013: Host-side guest unit spawning
+            // When host detects a new player, spawn a unit for them
+            if (state === 'HOSTING' && this.sessionManager.isHost()) {
+                const players = this.sessionManager.getPlayers();
+                for (const player of players) {
+                    // Skip host (slot 0) - host already has units
+                    if (player.slot === 0) continue;
+                    // Check if this player already has a unit (avoid duplicate spawns)
+                    const hasUnit = this.units.some(u => u && u.ownerSlot === player.slot);
+                    if (!hasUnit) {
+                        this._spawnUnitForPlayer(player.slot);
+                        if (this._isDevMode) {
+                            console.log(`[Game] Host spawned unit for guest slot ${player.slot} (${player.displayName})`);
+                        }
+                    }
+                }
+            }
+
+            this.generateUnitTabs();
+            // Update multiplayer HUD with latest state
+            if (this.multiplayerHUD) {
+                this.multiplayerHUD.update();
+            }
+            // Update player count on overlay when players join/leave
+            if (this.joinOverlay && this.joinOverlay.isVisible) {
+                const playerCount = this.sessionManager.getPlayers().length;
+                this.joinOverlay.updatePlayerCount(playerCount);
+            }
+        };
+
+        /**
+         * R013 M07: Command execution gate for Slice 1 transport testing.
+         * Dynamic based on role:
+         * - OFFLINE/HOST: true (they run the simulation, must execute)
+         * - GUEST Slice 1: false (queue accumulates for transport testing)
+         * - GUEST Slice 2+: true (actual gameplay)
+         * @type {boolean}
+         */
+        this._guestExecutionEnabled = true; // Slice 2: enabled
+
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();
 
@@ -142,8 +346,11 @@ export class Game {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.setPixelRatio(0.7);
         this.container.appendChild(this.renderer.domElement);
+
+        // Adaptive Performance Monitor (auto-adjusts quality based on FPS)
+        this.adaptivePerf = new AdaptivePerformance(this);
 
         // R006-fix: Enable canvas to receive keyboard focus
         this._setupCanvasFocus();
@@ -175,14 +382,16 @@ export class Game {
         this.scene.add(this.stars);
 
         // Log star sizing info with adjustment instructions
-        console.log("=== STAR PARAMETERS ===");
-        console.log("Location: Planet.js water shader (~line 97-115)");
-        console.log("Grid Size: 100x100 (starUV * 100.0)");
-        console.log("Star Density: 15% (cellHash > 0.85) - lower = more stars");
-        console.log("Star Size: 0.08 - 0.13");
-        console.log("");
-        console.log("TO ADJUST DENSITY: Edit 'cellHash > 0.85' value in Planet.js");
-        console.log("  0.50 = 50% dense, 0.85 = 15% dense, 0.95 = 5% sparse");
+        if (this._isDevMode) {
+            console.log("=== STAR PARAMETERS ===");
+            console.log("Location: Planet.js water shader (~line 97-115)");
+            console.log("Grid Size: 100x100 (starUV * 100.0)");
+            console.log("Star Density: 15% (cellHash > 0.85) - lower = more stars");
+            console.log("Star Size: 0.08 - 0.13");
+            console.log("");
+            console.log("TO ADJUST DENSITY: Edit 'cellHash > 0.85' value in Planet.js");
+            console.log("  0.50 = 50% dense, 0.85 = 15% dense, 0.95 = 5% sparse");
+        }
 
         // Camera
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -239,6 +448,12 @@ export class Game {
 
         this.loadingManager.onError = (url) => {
             console.error('[Game] There was an error loading ' + url);
+            // Don't let a single failed asset block the game forever.
+            // If most assets are loaded, consider it loaded enough.
+            if (this.loadingManager.itemsLoaded >= this.loadingManager.itemsTotal - 1) {
+                console.warn('[Game] Marking assets as loaded despite error (most assets ready)');
+                this.assetsLoaded = true;
+            }
         };
 
         // World
@@ -265,7 +480,7 @@ export class Game {
         };
         this.loadUnits();
 
-        // Fog of War
+        // Fog of War (shader-based, spherical)
         this.fogOfWar = new FogOfWar(this.renderer, this.planet.terrain.params.radius);
 
         // Rocks on terrain (System V2)
@@ -288,7 +503,7 @@ export class Game {
         const sphereMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true, transparent: true, opacity: 0.2 });
         this.visionHelper = new THREE.Mesh(sphereGeo, sphereMat);
         this.visionHelper.visible = false; // Hidden by default
-        console.log("Vision Helper is hidden. To enable: game.visionHelper.visible = true");
+        if (this._isDevMode) console.log("Vision Helper is hidden. To enable: game.visionHelper.visible = true");
         this.scene.add(this.visionHelper);
 
         // UI
@@ -326,109 +541,394 @@ export class Game {
         this.interactionManager = new InteractionManager(this);
 
         // Audio Manager (Initialized above before loadUnits)
+
+        // R013 M07: Dev-only evidence helper (no console.log dependency)
+        if (this._isDevMode) {
+            window.dumpNetEvidence = () => this._dumpNetEvidence();
+        }
+
+        // Debug Console Toggle Button (top-left corner)
+        // Debug toggle button created later, only if DEV mode is selected
+        // (see applyDevMode() called from Main.js)
+
+        // Default: hide all debug consoles on startup
+        this._hideAllDebugConsoles();
+
     } // End Constructor
 
-    // R012: Unified dev HUD for observability (only shown when dev=1)
-    _createDevHUD() {
-        const hud = document.createElement('div');
-        hud.id = 'r012-dev-hud';
-        hud.style.cssText = `
-            position: fixed;
-            top: 8px;
-            right: 8px;
-            background: rgba(0,0,0,0.9);
-            color: #ccc;
-            font-family: monospace;
-            font-size: 11px;
-            padding: 10px 14px;
-            border-radius: 6px;
-            z-index: 99999;
-            user-select: none;
-            min-width: 180px;
-            border: 1px solid #333;
-        `;
-
-        hud.innerHTML = `
-            <div style="color:#0ff;font-weight:bold;margin-bottom:8px;border-bottom:1px solid #333;padding-bottom:4px;">R012 DEV HUD</div>
-            <div id="r012-net-mode" style="margin-bottom:4px;">NET MODE: <span style="color:#888;">---</span></div>
-            <div id="r012-config" style="margin-bottom:4px;">CONFIG: <span style="color:#888;">---</span></div>
-            <div id="r012-auth" style="margin-bottom:4px;">AUTH: <span style="color:#888;">---</span></div>
-            <div id="r012-realtime" style="margin-bottom:8px;">REALTIME: <span style="color:#888;">---</span></div>
-            <div style="border-top:1px solid #333;padding-top:8px;margin-bottom:6px;">
-                <div style="display:flex;gap:8px;margin-bottom:6px;">
-                    <button id="r012-btn-save" style="
-                        background:#1a1;color:#fff;border:none;padding:4px 12px;
-                        border-radius:3px;cursor:pointer;font-family:monospace;font-size:11px;
-                    ">Save</button>
-                    <button id="r012-btn-load" style="
-                        background:#17a;color:#fff;border:none;padding:4px 12px;
-                        border-radius:3px;cursor:pointer;font-family:monospace;font-size:11px;
-                    ">Load</button>
-                </div>
-            </div>
-            <div id="r012-db-status" style="color:#888;font-size:10px;">DB: ready</div>
-        `;
-        document.body.appendChild(hud);
-
-        // Store reference for updates
-        this._devHUD = {
-            netMode: document.getElementById('r012-net-mode').querySelector('span'),
-            config: document.getElementById('r012-config').querySelector('span'),
-            auth: document.getElementById('r012-auth').querySelector('span'),
-            realtime: document.getElementById('r012-realtime').querySelector('span'),
-            dbStatus: document.getElementById('r012-db-status'),
-            btnSave: document.getElementById('r012-btn-save'),
-            btnLoad: document.getElementById('r012-btn-load')
-        };
+    /**
+     * Apply dev/game mode settings. Called from Main.js after user selects mode.
+     * In GAME mode: hides all debug UI elements.
+     * In DEV mode: creates debug toggle button and shows debug panels.
+     * @param {boolean} isDev - true for DEV mode, false for GAME mode
+     */
+    applyDevMode(isDev) {
+        this._isDevMode = isDev;
+        if (isDev) {
+            this._createDebugToggleButton();
+            // Show visibility indicator in DEV mode
+            const visEl = document.getElementById('visibility-indicator');
+            if (visEl) visEl.style.display = '';
+        } else {
+            // GAME mode: hide all debug/dev UI
+            this._hideAllDebugConsoles();
+            // Hide visibility indicator
+            const visEl = document.getElementById('visibility-indicator');
+            if (visEl) visEl.style.display = 'none';
+            // Hide version display
+            const verEl = document.getElementById('version-display');
+            if (verEl) verEl.style.display = 'none';
+            // Hide sync HUD if it was already created
+            const syncEl = document.getElementById('sync-hud');
+            if (syncEl) syncEl.style.display = 'none';
+            // Hide debug toggle button if it exists
+            const toggleEl = document.getElementById('debug-console-toggle');
+            if (toggleEl) toggleEl.style.display = 'none';
+        }
     }
 
-    // R012: Update network status in dev HUD
-    _updateNetStatus(status, extraInfo = {}) {
-        if (!this._devHUD) return;
+    /**
+     * Create the debug console toggle button in the top-left corner.
+     * Toggles visibility of ALL debug panels at once.
+     * @private
+     */
+    _createDebugToggleButton() {
+        const btn = document.createElement('button');
+        btn.id = 'debug-console-toggle';
+        btn.textContent = '\u{1F5A5}\uFE0F Console';
+        btn.style.cssText = `
+            position: fixed;
+            top: 8px;
+            left: 8px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #aaa;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            cursor: pointer;
+            z-index: 10000;
+            user-select: none;
+            transition: background 0.15s, border-color 0.15s;
+        `;
+        btn.addEventListener('mouseenter', () => {
+            btn.style.background = 'rgba(0, 0, 0, 0.9)';
+            btn.style.borderColor = '#888';
+        });
+        btn.addEventListener('mouseleave', () => {
+            btn.style.background = this._debugConsoleVisible
+                ? 'rgba(0, 40, 0, 0.8)' : 'rgba(0, 0, 0, 0.7)';
+            btn.style.borderColor = this._debugConsoleVisible ? '#0a0' : '#555';
+        });
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleDebugConsoles();
+        });
+        document.body.appendChild(btn);
+        this._debugToggleBtn = btn;
+    }
 
-        // NET MODE
-        const isSupabase = status === 'SUPABASE';
-        this._devHUD.netMode.textContent = isSupabase ? 'SUPABASE' : 'LOCAL';
-        this._devHUD.netMode.style.color = isSupabase ? '#4caf50' : '#888';
+    /**
+     * Toggle ALL debug consoles on/off.
+     * Controls: NetworkDebugPanel, Tweakpane DebugPanel, Stats.js,
+     * WaypointDebugOverlay, CommandDebugOverlay, CameraDebug,
+     * RockDebug, TextureDebugger, NavMeshDebug.
+     */
+    toggleDebugConsoles() {
+        this._debugConsoleVisible = !this._debugConsoleVisible;
+        const show = this._debugConsoleVisible;
 
-        // CONFIG status
-        if (extraInfo.config) {
-            const cfg = extraInfo.config;
-            this._devHUD.config.textContent = cfg;
-            this._devHUD.config.style.color = cfg === 'OK' ? '#4caf50' : '#f44336';
+        // Update toggle button text and style
+        if (this._debugToggleBtn) {
+            this._debugToggleBtn.textContent = show
+                ? '\u{1F5A5}\uFE0F Console \u2713' : '\u{1F5A5}\uFE0F Console';
+            this._debugToggleBtn.style.color = show ? '#0f0' : '#aaa';
+            this._debugToggleBtn.style.borderColor = show ? '#0a0' : '#555';
+            this._debugToggleBtn.style.background = show
+                ? 'rgba(0, 40, 0, 0.8)' : 'rgba(0, 0, 0, 0.7)';
         }
 
-        // AUTH status
-        if (extraInfo.auth) {
-            const auth = extraInfo.auth;
-            this._devHUD.auth.textContent = auth;
-            this._devHUD.auth.style.color = auth === 'ANON OK' ? '#4caf50' : '#f44336';
+        // 1. Unified NetworkDebugPanel (was DevHUD + NetworkDebugPanel)
+        if (this.networkDebugPanel) {
+            show ? this.networkDebugPanel.show() : this.networkDebugPanel.hide();
         }
 
-        // REALTIME status
-        if (extraInfo.rt) {
-            const rt = extraInfo.rt;
-            this._devHUD.realtime.textContent = rt;
-            if (rt === 'CONNECTED') {
-                this._devHUD.realtime.style.color = '#4caf50';
-            } else if (rt === 'CONNECTING...') {
-                this._devHUD.realtime.style.color = '#ff9800';
+        // 2. Tweakpane DebugPanel
+        if (this.debugPanel && this.debugPanel.pane) {
+            this.debugPanel.pane.hidden = !show;
+        }
+
+        // 3. Stats.js (FPS counter)
+        if (this.debugPanel && this.debugPanel.stats && this.debugPanel.stats.dom) {
+            this.debugPanel.stats.dom.style.display = show ? 'block' : 'none';
+        }
+
+        // 4. WaypointDebugOverlay
+        if (this.debugOverlay) {
+            show ? this.debugOverlay.show() : this.debugOverlay.hide();
+        }
+
+        // 5. CommandDebugOverlay
+        if (this.commandDebugOverlay) {
+            if (show) {
+                this.commandDebugOverlay.show();
             } else {
-                this._devHUD.realtime.style.color = '#f44336';
+                this.commandDebugOverlay.hide();
+            }
+        }
+
+        // 6. CameraDebug (has a container div, no show/hide methods)
+        if (this.cameraDebug && this.cameraDebug.container) {
+            this.cameraDebug.container.style.display = show ? 'block' : 'none';
+        }
+
+        // 7. NavMeshDebug (Tweakpane-based)
+        if (this.navMeshDebug && this.navMeshDebug.pane) {
+            this.navMeshDebug.pane.hidden = !show;
+        }
+
+        // 8. R012 Dev HUD legacy DOM cleanup (if still in DOM from prior runs)
+        const legacyHud = document.getElementById('r012-dev-hud');
+        if (legacyHud) {
+            legacyHud.style.display = show ? 'block' : 'none';
+        }
+    }
+
+    /**
+     * Force-hide all debug consoles (used on startup for default-hidden state).
+     * Does not toggle _debugConsoleVisible (it should already be false).
+     * @private
+     */
+    _hideAllDebugConsoles() {
+        // NetworkDebugPanel (already starts hidden via display:none)
+        if (this.networkDebugPanel && this.networkDebugPanel.isVisible()) {
+            this.networkDebugPanel.hide();
+        }
+
+        // Tweakpane DebugPanel
+        if (this.debugPanel && this.debugPanel.pane) {
+            this.debugPanel.pane.hidden = true;
+        }
+
+        // Stats.js
+        if (this.debugPanel && this.debugPanel.stats && this.debugPanel.stats.dom) {
+            this.debugPanel.stats.dom.style.display = 'none';
+        }
+
+        // WaypointDebugOverlay (starts visible by default)
+        if (this.debugOverlay) {
+            this.debugOverlay.hide();
+        }
+
+        // CommandDebugOverlay
+        if (this.commandDebugOverlay) {
+            this.commandDebugOverlay.hide();
+        }
+
+        // CameraDebug
+        if (this.cameraDebug && this.cameraDebug.container) {
+            this.cameraDebug.container.style.display = 'none';
+        }
+
+        // NavMeshDebug
+        if (this.navMeshDebug && this.navMeshDebug.pane) {
+            this.navMeshDebug.pane.hidden = true;
+        }
+
+        // Legacy R012 HUD
+        const legacyHud = document.getElementById('r012-dev-hud');
+        if (legacyHud) {
+            legacyHud.style.display = 'none';
+        }
+    }
+
+    /**
+     * R013 M07: Dynamic command execution gate.
+     * - OFFLINE/HOST: always true (they run the simulation)
+     * - GUEST: controlled by _guestExecutionEnabled (Slice 1: false, Slice 2: true)
+     * @returns {boolean}
+     */
+    get ENABLE_COMMAND_EXECUTION() {
+        const role = this.sessionManager?.getRole?.() || 'OFFLINE';
+        // OFFLINE and HOST always execute (they run the sim)
+        if (role === 'OFFLINE' || role === 'HOST') {
+            return true;
+        }
+        // GUEST: controlled by slice flag
+        return this._guestExecutionEnabled;
+    }
+
+    /**
+     * R013 M07: Dev-only evidence dump (no console.log dependency).
+     * Call via window.dumpNetEvidence() in browser.
+     * Uses getNetEvidence() for JSON-safe unit data (no circular refs).
+     * @returns {Object} Evidence object for HU-TEST
+     */
+    _dumpNetEvidence() {
+      try {
+        // Use getNetEvidence() for JSON-safe data (no circular refs, no seatPinDigit)
+        const netEvidence = this.sessionManager?.getNetEvidence?.() || {};
+
+        // Summarize units with position (separate from netEvidence units)
+        const unitSummary = (this.units || []).filter(u => u).map(u => ({
+            id: u.id,
+            ownerSlot: u.ownerSlot ?? 0,
+            selectedBySlot: u.selectedBySlot ?? null,
+            seatPolicy: u.seatPolicy ?? 'OPEN',
+            // NOTE: seatPinDigit intentionally excluded (privacy)
+            pos: u.position ? {
+                x: Number(u.position.x).toFixed(2),
+                y: Number(u.position.y).toFixed(2),
+                z: Number(u.position.z).toFixed(2)
+            } : null,
+            pathPoints: u.waypointControlPoints?.length || 0
+        }));
+
+        // Build JSON-safe evidence object (no circular refs)
+        const evidence = {
+            tick: this.simLoop?.tickCount || 0,
+            role: netEvidence.role || 'OFFLINE',
+            mySlot: netEvidence.mySlot ?? 0,
+            ENABLE_COMMAND_EXECUTION: this.ENABLE_COMMAND_EXECUTION,
+            _guestExecutionEnabled: this._guestExecutionEnabled,
+            queuePending: this.commandQueue?.pendingCount || 0,
+            unitCount: this.units?.filter(u => u)?.length || 0,
+            selectedUnitId: this.selectedUnit?.id || null,
+            units: unitSummary,
+            // Spread debug counters (primitives only)
+            debugCounters: netEvidence.debugCounters || {},
+            // Gating state
+            batchSeqCounter: netEvidence.batchSeqCounter ?? 0,
+            lastReceivedBatchSeq: netEvidence.lastReceivedBatchSeq ?? -1,
+            inputBufferSize: netEvidence.inputBufferSize ?? 0
+        };
+
+        return evidence;
+      } catch (err) {
+        // Safety net: never throw from evidence dump
+        return { error: err.message, tick: this.simLoop?.tickCount || 0 };
+      }
+    }
+
+    /**
+     * R013 M07: Get network evidence as clean, JSON-safe object.
+     * CRITICAL: Returns ONLY primitives and simple arrays.
+     * NEVER include: transport, supabase client, game ref, objects with methods.
+     * Safe to call JSON.stringify() on the result.
+     * @returns {Object} JSON-safe evidence object
+     */
+    getNetEvidence() {
+      try {
+        return {
+            role: this.sessionManager?.state?.role || 'OFFLINE',
+            mySlot: this.sessionManager?.state?.mySlot ?? -1,
+            units: (this.units || []).map(u => u ? {
+                id: u.id,
+                ownerSlot: u.ownerSlot,
+                selectedBySlot: u.selectedBySlot,
+                seatPolicy: u.seatPolicy
+                // NO seatPinDigit - privacy
+                // NO references to game, supabase, transport
+            } : null).filter(Boolean),
+            selectedUnitId: this.selectedUnit?.id ?? null,
+            debugCounters: this.sessionManager?._debugCounters ? { ...this.sessionManager._debugCounters } : {}
+        };
+      } catch (err) {
+        return { error: err.message };
+      }
+    }
+
+    // R013: Show the multiplayer status HUD (called when JoinOverlay hides)
+    _showMultiplayerHUD() {
+        if (this.multiplayerHUD && this._netMode === 'supabase') {
+            this.multiplayerHUD.show();
+        }
+    }
+
+    // R012: Update network status in unified NetworkDebugPanel
+    _updateNetStatus(status, extraInfo = {}) {
+        if (!this.networkDebugPanel) return;
+        this.networkDebugPanel.setNetStatus(status, extraInfo);
+    }
+
+    // R013: Visible sync diagnostic overlay (DEV mode only)
+    _updateSyncHUD(role, counters, tick) {
+        if (!this._isDevMode) return;
+        let el = document.getElementById('sync-hud');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'sync-hud';
+            el.style.cssText = 'position:fixed;top:30px;left:10px;background:rgba(0,0,0,0.7);color:#0f0;font-family:monospace;font-size:11px;padding:4px 8px;z-index:9999;pointer-events:none;border-radius:4px;line-height:1.4;';
+            document.body.appendChild(el);
+        }
+        const sent = counters?.positionSyncSentCount || 0;
+        const recv = counters?.positionSyncRecvCount || 0;
+        const cmdSent = counters?.batchSentCount || 0;
+        const cmdRecv = counters?.batchRecvCount || 0;
+        el.textContent = `${role} t:${tick} pos:${sent}/${recv} cmd:${cmdSent}/${cmdRecv}`;
+        el.style.color = (role === 'GUEST' && recv === 0 && tick > 200) ? '#f44' : '#0f0';
+    }
+
+    // R013: Apply position sync from Host (called by SessionManager._handlePositionSync)
+    // Lives here because Game.js has THREE.Vector3 for path reconstruction
+    applyPositionSync(msg) {
+        const units = msg.units;
+        if (!units || !Array.isArray(units)) return;
+
+        const mySelectedUnit = this.selectedUnit;
+        const mySlot = this.sessionManager?.state?.mySlot;
+
+        for (const uData of units) {
+            const unit = this.units.find(u => u && u.id === uData.id);
+            if (!unit) continue;
+
+            // Don't override Guest's own controlled unit
+            if (unit === mySelectedUnit && unit.selectedBySlot === mySlot) continue;
+
+            // Apply position
+            unit.position.set(uData.px, uData.py, uData.pz);
+
+            // Apply rotation
+            if (unit.mesh?.quaternion) {
+                unit.mesh.quaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
+            }
+            if (unit.headingQuaternion) {
+                unit.headingQuaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
+            }
+
+            // Reconstruct path from flat array [x,y,z, x,y,z, ...]
+            if (uData.pp && uData.pp.length >= 3) {
+                const newPath = [];
+                for (let i = 0; i < uData.pp.length; i += 3) {
+                    newPath.push(new THREE.Vector3(uData.pp[i], uData.pp[i+1], uData.pp[i+2]));
+                }
+                unit.path = newPath;
+            } else {
+                unit.path = [];
+            }
+
+            // Apply path-following flags
+            unit.isFollowingPath = uData.fp === 1;
+            unit.pathIndex = uData.pi || 0;
+            unit.isPathClosed = uData.pc === 1;
+            unit.isKeyboardOverriding = uData.kb === 1;
+
+            if (unit.isKeyboardOverriding) {
+                unit.isFollowingPath = false;
             }
         }
     }
 
-    // R012: Update DB status in dev HUD (called by save/load)
+    // R012: Update DB status in unified NetworkDebugPanel (called by save/load)
     _updateDBStatus(msg, isError = false) {
-        if (!this._devHUD) return;
-        this._devHUD.dbStatus.textContent = `DB: ${msg}`;
-        this._devHUD.dbStatus.style.color = isError ? '#f44336' : '#4caf50';
+        if (!this.networkDebugPanel) return;
+        this.networkDebugPanel.setDBStatus(msg, isError);
     }
 
-    // R012: Poll Supabase transport state and update REALTIME status in HUD
+    // R012: Poll Supabase transport state and update REALTIME status in panel
     _startRealtimeStatusPolling() {
-        if (!this._supabaseTransport || !this._devHUD) return;
+        if (!this._supabaseTransport || !this.networkDebugPanel) return;
 
         let lastState = null;
         const poll = () => {
@@ -436,19 +936,13 @@ export class Game {
             if (state !== lastState) {
                 lastState = state;
                 let rtText = 'UNKNOWN';
-                if (state === 'CONNECTED') rtText = 'CONNECTED';
-                else if (state === 'CONNECTING') rtText = 'CONNECTING...';
-                else if (state === 'DISCONNECTED') rtText = 'DISCONNECTED';
-                else if (state === 'ERROR') rtText = 'ERROR';
+                let rtColor = '#f44336';
+                if (state === 'CONNECTED') { rtText = 'CONNECTED'; rtColor = '#4caf50'; }
+                else if (state === 'CONNECTING') { rtText = 'CONNECTING...'; rtColor = '#ff9800'; }
+                else if (state === 'DISCONNECTED') { rtText = 'DISCONNECTED'; rtColor = '#f44336'; }
+                else if (state === 'ERROR') { rtText = 'ERROR'; rtColor = '#f44336'; }
 
-                this._devHUD.realtime.textContent = rtText;
-                if (state === 'CONNECTED') {
-                    this._devHUD.realtime.style.color = '#4caf50';
-                } else if (state === 'CONNECTING') {
-                    this._devHUD.realtime.style.color = '#ff9800';
-                } else {
-                    this._devHUD.realtime.style.color = '#f44336';
-                }
+                this.networkDebugPanel.setRealtimeStatus(rtText, rtColor);
             }
         };
 
@@ -472,9 +966,8 @@ export class Game {
             const { data, error } = await client.auth.signInAnonymously();
             if (error) {
                 console.error('[Game] Supabase anonymous sign-in failed:', error.message);
-                if (this._devHUD) {
-                    this._devHUD.auth.textContent = 'AUTH FAIL';
-                    this._devHUD.auth.style.color = '#f44336';
+                if (this.networkDebugPanel) {
+                    this.networkDebugPanel.setNetStatus('SUPABASE', { auth: 'AUTH FAIL' });
                 }
                 return;
             }
@@ -489,21 +982,38 @@ export class Game {
     loadUnits() {
         // Use the centralized loading manager
         const loader = new GLTFLoader(this.loadingManager);
-        // All 5 units - Unit 1 spawns in front of camera
-        const models = ['1.glb', '2.glb', '3.glb', '4.glb', '5.glb'];
+        // All 10 units - Unit 1 spawns in front of camera, models cycle through 5 available GLBs
+        const availableModels = ['1.glb', '2.glb', '3.glb', '4.glb', '5.glb'];
+        const models = Array.from({ length: 10 }, (_, i) => availableModels[i % availableModels.length]);
         let loadedCount = 0;
 
         // Pre-allocate units array to preserve order
         this.units = new Array(models.length).fill(null);
 
+        // R013 M07 FIX: Pre-compute unit IDs BEFORE async loading
+        // This ensures deterministic IDs regardless of model load order
+        const unitIds = models.map(() => nextEntityId());
+
         models.forEach((modelName, index) => {
             loader.load(`./modellek/${modelName}`, (gltf) => {
                 const model = gltf.scene;
 
-                // Create a Unit wrapper (R003: deterministic ID)
-                const unitId = nextEntityId();
+                // Create a Unit wrapper (R003: deterministic ID - now uses pre-computed ID)
+                const unitId = unitIds[index];
                 const unit = new Unit(this.planet, unitId);
                 unit.name = `Unit ${unitId}`; // Set unit name from ID
+                // R013 M07: Ownership tracking (0 = Host, assigned on join for guests)
+                unit.ownerSlot = 0; // Default: Host owns all initial units
+                unit.recordOwnershipChange(0, null, this.simLoop?.tickCount || 0, 'SPAWN');
+
+                // M07 GAP-0: PIN protection for testing
+                // First unit (index 0) stays OPEN for immediate host control.
+                // Remaining units get PIN_1DIGIT so guests must enter a PIN.
+                if (index > 0) {
+                    unit.seatPolicy = 'PIN_1DIGIT';
+                    // Deterministic PIN for testing: unit index mod 9 + 1 (yields 1-9)
+                    unit.seatPinDigit = (index % 9) + 1;
+                }
 
                 // Replace the default cube mesh with the loaded model
                 // CRITICAL FIX: Do NOT replace unit.mesh (Group). Add model TO it.
@@ -526,7 +1036,7 @@ export class Game {
                         child.renderOrder = 20;
                     }
                 });
-                
+
                 // Ensure unit.mesh is in scene (it is added by default? No need to remove/add)
                 // If it was already in scene, this update is visible immediately.
                 this.scene.add(unit.mesh); // Ensure it's there
@@ -615,33 +1125,170 @@ export class Game {
                     this.setupPanelControls();
                 }
 
-                // Select first unit by default
+                // #1: No auto-select at startup. Camera positions on first unit but nothing is selected.
                 if (index === 0) {
-                    this.selectedUnit = unit;
-                    this.unit = unit;
-                    
-                    // FIX: Activate selection visuals immediately
-                    // Without this, selectUnit() skips setSelection() because isSameUnit === true
-                    unit.setSelection(true);
-
-                    // Position camera above unit 1 with side/top view
                     this.positionCameraAboveUnit(unit);
                 }
             });
         });
     }
 
+    // === R013: Guest Unit Spawning ===
+
+    /**
+     * Spawn a new unit for a player who just joined.
+     * Loads a proper GLTF model (same as initial host units).
+     * Positions the unit on the planet surface, avoiding rocks and water.
+     *
+     * @param {number} slot - Player slot number (ownerSlot)
+     * @returns {Unit|null} The spawned unit, or null if planet not ready
+     */
+    _spawnUnitForPlayer(slot) {
+        if (!this.planet || !this.planet.terrain) {
+            console.warn('[Game] Cannot spawn unit: planet not ready');
+            return null;
+        }
+
+        const unitId = nextEntityId();
+        const unit = new Unit(this.planet, unitId);
+        unit.name = `Unit ${unitId}`;
+        unit.ownerSlot = slot;
+        unit.selectedBySlot = null; // Not seated yet - will be seated on select
+        unit.seatPolicy = 'OPEN'; // Guest units are open for their owner
+        // Position: random safe location on planet surface (same logic as loadUnits)
+        const randomPos = new THREE.Vector3();
+        let safeFound = false;
+        const maxRetries = 15;
+
+        for (let r = 0; r < maxRetries; r++) {
+            const theta = rngNext() * Math.PI * 2;
+            const phi = Math.acos(2 * rngNext() - 1);
+            const radius = this.planet.terrain.params.radius + 10;
+
+            randomPos.set(
+                radius * Math.sin(phi) * Math.cos(theta),
+                radius * Math.sin(phi) * Math.sin(theta),
+                radius * Math.cos(phi)
+            );
+
+            // Check against rocks
+            let collision = false;
+            if (this.rockSystem && this.rockSystem.rocks) {
+                for (const rock of this.rockSystem.rocks) {
+                    if (rock.position.distanceTo(randomPos) < 7.0) {
+                        collision = true;
+                        break;
+                    }
+                }
+            }
+
+            // Check for water
+            if (!collision && this.planet && this.planet.terrain) {
+                const waterLevel = this.planet.terrain.params.waterLevel || 0;
+                const baseRadius = this.planet.terrain.params.radius;
+                const waterRadius = baseRadius + waterLevel;
+
+                const dir = randomPos.clone().normalize();
+                const actualTerrainRadius = this.planet.terrain.getRadiusAt(dir);
+
+                if (actualTerrainRadius < waterRadius + 0.5) {
+                    collision = true;
+                }
+            }
+
+            if (!collision) {
+                safeFound = true;
+                break;
+            }
+        }
+
+        if (!safeFound) {
+            console.warn(`[Game] Could not find safe spawn for guest unit (slot ${slot}) after ${maxRetries} tries.`);
+        }
+
+        unit.position.copy(randomPos);
+        unit.snapToSurface();
+
+        // Sync mesh position immediately
+        unit.mesh.position.copy(unit.position);
+
+        // Add to scene
+        this.scene.add(unit.mesh);
+
+        // Scale to match existing units
+        unit.mesh.scale.set(0.5, 0.5, 0.5);
+
+        // Load a proper GLTF model (same as host units) to replace the default cone
+        const availableModels = ['1.glb', '2.glb', '3.glb', '4.glb', '5.glb'];
+        const modelName = availableModels[unitId % availableModels.length];
+        const loader = new GLTFLoader(this.loadingManager);
+        loader.load(`./modellek/${modelName}`, (gltf) => {
+            const model = gltf.scene;
+
+            // Remove the default cone body mesh
+            if (unit.bodyMesh) {
+                unit.mesh.remove(unit.bodyMesh);
+            }
+
+            // Add GLTF model to the Unit's Group
+            unit.mesh.add(model);
+
+            // Apply shadow props to model
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    child.renderOrder = 20;
+                }
+            });
+        });
+
+        // Add unit sound
+        if (this.audioManager) {
+            this.audioManager.addUnitSound(unit);
+        }
+
+        // Add to units array
+        this.units.push(unit);
+
+        console.log(`[Game] Spawned unit ${unitId} for player slot ${slot} at`, unit.position.toArray().map(v => v.toFixed(1)));
+
+        // Refresh tabs so the new unit appears
+        this.generateUnitTabs();
+
+        return unit;
+    }
+
     // === Interaction Delegates (V3) ===
 
     selectUnit(unit, skipCamera = false) {
         const isSameUnit = (this.selectedUnit === unit);
-        
+
         // Only do visual selection changes if different unit
         if (!isSameUnit) {
             this.deselectUnit();
 
             this.selectedUnit = unit;
             unit.setSelection(true);
+
+            // Keep unit in view during all camera operations
+            if (this.cameraControls) {
+                this.cameraControls.keepInViewUnit = unit;
+            }
+
+            // #3 OCCUPIED: Mark unit as seated + owned by this player and broadcast
+            const mySlot = this.sessionManager?.state?.mySlot ?? 0;
+            unit.selectedBySlot = mySlot;
+            const prevOwner = unit.ownerSlot;
+            unit.ownerSlot = mySlot; // Ownership transfers to whoever sits down
+            if (prevOwner !== mySlot) {
+                unit.recordOwnershipChange(mySlot, prevOwner, this.simLoop?.tickCount || 0, 'SEAT_CLAIM');
+            }
+
+            // Broadcast seat claim to all other clients (so they see OCCUPIED)
+            if (this.sessionManager?.broadcastSeatClaim) {
+                this.sessionManager.broadcastSeatClaim(unit, mySlot);
+            }
 
             // Show path markers
             this.showUnitMarkers(unit);
@@ -651,7 +1298,7 @@ export class Game {
                 this.zoomCameraToPath(unit);
             }
 
-            console.log("Unit Selected:", unit);
+            if (this._isDevMode) console.log("Unit Selected:", unit);
 
             // Update tab active state
             this.updateTabActiveState();
@@ -861,12 +1508,24 @@ export class Game {
 
     deselectUnit() {
         if (this.selectedUnit) {
+            // SEAT_RELEASE: broadcast seat release to all clients (or local clear if offline)
+            if (this.sessionManager?.releaseSeat) {
+                this.sessionManager.releaseSeat(this.selectedUnit);
+            } else {
+                this.selectedUnit.selectedBySlot = null;
+            }
+
             this.selectedUnit.setSelection(false);
 
             // HIDE this unit's path markers
             this.hideUnitMarkers(this.selectedUnit);
 
             this.selectedUnit = null;
+
+            // Release unit-in-view constraint
+            if (this.cameraControls) {
+                this.cameraControls.keepInViewUnit = null;
+            }
         }
 
         // Also Exit Focus Mode if active
@@ -884,7 +1543,22 @@ export class Game {
 
         tabContainer.innerHTML = '';
 
+        // Filter units based on role and seat authority
+        const role = this.sessionManager?.state?.role || 'OFFLINE';
+        const mySlot = this.sessionManager?.state?.mySlot ?? 0;
+
         this.units.forEach((unit, index) => {
+            if (!unit) return; // Guard against null entries in pre-allocated array
+            // Tab filtering by OWNERSHIP (ownerSlot), not current driver (selectedBySlot)
+            // ownerSlot = "who was the last person to sit in this unit"
+            if (role === 'GUEST') {
+                // Guest: show units I own (entered at least once)
+                if (unit.ownerSlot !== mySlot) return;
+            } else if (role === 'HOST') {
+                // Host: show units I own (not taken over by someone else)
+                if (unit.ownerSlot !== mySlot) return;
+            }
+            // OFFLINE: show all (no filter)
             const tab = document.createElement('div');
             tab.className = 'unit-tab';
             tab.textContent = `Unit ${index + 1}`;
@@ -922,33 +1596,42 @@ export class Game {
         toggleBtn.title = 'Expand/Collapse Panel';
         tabContainer.appendChild(toggleBtn);
 
+        // Attach toggle click handler directly on the new button
+        // (must be re-attached every time tabs are regenerated since innerHTML is cleared)
+        toggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.togglePanel();
+        });
+
         // Update active state if a unit is already selected
         this.updateTabActiveState();
 
-        // Header Click DESELECT (Empty space)
-        tabContainer.addEventListener('click', (e) => {
-            // If clicked directly on the container (gap), not on a tab
-            if (e.target === tabContainer) {
-                console.log('Clicked header empty space -> Deselect');
-                this.deselectUnit();
-            }
-        });
+        // Header Click DESELECT (Empty space) - only attach once to avoid stacking
+        if (!this._tabContainerClickBound) {
+            this._tabContainerClickBound = true;
+            tabContainer.addEventListener('click', (e) => {
+                // If clicked directly on the container (gap), not on a tab
+                if (e.target === tabContainer) {
+                    if (this._isDevMode) console.log('Clicked header empty space -> Deselect');
+                    this.deselectUnit();
+                }
+            });
+        }
 
         console.log(`Generated ${this.units.length} unit tabs with toggle button`);
     }
 
     setupPanelControls() {
-        const toggleBtn = document.getElementById('panel-toggle-btn');
+        // Guard against duplicate drag handler setup (this is only called once,
+        // but defend against accidental re-calls)
+        if (this._panelControlsInitialized) return;
+        this._panelControlsInitialized = true;
+
+        // NOTE: Toggle button click handler is now attached in generateUnitTabs()
+        // because generateUnitTabs() destroys and recreates the button via innerHTML=''.
+
         const unitTabs = document.getElementById('unit-tabs');
         const bottomPanel = document.getElementById('bottom-panel');
-
-        // Toggle button click
-        if (toggleBtn) {
-            toggleBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.togglePanel();
-            });
-        }
 
         // Edge drag on unit-tabs row
         if (unitTabs && bottomPanel) {
@@ -999,15 +1682,17 @@ export class Game {
                 if (!isDragging) return;
                 isDragging = false;
 
-                // Re-enable smooth transition
-                bottomPanel.style.transition = '';
-                bottomPanel.style.transform = '';
-
-                // Get current position to decide snap direction
+                // IMPORTANT: Read current drag position BEFORE clearing the inline transform,
+                // otherwise getBoundingClientRect returns the CSS-defined position (open or closed)
+                // rather than where the user actually dragged to.
                 const rect = bottomPanel.getBoundingClientRect();
                 const screenHeight = window.innerHeight;
                 const panelTop = rect.top;
                 const threshold = screenHeight * 0.6; // 60% threshold
+
+                // Re-enable smooth transition and clear inline transform
+                bottomPanel.style.transition = '';
+                bottomPanel.style.transform = '';
 
                 if (panelTop < threshold) {
                     // Panel is mostly shown -> snap to open
@@ -1060,6 +1745,16 @@ export class Game {
         const now = Date.now();
         const doubleClickThreshold = 300; // ms
 
+        // M07 B4-fix: Gate tab click by seat authority
+        // If guest doesn't have seat, trigger seat flow instead of blocking
+        if (!(this.sessionManager?.hasSeatedUnit?.(unit) ?? true)) {
+            if (this._isDevMode) console.warn("[Game] Tab click: no seat on unit " + unit.id + ", triggering seat flow");
+            if (this.interactionManager) {
+                this.interactionManager._triggerSeatFlow(unit);
+            }
+            return;
+        }
+
         // Check for double click
         if (this.lastTabClickIndex === unitIndex &&
             this.lastTabClickTime &&
@@ -1067,17 +1762,17 @@ export class Game {
             // DOUBLE CLICK: Open panel if closed, or just re-focus
             this.enterFocusMode(unit);
             this.lastTabClickTime = 0; // Reset
-            console.log(`Tab DOUBLE clicked: Unit ${unitIndex + 1} - Opening panel`);
+            if (this._isDevMode) console.log(`Tab DOUBLE clicked: Unit ${unitIndex + 1} - Opening panel`);
         } else {
             // SINGLE CLICK
             if (this.isFocusMode) {
                 // If panel is ALREADY open, single click should switch content seamlessly
                 this.enterFocusMode(unit);
-                console.log(`Tab clicked (Panel Open): Unit ${unitIndex + 1} - Switch content`);
+                if (this._isDevMode) console.log(`Tab clicked (Panel Open): Unit ${unitIndex + 1} - Switch content`);
             } else {
                 // Panel is CLOSED: Just select and fly
                 this.selectAndFlyToUnit(unit);
-                console.log(`Tab clicked (Panel Closed): Unit ${unitIndex + 1} - Select only`);
+                if (this._isDevMode) console.log(`Tab clicked (Panel Closed): Unit ${unitIndex + 1} - Select only`);
             }
         }
 
@@ -1118,29 +1813,24 @@ export class Game {
 
     updateTabActiveState() {
         const tabs = document.querySelectorAll('.unit-tab');
-        tabs.forEach((tab, index) => {
-            if (this.units[index] === this.selectedUnit) {
+        let activeTab = null;
+        tabs.forEach((tab) => {
+            const unitIdx = parseInt(tab.dataset.unitIndex);
+            if (this.units[unitIdx] === this.selectedUnit) {
                 tab.classList.add('active');
+                activeTab = tab;
             } else {
                 tab.classList.remove('active');
             }
         });
-    }
 
-    deselectUnit() {
-        if (this.selectedUnit) {
-            this.selectedUnit.setSelection(false);
-            this.hideUnitMarkers(this.selectedUnit);
-            this.selectedUnit = null;
+        // Scroll the active tab into view if it's off-screen in the tab bar
+        if (activeTab) {
+            activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
         }
-
-        // Close panel
-        this.exitFocusMode();
-
-        // Update tabs
-        this.updateTabActiveState();
-        console.log('Unit Deselected');
     }
+
+    // DELETED: duplicate deselectUnit() was here. Canonical version is above (with SEAT_RELEASE).
 
     hideUnitMarkers(unit) {
         if (!unit) return;
@@ -1211,7 +1901,7 @@ export class Game {
         const spriteMat = new THREE.SpriteMaterial({
             map: texture,
             transparent: true,
-            depthTest: false,
+            depthTest: true,
             depthWrite: false
         });
 
@@ -1253,11 +1943,16 @@ export class Game {
         unit.commands.push(command);
         
         this.syncWaypointsFromCommands(unit);
-        
+
         if (this.isFocusMode && this.focusedUnit === unit) {
             this.updatePanelContent(unit);
         }
-        
+
+        // Auto-switch tab to this unit when adding a waypoint (e.g. Shift+Click)
+        if (type === 'Move' && unit === this.selectedUnit) {
+            this.updateTabActiveState();
+        }
+
         return command;
     }
 
@@ -1310,13 +2005,13 @@ export class Game {
                     color: 0x00ff88,
                     transparent: true,
                     opacity: 0.7,
-                    depthTest: false,
+                    depthTest: true,
                     depthWrite: false
                 });
                 marker = new THREE.Mesh(markerGeo, markerMat);
                 unit.waypointMarkers.push(marker);
                 this.scene.add(marker);
-                
+
                 // Label
                 const label = this.createNumberSprite(i);
                 label.renderOrder = 15;
@@ -1362,7 +2057,8 @@ export class Game {
         });
         
         // 3. Update Curve Visualization
-        this.updateWaypointCurve();
+        this.updateWaypointCurve(unit);
+
     }
 
     addWaypoint(point) {
@@ -1374,28 +2070,37 @@ export class Game {
     closePath() {
         // Called from InteractionManager when start marker is clicked
         if (!this.selectedUnit) return;
-        const unit = this.selectedUnit;
+        this.closePathForUnit(this.selectedUnit);
+    }
+
+    /**
+     * R013 M07: Close path for a specific unit (multiplayer-safe).
+     * @param {Unit} unit - Target unit
+     */
+    closePathForUnit(unit) {
+        if (!unit) return;
 
         if (unit.waypointControlPoints && unit.waypointControlPoints.length >= 3 && !unit.isPathClosed) {
             unit.loopingEnabled = true;
             unit.isPathClosed = true;
-            console.log("Path CLOSED - clicked on start marker!");
+            if (this._isDevMode) console.log(`Path CLOSED for unit ${unit.id}`);
 
             // NOTE: Colors are managed by updateWaypointMarkerFill - do not hardcode here
 
             // Regenerate curve as closed loop
-            this.updateWaypointCurve();
+            // Pass unit explicitly so non-selected units also get their path populated
+            this.updateWaypointCurve(unit);
 
             // Update Command Queue if panel is open
-            if (this.isFocusMode && this.focusedUnit) {
+            if (this.isFocusMode && this.focusedUnit === unit) {
                 this.updatePanelContent(this.focusedUnit);
             }
         }
     }
 
-    updateWaypointCurve() {
-        if (!this.selectedUnit) return;
-        const unit = this.selectedUnit;
+    updateWaypointCurve(targetUnit = null) {
+        const unit = targetUnit || this.selectedUnit;
+        if (!unit) return;
 
         if (!unit.waypointControlPoints || unit.waypointControlPoints.length < 2) return;
 
@@ -1428,7 +2133,7 @@ export class Game {
                         const oldTgtId = oldTargetId ? oldTargetId.slice(-4) : 'null';
                         const newTgtId = newTarget.id ? newTarget.id.slice(-4) : 'null';
                         const lastWpId = unit.lastWaypointId ? unit.lastWaypointId.slice(-4) : 'null';
-                        console.log(`[REORDER] Target updated: ${oldTgtId} -> ${newTgtId} (after lastWaypointId ${lastWpId})`);
+                        if (this._isDevMode) console.log(`[REORDER] Target updated: ${oldTgtId} -> ${newTgtId} (after lastWaypointId ${lastWpId})`);
                         
                         // Update logical states
                         unit.waypoints.forEach(wp => {
@@ -1691,7 +2396,7 @@ export class Game {
         // ============================================================================
         
         const sampledPath = [];
-        const sampleSpacing = 0.5; // Sample every 0.5 meters
+        const sampleSpacing = 0.3; // Sample every 0.3 meters (denser = smoother visual)
         
         const numSegments = unit.isPathClosed ? n : n - 1;
         
@@ -1762,7 +2467,8 @@ export class Game {
             unit.waypointCurveLine.material.dispose();
         }
 
-        const tubeGeo = new THREE.TubeGeometry(visualCurve, projectedPoints.length, 0.08, 12, unit.isPathClosed);
+        const tubularSegments = Math.max(projectedPoints.length, projectedPoints.length * 1.5) | 0;
+        const tubeGeo = new THREE.TubeGeometry(visualCurve, tubularSegments, 0.08, 12, unit.isPathClosed);
         const tubeMat = new THREE.MeshBasicMaterial({
             color: unit.isPathClosed ? 0x00ff88 : 0x00cc66,
             transparent: true,
@@ -1944,12 +2650,13 @@ export class Game {
             unit.savedPath = null;
 
             // === TRANSITION PATH GENERATION (User Requirement) ===
-            // If the re-projected point is far away (e.g. dragged curve), 
+            // If the re-projected point is far away (e.g. dragged curve),
             // generate a safe path using PathPlanner to avoid obstacles (rocks/water).
-            // THROTTLE: Only run every 200ms to prevent freezing during drag.
-            const now = Date.now();
-            if (this.pathPlanner && (!unit._lastTransitionCheck || now - unit._lastTransitionCheck > 200)) {
-                unit._lastTransitionCheck = now;
+            // THROTTLE: Only run every ~200ms (4 ticks at 20 ticks/sec) to prevent freezing during drag.
+            // Uses tick-based throttle for determinism (Issue 6).
+            const currentTick = this.simLoop?.tickCount || 0;
+            if (this.pathPlanner && (!unit._lastTransitionCheckTick || currentTick - unit._lastTransitionCheckTick >= 4)) {
+                unit._lastTransitionCheckTick = currentTick;
                 
                 const targetPoint = unit.path[unit.pathIndex];
                 if (targetPoint) {
@@ -1987,7 +2694,7 @@ export class Game {
             unit.savedPathIndex = 0;
             unit.isKeyboardOverriding = false;
 
-            console.log(`Path sync: closest=${closestIdx}, target=${targetIdx}`);
+            if (this._isDevMode) console.log(`Path sync: closest=${closestIdx}, target=${targetIdx}`);
         }
     }
 
@@ -2088,7 +2795,7 @@ export class Game {
                 const markerId = marker.userData.id;
 
                 // DEBUG: Log first marker of first unit to see what's happening
-                if (index === 0 && this.units.indexOf(unit) === 0) {
+                if (this._isDevMode && index === 0 && this.units.indexOf(unit) === 0) {
                     const mId = markerId ? markerId.slice(-4) : 'null';
                     const lId = unit.lastWaypointId ? unit.lastWaypointId.slice(-4) : 'null';
                     const tId = unit.targetWaypointId ? unit.targetWaypointId.slice(-4) : 'null';
@@ -2156,7 +2863,7 @@ export class Game {
                 });
                 unit.passedControlPointCount = 0;
 
-                console.log("Path looping (Projected on Terrain)!");
+                if (this._isDevMode) console.log("Path looping (Projected on Terrain)!");
             }
         }
     }
@@ -2217,7 +2924,7 @@ export class Game {
     }
 
     onUnitDoubleClicked(unit) {
-        console.log("Double Clicked:", unit);
+        if (this._isDevMode) console.log("Double Clicked:", unit);
         if (unit) {
             this.enterFocusMode(unit);
         }
@@ -2324,13 +3031,15 @@ export class Game {
         const panelContent = document.querySelector('#bottom-panel .panel-content');
 
         // DEBUG LOG
-        console.log('[Panel] updatePanelContent', {
-            unit: (unit && unit.name) || 'NO UNIT',
-            waypointControlPoints: (unit && unit.waypointControlPoints) ? unit.waypointControlPoints.length : 0,
-            focusedUnit: (this.focusedUnit && this.focusedUnit.name) || 'none',
-            selectedUnit: (this.selectedUnit && this.selectedUnit.name) || 'none',
-            panelFound: !!panelContent
-        });
+        if (this._isDevMode) {
+            console.log('[Panel] updatePanelContent', {
+                unit: (unit && unit.name) || 'NO UNIT',
+                waypointControlPoints: (unit && unit.waypointControlPoints) ? unit.waypointControlPoints.length : 0,
+                focusedUnit: (this.focusedUnit && this.focusedUnit.name) || 'none',
+                selectedUnit: (this.selectedUnit && this.selectedUnit.name) || 'none',
+                panelFound: !!panelContent
+            });
+        }
 
         // BLOCK UPDATES DURING DRAG to prevent DOM thrashing and killing the drag event
         if (this.isCommandQueueDragging) {
@@ -2578,9 +3287,15 @@ export class Game {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                
+
+                // M07: Gate by seat authority
+                if (!this._hasPanelSeatAuthority()) {
+                    if (this._isDevMode) console.warn('[UI] Cannot delete command: not seated on unit');
+                    return;
+                }
+
                 const index = parseInt(btn.dataset.index);
-                console.log(`[UI] Delete command at index ${index}`);
+                if (this._isDevMode) console.log(`[UI] Delete command at index ${index}`);
                 this.deleteCommandAtIndex(index);
             });
         });
@@ -2589,6 +3304,12 @@ export class Game {
         const dropdowns = list.querySelectorAll('.action-dropdown');
         dropdowns.forEach((dd) => {
             dd.addEventListener('change', (e) => {
+                // M07: Gate by seat authority
+                if (!this._hasPanelSeatAuthority()) {
+                    if (this._isDevMode) console.warn('[UI] Cannot change command: not seated on unit');
+                    return;
+                }
+
                 const index = parseInt(dd.dataset.index);
                 const newType = e.target.value;
                 if (this.selectedUnit && this.selectedUnit.commands[index]) {
@@ -2602,6 +3323,12 @@ export class Game {
         const inputs = list.querySelectorAll('.seconds-input');
         inputs.forEach((inp) => {
             inp.addEventListener('change', (e) => {
+                // M07: Gate by seat authority
+                if (!this._hasPanelSeatAuthority()) {
+                    if (this._isDevMode) console.warn('[UI] Cannot change seconds: not seated on unit');
+                    return;
+                }
+
                 const index = parseInt(inp.dataset.index);
                 const val = parseFloat(e.target.value);
                 if (this.selectedUnit && this.selectedUnit.commands[index]) {
@@ -2612,18 +3339,36 @@ export class Game {
         });
     }
 
+    /**
+     * M07: Check if local client has seat authority on the panel unit.
+     * Used to gate UI panel modifications.
+     * @returns {boolean}
+     * @private
+     */
+    _hasPanelSeatAuthority() {
+        const unit = this.getPanelUnit();
+        if (!unit) return false;
+        return this.sessionManager?.hasSeatedUnit?.(unit) ?? true;
+    }
+
     reorderCommandsFromDOM() {
+        // M07: Gate by seat authority
+        if (!this._hasPanelSeatAuthority()) {
+            if (this._isDevMode) console.warn('[Game] Cannot reorder commands: not seated on unit');
+            return;
+        }
+
         const list = document.getElementById('command-queue-list');
         const unit = this.selectedUnit;
         if (!list || !unit || !unit.commands) return;
 
         const items = list.querySelectorAll('.command-item');
         const newOrderIndices = Array.from(items).map(item => parseInt(item.dataset.index));
-        
+
         // Reorder COMMANDS
         const reorderedCommands = newOrderIndices.map(i => unit.commands[i]);
         unit.commands = reorderedCommands;
-        
+
         // Adjust currentCommandIndex if necessary?
         // For simple logic, maybe reset or try to track the active one via ID?
         // Let's assume simpler: Reset logic or trust the user knows what they are doing.
@@ -2635,55 +3380,89 @@ export class Game {
             this.updatePanelContent(this.focusedUnit);
         }
 
-        console.log("Commands reordered successfully.", newOrderIndices);
+        if (this._isDevMode) console.log("Commands reordered successfully.", newOrderIndices);
     }
 
     clearWaypoints() {
-        const unit = this.getPanelUnit();
-        if (!unit) {
-            console.log("[Game] clearWaypoints: No unit");
+        // M07: Gate by seat authority
+        if (!this._hasPanelSeatAuthority()) {
+            if (this._isDevMode) console.warn('[Game] Cannot clear waypoints: not seated on unit');
             return;
         }
-        
+
+        const unit = this.getPanelUnit();
+        if (!unit) {
+            if (this._isDevMode) console.log("[Game] clearWaypoints: No unit");
+            return;
+        }
+
         this.clearWaypointMarkers(); // Clears markers and resets waypoints/controlPoints arrays on unit
         unit.path = [];
-        unit.isFollowingPath = false;
         unit.setCommandPause(false);
+        // Bug #13 fix: Set isFollowingPath AFTER setCommandPause to prevent
+        // setCommandPause(false) from re-enabling it ([] is truthy in JS)
+        unit.isFollowingPath = false;
+        unit.isKeyboardOverriding = false;
         unit.waterState = 'normal';
-        
+        // Bug #13 fix: Re-align headingQuaternion to current mesh orientation
+        // so keyboard control responds to the unit's visual forward direction
+        if (unit.headingQuaternion && unit.mesh) {
+            unit.headingQuaternion.copy(unit.mesh.quaternion);
+        }
+
+        // === Bug #19 Fix: Clear ALL backing data structures ===
+        // Without this, old commands/waypoints survive and ghost-reappear on next addCommand
+        unit.commands = [];
+        unit.currentCommandIndex = 0;
+        unit.lastCompletedCommandIndex = -1;
+        unit.waypoints = [];
+        unit.targetWaypointId = null;
+        unit.lastWaypointId = null;
+        unit.pathSegmentIndices = [];
+        unit.currentSegmentIndex = 0;
+        unit.segmentProgress = 0.0;
+        unit.lastControlPointIds = [];
+
         // Remove curve line
         if (unit.waypointCurveLine) {
             this.scene.remove(unit.waypointCurveLine);
             unit.waypointCurveLine.geometry.dispose();
             unit.waypointCurveLine = null;
         }
-        
+
         // Update panel (no argument needed - will use getPanelUnit)
         this.updatePanelContent();
-        console.log("[Game] Waypoints cleared via UI");
+        if (this._isDevMode) console.log("[Game] Waypoints cleared via UI");
     }
 
     /**
      * Delete a single waypoint at the given index.
      * Removes control point, waypoint data, and marker.
      * Regenerates the path curve after deletion.
+     * M07: Gated by seat authority (checked by caller)
      */
     deleteCommandAtIndex(index) {
+        // M07: Gate by seat authority
+        if (!this._hasPanelSeatAuthority()) {
+            if (this._isDevMode) console.warn('[Game] Cannot delete command: not seated on unit');
+            return;
+        }
+
         const unit = this.getPanelUnit();
         if (!unit || !unit.commands) return;
-        
+
         // Remove command
         unit.commands.splice(index, 1);
-        
+
         // Adjust current index if needed
         if (unit.currentCommandIndex > index) unit.currentCommandIndex--;
-        
+
         // Sync derived data
         this.syncWaypointsFromCommands(unit);
-        
+
         // Update UI
         this.updatePanelContent();
-        console.log(`[Game] Deleted command at index ${index}. Remaining: ${unit.commands.length}`);
+        if (this._isDevMode) console.log(`[Game] Deleted command at index ${index}. Remaining: ${unit.commands.length}`);
     }
     setupPlaybackButtons() {
         // Clone buttons to remove all existing listeners (prevents duplication)
@@ -2704,37 +3483,95 @@ export class Game {
             playBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log("[UI] Play button clicked");
+                if (this._isDevMode) console.log("[UI] Play button clicked");
                 
                 const unit = this.selectedUnit || this.focusedUnit;
                 if (unit && unit.waypointControlPoints && unit.waypointControlPoints.length >= 2) {
+                    // Check if unit was already following BEFORE we change state
+                    const wasAlreadyFollowing = unit.isFollowingPath && unit.pathIndex !== undefined && unit.pathIndex >= 0;
+
                     // Reset command pause
                     unit.setCommandPause(false);
 
                     // CRITICAL: Reset water state so unit can move again
                     unit.waterState = 'normal';
 
-                    // Resume path following
-                    unit.isFollowingPath = true;
+                    // Clear keyboard override state
+                    unit.isKeyboardOverriding = false;
 
-                    // Only find closest point if starting fresh (not resuming from pause)
-                    // This prevents jerking when pressing Play repeatedly
-                    const wasAlreadyFollowing = unit.isFollowingPath && unit.pathIndex !== undefined && unit.pathIndex >= 0;
-                    
-                    if (!wasAlreadyFollowing && unit.path && unit.path.length > 0) {
-                        let closest = 0;
-                        let minDist = Infinity;
-                        for (let i = 0; i < unit.path.length; i++) {
-                            const d = unit.position.distanceTo(unit.path[i]);
-                            if (d < minDist) { minDist = d; closest = i; }
+                    // If unit was manually driven off path, use smooth Bezier rejoin
+                    if (unit.savedPath && unit.savedPath.length > 0) {
+                        // Restore saved path as the active path
+                        unit.path = unit.savedPath;
+                        unit.savedPath = null;
+
+                        // Find the closest FORWARD point on the restored path
+                        const searchStart = Math.max(0, unit.savedPathIndex || 0);
+                        const pathLen = unit.path.length;
+                        let bestIdx = searchStart;
+                        let bestDist = Infinity;
+                        const maxSearch = unit.isPathClosed ? pathLen : (pathLen - searchStart);
+
+                        for (let i = 0; i < maxSearch; i++) {
+                            const idx = (searchStart + i) % pathLen;
+                            if (!unit.isPathClosed && idx < searchStart) break;
+                            const dist = unit.position.distanceTo(unit.path[idx]);
+                            if (dist < bestDist) {
+                                bestDist = dist;
+                                bestIdx = idx;
+                            }
+                            if (dist > bestDist * 2.0 && i > 6) break;
                         }
-                        unit.pathIndex = closest;
-                        console.log("[UI] Play: Found closest path point:", closest);
-                    }
 
-                    console.log("[UI] Playback: PLAY - Resumed path following");
+                        // Add lookahead based on distance
+                        let rejoinIdx;
+                        if (bestDist < 3.0) {
+                            rejoinIdx = bestIdx + 6;
+                        } else {
+                            rejoinIdx = bestIdx + 12;
+                        }
+
+                        if (unit.isPathClosed || unit.loopingEnabled) {
+                            rejoinIdx = rejoinIdx % pathLen;
+                        } else {
+                            rejoinIdx = Math.min(rejoinIdx, pathLen - 1);
+                        }
+
+                        unit.pathIndex = rejoinIdx;
+                        unit.isFollowingPath = true;
+                        unit.savedPathIndex = 0;
+
+                        // Generate smooth Bezier transition arc
+                        unit._generateRejoinArc(rejoinIdx);
+
+                        if (this._isDevMode) console.log(`[UI] Play: Smooth rejoin via Bezier arc to idx ${rejoinIdx}`);
+                    } else {
+                        // Normal resume - clear any stale transition arc
+                        if (unit.isInTransition) {
+                            unit.isInTransition = false;
+                            unit.transitionPath = null;
+                            unit.transitionIndex = 0;
+                        }
+
+                        // Resume path following
+                        unit.isFollowingPath = true;
+
+                        // Only find closest point if starting fresh (not resuming from pause)
+                        if (!wasAlreadyFollowing && unit.path && unit.path.length > 0) {
+                            let closest = 0;
+                            let minDist = Infinity;
+                            for (let i = 0; i < unit.path.length; i++) {
+                                const d = unit.position.distanceTo(unit.path[i]);
+                                if (d < minDist) { minDist = d; closest = i; }
+                            }
+                            unit.pathIndex = closest;
+                            if (this._isDevMode) console.log("[UI] Play: Found closest path point:", closest);
+                        }
+
+                        if (this._isDevMode) console.log("[UI] Playback: PLAY - Resumed path following");
+                    }
                 } else {
-                    console.log("[UI] Play: No unit or insufficient waypoints");
+                    if (this._isDevMode) console.log("[UI] Play: No unit or insufficient waypoints");
                 }
             });
         }
@@ -2743,12 +3580,12 @@ export class Game {
             pauseBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log("[UI] Pause button clicked");
+                if (this._isDevMode) console.log("[UI] Pause button clicked");
                 
                 const unit = this.selectedUnit || this.focusedUnit;
                 if (unit) {
                     unit.setCommandPause(true);
-                    console.log("[UI] Playback: PAUSE (Command)");
+                    if (this._isDevMode) console.log("[UI] Playback: PAUSE (Command)");
                 }
             });
         }
@@ -2757,7 +3594,7 @@ export class Game {
             clearBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log("[UI] Clear button clicked");
+                if (this._isDevMode) console.log("[UI] Clear button clicked");
                 
                 this.clearWaypoints();
             });
@@ -2772,7 +3609,7 @@ export class Game {
             addActionBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log("[UI] Add Action button clicked");
+                if (this._isDevMode) console.log("[UI] Add Action button clicked");
                 
                 const unit = this.selectedUnit || this.focusedUnit;
                 if (unit) {
@@ -2790,7 +3627,7 @@ export class Game {
                 const unit = this.selectedUnit || this.focusedUnit;
                 if (unit && unit.actionCards && unit.actionCards[index]) {
                     unit.actionCards[index].type = e.target.value;
-                    console.log(`[UI] Action ${index} type changed to: ${e.target.value}`);
+                    if (this._isDevMode) console.log(`[UI] Action ${index} type changed to: ${e.target.value}`);
                 }
             });
         });
@@ -2802,7 +3639,7 @@ export class Game {
                 const unit = this.selectedUnit || this.focusedUnit;
                 if (unit && unit.actionCards && unit.actionCards[index]) {
                     unit.actionCards[index].seconds = parseFloat(e.target.value) || 0;
-                    console.log(`[UI] Action ${index} seconds changed to: ${e.target.value}`);
+                    if (this._isDevMode) console.log(`[UI] Action ${index} seconds changed to: ${e.target.value}`);
                 }
             });
         });
@@ -2816,7 +3653,7 @@ export class Game {
                 const unit = this.selectedUnit || this.focusedUnit;
                 if (unit && unit.actionCards) {
                     unit.actionCards.splice(index, 1);
-                    console.log(`[UI] Action ${index} deleted`);
+                    if (this._isDevMode) console.log(`[UI] Action ${index} deleted`);
                     this.updatePanelContent();
                 }
             });
@@ -2920,7 +3757,11 @@ export class Game {
             unit.smoothingRadius = this.unitParams.smoothingRadius;
 
             if (unit === this.selectedUnit) {
-                unit.update(keys, fixedDt, this.pathPlanner);
+                // M07 GAP-0: Gate keyboard movement by seat authority
+                // If client doesn't have seat, don't pass keyboard input
+                const hasSeat = this.sessionManager?.hasSeatedUnit?.(unit) ?? true;
+                const effectiveKeys = hasSeat ? keys : { forward: false, backward: false, left: false, right: false };
+                unit.update(effectiveKeys, fixedDt, this.pathPlanner);
             } else {
                 unit.update({ forward: false, backward: false, left: false, right: false }, fixedDt, this.pathPlanner);
             }
@@ -2929,8 +3770,49 @@ export class Game {
             unit.snapshotCurrAuthState();
         });
 
+        // Unit-to-unit collision (mutual bounce)
+        const activeUnits = this.units.filter(u => u);
+        for (const unit of activeUnits) {
+            unit.checkUnitCollisions(activeUnits);
+        }
+
         // Handle path looping (sim state mutation)
         this.handlePathLooping();
+
+        // Slice 2: Periodic state hash sampling for determinism verification
+        if (tickCount % 60 === 0 && this.sessionManager?.getRole?.() !== 'OFFLINE') {
+            const surface = this.stateSurface?.serialize?.();
+            if (surface) {
+                const hash = hashState(surface);
+                if (this._isDevMode) {
+                    console.log(`[Game] StateHash @tick ${tickCount}: ${hash.substring(0, 40)}...`);
+                }
+                // Store for debug evidence
+                this._lastStateHash = hash;
+                this._lastStateHashTick = tickCount;
+            }
+        }
+
+        // R013: Periodic sync diagnostics (every 5 seconds = 100 ticks)
+        if (tickCount % 100 === 0 && this.sessionManager?.getRole?.() !== 'OFFLINE') {
+            const smCounters = this.sessionManager?._debugCounters;
+            const role = this.sessionManager.getRole();
+            console.log(`[SYNC] tick=${tickCount} role=${role} posSent=${smCounters?.positionSyncSentCount||0} posRecv=${smCounters?.positionSyncRecvCount||0} cmdSent=${smCounters?.batchSentCount||0} cmdRecv=${smCounters?.batchRecvCount||0}`);
+
+            // On-screen sync indicator (visible without opening console)
+            this._updateSyncHUD(role, smCounters, tickCount);
+        }
+
+        // R013 Slice 2: Broadcast buffered commands to other clients
+        if (this.sessionManager?.sendCmdBatch) {
+            this.sessionManager.sendCmdBatch();
+        }
+
+        // R013: Position sync - Host broadcasts unit positions every 3 ticks (150ms)
+        // This syncs keyboard-driven movement (WASD) which doesn't flow through commands
+        if (tickCount % 3 === 0 && this.sessionManager?.sendPositionSync) {
+            this.sessionManager.sendPositionSync();
+        }
     }
 
     /**
@@ -2954,12 +3836,12 @@ export class Game {
      * Only active when ?dev=1 or #dev=1 is present.
      */
     _setupDevSaveLoad() {
-        // R012: Guard - only run in dev mode (HUD created by _createDevHUD)
-        if (!this._isDevMode || !this._devHUD) return;
+        // R012: Guard - only run in dev mode (panel created by initNetworkDebugPanel)
+        if (!this._isDevMode || !this.networkDebugPanel) return;
 
-        // Use unified HUD buttons (created by _createDevHUD)
-        const btnSave = this._devHUD.btnSave;
-        const btnLoad = this._devHUD.btnLoad;
+        // Use unified panel buttons (created by NetworkDebugPanel)
+        const btnSave = this.networkDebugPanel.btnSave;
+        const btnLoad = this.networkDebugPanel.btnLoad;
         if (!btnSave || !btnLoad) return;
 
         // Update status uses unified HUD method
@@ -3087,6 +3969,17 @@ export class Game {
 
         // Window-level keyboard handler
         window.addEventListener('keydown', (e) => {
+            // Don't intercept keys when typing in input fields
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            // ESC = Deselect current unit
+            if (e.key === 'Escape') {
+                if (this.selectedUnit) {
+                    this.deselectUnit();
+                }
+                return;
+            }
+
             // Ctrl+Shift+K = Save (primary, browser-safe)
             if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'k') {
                 e.preventDefault();
@@ -3162,6 +4055,14 @@ export class Game {
             unit.velocity.set(data.velocity.x, data.velocity.y, data.velocity.z);
         }
         unit.health = data.health ?? unit.health;
+        unit.ownerSlot = data.ownerSlot ?? unit.ownerSlot ?? 0; // R013 M07: Ownership
+        // Restore ownerHistory from saved data (if present)
+        if (data.ownerHistory && Array.isArray(data.ownerHistory)) {
+            unit.ownerHistory = data.ownerHistory;
+        }
+        // M07 Unit Authority v0: Restore selectedBySlot (handle old controllerSlot for compat)
+        unit.selectedBySlot = data.selectedBySlot ?? data.controllerSlot ?? unit.selectedBySlot ?? null;
+        unit.seatPolicy = data.seatPolicy ?? unit.seatPolicy ?? 'OPEN';
         unit.currentSpeed = data.currentSpeed ?? 0;
         unit.pathIndex = data.pathIndex ?? 0;
         unit.isFollowingPath = data.isFollowingPath ?? false;
@@ -3231,13 +4132,27 @@ export class Game {
     /**
      * R006: Process input commands from the queue.
      * Called at the start of each simTick for deterministic command execution.
+     * R013 M07: Respects ENABLE_COMMAND_EXECUTION flag for Slice 1 testing.
+     *
+     * M07 GAP-0 Fix: SELECT/DESELECT are UI-only (per-client visual state)
+     * and always execute regardless of gate. Sim-mutating commands (MOVE,
+     * SET_PATH, CLOSE_PATH) are gated by ENABLE_COMMAND_EXECUTION.
+     *
      * @param {number} tickCount - Current tick number
      */
     _processInputCommands(tickCount) {
-        const commands = globalCommandQueue.flush(tickCount);
+        // Always flush the queue - we need to process UI commands even if sim is gated
+        const commands = (this.commandQueue || globalCommandQueue).flush(tickCount);
+
+        // Track whether Host needs to relay commands to Guest via CMD_BATCH
+        const isHost = this.sessionManager?.state?.isHost?.() ?? false;
 
         for (const cmd of commands) {
+            // Skip commands already relayed from Host (prevent Guest re-buffering)
+            const fromHost = cmd._fromHost === true;
+
             switch (cmd.type) {
+                // === UI-ONLY COMMANDS (always execute, per-client visual state) ===
                 case CommandType.SELECT: {
                     const unit = this.units.find(u => u && u.id === cmd.unitId);
                     if (unit) {
@@ -3249,15 +4164,27 @@ export class Game {
                     this.deselectUnit();
                     break;
                 }
+
+                // === SIM-MUTATING COMMANDS (gated by ENABLE_COMMAND_EXECUTION) ===
                 case CommandType.MOVE: {
+                    if (!this.ENABLE_COMMAND_EXECUTION) break; // Gate
                     const unit = this.units.find(u => u && u.id === cmd.unitId);
                     if (unit) {
                         const pos = new THREE.Vector3(cmd.position.x, cmd.position.y, cmd.position.z);
                         this.addCommand(unit, 'Move', { position: pos });
                     }
+                    // Host: buffer for CMD_BATCH relay to Guest (skip if already from CMD_BATCH)
+                    if (isHost && !fromHost && this.sessionManager?.bufferInputCmd) {
+                        this.sessionManager.bufferInputCmd({
+                            slot: cmd.slot ?? 0,
+                            seq: cmd.seq ?? 0,
+                            command: { type: cmd.type, unitId: cmd.unitId, position: cmd.position }
+                        });
+                    }
                     break;
                 }
                 case CommandType.SET_PATH: {
+                    if (!this.ENABLE_COMMAND_EXECUTION) break; // Gate
                     const unit = this.units.find(u => u && u.id === cmd.unitId);
                     if (unit && cmd.points && cmd.points.length > 0) {
                         // Clear existing path and add new waypoints
@@ -3269,12 +4196,29 @@ export class Game {
                             this.addCommand(unit, 'Move', { position: pos });
                         }
                     }
+                    // Host: buffer for CMD_BATCH relay to Guest
+                    if (isHost && !fromHost && this.sessionManager?.bufferInputCmd) {
+                        this.sessionManager.bufferInputCmd({
+                            slot: cmd.slot ?? 0,
+                            seq: cmd.seq ?? 0,
+                            command: { type: cmd.type, unitId: cmd.unitId, points: cmd.points }
+                        });
+                    }
                     break;
                 }
                 case CommandType.CLOSE_PATH: {
+                    if (!this.ENABLE_COMMAND_EXECUTION) break; // Gate
                     const unit = this.units.find(u => u && u.id === cmd.unitId);
-                    if (unit && unit === this.selectedUnit) {
-                        this.closePath();
+                    if (unit) {
+                        this.closePathForUnit(unit);
+                    }
+                    // Host: buffer for CMD_BATCH relay to Guest
+                    if (isHost && !fromHost && this.sessionManager?.bufferInputCmd) {
+                        this.sessionManager.bufferInputCmd({
+                            slot: cmd.slot ?? 0,
+                            seq: cmd.seq ?? 0,
+                            command: { type: cmd.type, unitId: cmd.unitId }
+                        });
                     }
                     break;
                 }
@@ -3294,8 +4238,13 @@ export class Game {
 
         const keys = this.input.getKeys();
 
-        // Auto-Chase: ONLY when Manual Driving
-        if (this.selectedUnit && (keys.forward || keys.backward || keys.left || keys.right)) {
+        // M07: Gate keyboard-triggered camera transitions by seat authority
+        const hasSeat = this.selectedUnit
+            ? (this.sessionManager?.hasSeatedUnit?.(this.selectedUnit) ?? true)
+            : false;
+
+        // Auto-Chase: ONLY when Manual Driving (and we have the seat)
+        if (this.selectedUnit && hasSeat && (keys.forward || keys.backward || keys.left || keys.right)) {
             // First keyboard press: transition to third-person view
             if (this.cameraControls.chaseMode === 'drone') {
                 this.cameraControls.transitionToThirdPerson(this.selectedUnit);
@@ -3336,9 +4285,9 @@ export class Game {
             this.visionHelper.scale.set(r / 15, r / 15, r / 15);
         }
 
-        // Update visibility indicator
+        // Update visibility indicator (DEV mode only)
         const visIndicator = document.getElementById('visibility-indicator');
-        if (visIndicator) {
+        if (visIndicator && this._isDevMode) {
             if (this.selectedUnit && this.cameraControls) {
                 visIndicator.classList.remove('hidden');
                 const obstructionHeight = this.cameraControls.currentObstructionHeight || 0;
@@ -3356,7 +4305,7 @@ export class Game {
             }
         }
 
-        // Update FOW with ALL units
+        // Update FOW with ALL units (shader-based spherical FOW)
         if (this.units.length > 0) {
             this.fogOfWar.update(this.units);
         }
@@ -3392,11 +4341,6 @@ export class Game {
             }
         }
 
-        // Update Camera
-        if (this.cameraControls) {
-            this.cameraControls.update(0.016);
-        }
-
         // Update Path Visuals
         this.updatePathVisuals();
 
@@ -3409,10 +4353,23 @@ export class Game {
     }
 
     animate() {
-        // R001: Run fixed-timestep sim ticks, then render
-        this.simLoop.step(performance.now());
-        this.renderUpdate();
-        this.renderer.render(this.scene, this.camera);
+        try {
+            // R001: Run fixed-timestep sim ticks, then render
+            this.simLoop.step(performance.now());
+            this.renderUpdate();
+            this.renderer.render(this.scene, this.camera);
+            this.adaptivePerf.update(performance.now());
+        } catch (err) {
+            // Show error on screen for diagnosis (user may not have console open)
+            if (!this._animateErrorShown) {
+                this._animateErrorShown = true;
+                console.error('[Game] animate() error:', err);
+                const errDiv = document.createElement('div');
+                errDiv.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.9);color:#ff4444;padding:24px;border-radius:12px;z-index:99999;font-family:monospace;font-size:14px;max-width:80%;white-space:pre-wrap;';
+                errDiv.textContent = 'GAME ERROR:\n' + err.message + '\n\n' + err.stack;
+                document.body.appendChild(errDiv);
+            }
+        }
 
         // Trigger onFirstRender callback after enough frames to ensure content visible
         // Wait for 30 frames (about 0.5s at 60fps) to ensure textures loaded
@@ -3441,7 +4398,7 @@ export class Game {
 
         unit.pausedByCommand = !unit.pausedByCommand;
 
-        console.log(`Unit ${unit.id} Paused: ${unit.pausedByCommand}`);
+        if (this._isDevMode) console.log(`Unit ${unit.id} Paused: ${unit.pausedByCommand}`);
 
         if (this.isFocusMode && this.focusedUnit === unit) {
             this.updatePanelContent(unit);
@@ -3511,165 +4468,8 @@ export class Game {
         this.pathPlannerDebugMesh.renderOrder = 200; // Render on top
         this.scene.add(this.pathPlannerDebugMesh);
         
-        console.log(`[Game] PathPlanner debug: ${debugPoints.length} points visualized`);
+        if (this._isDevMode) console.log(`[Game] PathPlanner debug: ${debugPoints.length} points visualized`);
     }
 
-    // R012: Unified dev HUD for observability (only shown when dev=1)
-    _createDevHUD() {
-        const hud = document.createElement('div');
-        hud.id = 'r012-dev-hud';
-        hud.style.cssText = `
-            position: fixed;
-            top: 8px;
-            right: 8px;
-            background: rgba(0,0,0,0.9);
-            color: #ccc;
-            font-family: monospace;
-            font-size: 11px;
-            padding: 10px 14px;
-            border-radius: 6px;
-            z-index: 99999;
-            user-select: none;
-            min-width: 180px;
-            border: 1px solid #333;
-        `;
-
-        hud.innerHTML = `
-            <div style="color:#0ff;font-weight:bold;margin-bottom:8px;border-bottom:1px solid #333;padding-bottom:4px;">R012 DEV HUD</div>
-            <div id="r012-net-mode" style="margin-bottom:4px;">NET MODE: <span style="color:#888;">---</span></div>
-            <div id="r012-config" style="margin-bottom:4px;">CONFIG: <span style="color:#888;">---</span></div>
-            <div id="r012-auth" style="margin-bottom:4px;">AUTH: <span style="color:#888;">---</span></div>
-            <div id="r012-realtime" style="margin-bottom:8px;">REALTIME: <span style="color:#888;">---</span></div>
-            <div style="border-top:1px solid #333;padding-top:8px;margin-bottom:6px;">
-                <div style="display:flex;gap:8px;margin-bottom:6px;">
-                    <button id="r012-btn-save" style="
-                        background:#1a1;color:#fff;border:none;padding:4px 12px;
-                        border-radius:3px;cursor:pointer;font-family:monospace;font-size:11px;
-                    ">Save</button>
-                    <button id="r012-btn-load" style="
-                        background:#17a;color:#fff;border:none;padding:4px 12px;
-                        border-radius:3px;cursor:pointer;font-family:monospace;font-size:11px;
-                    ">Load</button>
-                </div>
-            </div>
-            <div id="r012-db-status" style="color:#888;font-size:10px;">DB: ready</div>
-        `;
-        document.body.appendChild(hud);
-
-        // Store reference for updates
-        this._devHUD = {
-            netMode: document.getElementById('r012-net-mode').querySelector('span'),
-            config: document.getElementById('r012-config').querySelector('span'),
-            auth: document.getElementById('r012-auth').querySelector('span'),
-            realtime: document.getElementById('r012-realtime').querySelector('span'),
-            dbStatus: document.getElementById('r012-db-status'),
-            btnSave: document.getElementById('r012-btn-save'),
-            btnLoad: document.getElementById('r012-btn-load')
-        };
-    }
-
-    // R012: Update network status in dev HUD
-    _updateNetStatus(status, extraInfo = {}) {
-        if (!this._devHUD) return;
-
-        // NET MODE
-        const isSupabase = status === 'SUPABASE';
-        this._devHUD.netMode.textContent = isSupabase ? 'SUPABASE' : 'LOCAL';
-        this._devHUD.netMode.style.color = isSupabase ? '#4caf50' : '#888';
-
-        // CONFIG status
-        if (extraInfo.config) {
-            const cfg = extraInfo.config;
-            this._devHUD.config.textContent = cfg;
-            this._devHUD.config.style.color = cfg === 'OK' ? '#4caf50' : '#f44336';
-        }
-
-        // AUTH status
-        if (extraInfo.auth) {
-            const auth = extraInfo.auth;
-            this._devHUD.auth.textContent = auth;
-            this._devHUD.auth.style.color = auth === 'ANON OK' ? '#4caf50' : '#f44336';
-        }
-
-        // REALTIME status
-        if (extraInfo.rt) {
-            const rt = extraInfo.rt;
-            this._devHUD.realtime.textContent = rt;
-            if (rt === 'CONNECTED') {
-                this._devHUD.realtime.style.color = '#4caf50';
-            } else if (rt === 'CONNECTING...') {
-                this._devHUD.realtime.style.color = '#ff9800';
-            } else {
-                this._devHUD.realtime.style.color = '#f44336';
-            }
-        }
-    }
-
-    // R012: Update DB status in dev HUD (called by save/load)
-    _updateDBStatus(msg, isError = false) {
-        if (!this._devHUD) return;
-        this._devHUD.dbStatus.textContent = `DB: ${msg}`;
-        this._devHUD.dbStatus.style.color = isError ? '#f44336' : '#4caf50';
-    }
-
-    // R012: Poll Supabase transport state and update REALTIME status in HUD
-    _startRealtimeStatusPolling() {
-        if (!this._supabaseTransport || !this._devHUD) return;
-
-        let lastState = null;
-        const poll = () => {
-            const state = this._supabaseTransport.state;
-            if (state !== lastState) {
-                lastState = state;
-                let rtText = 'UNKNOWN';
-                if (state === 'CONNECTED') rtText = 'CONNECTED';
-                else if (state === 'CONNECTING') rtText = 'CONNECTING...';
-                else if (state === 'DISCONNECTED') rtText = 'DISCONNECTED';
-                else if (state === 'ERROR') rtText = 'ERROR';
-
-                this._devHUD.realtime.textContent = rtText;
-                if (state === 'CONNECTED') {
-                    this._devHUD.realtime.style.color = '#4caf50';
-                } else if (state === 'CONNECTING') {
-                    this._devHUD.realtime.style.color = '#ff9800';
-                } else {
-                    this._devHUD.realtime.style.color = '#f44336';
-                }
-            }
-        };
-
-        // Poll every 500ms
-        this._rtStatusInterval = setInterval(poll, 500);
-        poll(); // Initial check
-    }
-
-    // R012: Initialize Supabase auth (anonymous sign-in for persistence)
-    async _initSupabaseAuth(client) {
-        try {
-            // Check if already signed in
-            const { data: { user } } = await client.auth.getUser();
-            if (user) {
-                console.log('[Game] Supabase auth: Already signed in as', user.id);
-                this._supabaseUserId = user.id;
-                return;
-            }
-
-            // Sign in anonymously
-            const { data, error } = await client.auth.signInAnonymously();
-            if (error) {
-                console.error('[Game] Supabase anonymous sign-in failed:', error.message);
-                if (this._devHUD) {
-                    this._devHUD.auth.textContent = 'AUTH FAIL';
-                    this._devHUD.auth.style.color = '#f44336';
-                }
-                return;
-            }
-
-            this._supabaseUserId = (data.user && data.user.id) ? data.user.id : null;
-            console.log('[Game] Supabase auth: Signed in anonymously as', this._supabaseUserId);
-        } catch (err) {
-            console.error('[Game] Supabase auth error:', err);
-        }
-    }
 }
 

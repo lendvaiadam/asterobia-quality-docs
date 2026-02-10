@@ -133,6 +133,58 @@ export class TransportBase {
         throw new Error('TransportBase.disconnect() must be implemented by subclass');
     }
 
+    // ========================================
+    // CHANNEL API (R013: Multiplayer channels)
+    // ========================================
+
+    /**
+     * Join a named channel and subscribe to its messages.
+     * Used by SessionManager for lobby discovery and session communication.
+     *
+     * Must be implemented by subclasses that support multiplayer channels
+     * (e.g., SupabaseTransport, MemoryTransportEndpoint).
+     *
+     * @param {string} channelName - Channel name (e.g., 'asterobia:lobby')
+     * @param {Function} [callback] - Callback for incoming messages on this channel
+     * @returns {Promise<void>}
+     * @abstract
+     */
+    async joinChannel(channelName, callback) {
+        throw new Error('TransportBase.joinChannel() must be implemented by subclass');
+    }
+
+    /**
+     * Broadcast a message to all subscribers of a named channel.
+     * Used by SessionManager for HOST_ANNOUNCE, JOIN_REQ, CMD_BATCH, etc.
+     *
+     * Must be implemented by subclasses that support multiplayer channels.
+     *
+     * @param {string} channelName - Channel name
+     * @param {Object} msg - Message object to broadcast
+     * @returns {Promise<void>}
+     * @abstract
+     */
+    async broadcastToChannel(channelName, msg) {
+        throw new Error('TransportBase.broadcastToChannel() must be implemented by subclass');
+    }
+
+    /**
+     * Register a global message handler.
+     * Called by SessionManager.setTransport() to wire up message routing.
+     *
+     * Must be implemented by subclasses that support multiplayer channels.
+     *
+     * @param {Function} callback - Global message handler
+     * @abstract
+     */
+    onMessage(callback) {
+        throw new Error('TransportBase.onMessage() must be implemented by subclass');
+    }
+
+    // ========================================
+    // INTERNAL DELIVERY
+    // ========================================
+
     /**
      * Deliver a received command to the callback.
      * Called by concrete transports when a command arrives.

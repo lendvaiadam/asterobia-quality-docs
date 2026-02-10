@@ -41,6 +41,31 @@ node --experimental-vm-modules src/SimCore/__tests__/r011-save-load.test.js
 - **Hash Match**: `r010-full-determinism` must confirm "IDENTICAL final hash" and "100% per-tick match".
 - **Save/Load**: Post-load simulation must match original run tick-for-tick.
 
+## Determinism Blockers (Red Flags)
+
+### FORBIDDEN in Gameplay Logic
+| Pattern | Why It Breaks Determinism | Alternative |
+|---------|---------------------------|-------------|
+| `Math.random()` | Non-deterministic seed | Use `SeededRNG` |
+| `Date.now()` | Time varies per machine | Use `simTick` counter |
+| `Object.keys()` ordering | Browser-dependent | Sort keys explicitly |
+| `Set/Map` iteration | Insertion order varies | Use sorted arrays |
+| `Promise.race()` | Timing-dependent | Sequential processing |
+| `async/await` in sim | Execution order varies | Sync only in SimLoop |
+| Floating-point accumulation | Drift over time | Fixed-point or round |
+
+### ALLOWED (Render/UI Only)
+- `Math.random()` for particle effects, dust, visual jitter
+- `Date.now()` for UI timestamps, performance metrics
+- `requestAnimationFrame` timing for render interpolation
+
+### Network-Specific Determinism
+For multiplayer lockstep:
+- All clients MUST process the same commands in the same tick order
+- Use `simTick` as the canonical ordering, not wall-clock time
+- State hash comparison catches drift early
+- Command batches are processed atomically per tick
+
 ### Output Format
 If successful, output:
 > [!IMPORTANT]

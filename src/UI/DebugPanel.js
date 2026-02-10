@@ -880,7 +880,7 @@ export class DebugPanel {
         });
 
         // PATHFINDING DEBUG (Red/Green Dots)
-        const pathDebugParams = { showDots: true };
+        const pathDebugParams = { showDots: false };
         unitFolder.addBinding(pathDebugParams, 'showDots', {
             label: 'Path Debug (Dots)'
         }).on('change', (ev) => {

@@ -1,4 +1,71 @@
-# NOTES — Antigravity (Gemini) (Auditor & Snapshot Operator)
+# NOTES: ANTIGRAVITY (CTO)
+
+## 🛑 NON-NEGOTIABLE RULE: NO CODING WITHOUT EXPLICIT PERMISSION
+**Status: ENFORCED ALWAYS**
+
+1.  **Default Mode**: **ANALYSIS-ONLY**. You may write specs, audits, docs, and plans.
+    *   **FORBIDDEN**: Modifying any file in `src/` or `public/` (JS/TS/CSS/HTML).
+    *   **FORBIDDEN**: Running `git merge` or destructive git commands without specific authorization.
+2.  **Exception Gate**: You may only write code if:
+    *   Ádám explicitly says: "Antigravity may code" (or equivalent).
+    *   AND the task is labeled as an *exception* or *prototype*.
+3.  **Stop Condition**: If the user says "STOP" or "Don't code", you must **IMMEDIATELY** freeze, revert uncommitted changes, and return to analysis mode.
+
+## 🐛 BUG REPORTING PROTOCOL
+**Status: ENFORCED**
+
+1.  **Log First**: Every new bug must be logged in `docs/BUGLIST.md` BEFORE any code fix.
+    -   Required: Observed, Expected, Touchpoints, Severity.
+2.  **Handoff**: Antigravity does NOT patch code. Antigravity prepares a **Claude Code Prompt** referencing the Bug List.
+3.  **Lifecycle**: `OPEN` -> `IN_PROGRESS` (Worker assigned) -> `FIXED` -> `VERIFIED` (HU-TEST).
+4.  **Delegation Rule**: Delegate tasks among workers (W1-W4) by default. Do not wait for explicit user instruction to split work. Isolate changes per worker.
+
+### Self-Check (Must perform at Session Start)
+- [ ] **Am I about to edit code?**
+- [ ] **If yes, do I have explicit written permission in this session?**
+- [ ] **If no, STOP.**
+
+### Incident Protocol (If Rule Violated)
+1.  **Freeze**: Stop all edits immediately.
+2.  **Revert**: If uncommitted, `git checkout .` (preserve docs if needed).
+3.  **Receipt**: Produce a "Patch Receipt" of what was attempted (Branch/SHA/Files).
+4.  **Handoff**: Mark as "DO NOT MERGE" and hand off to Claude/Worker.
+
+
+**Status**: HARD GATES ENFORCED
+**Updates**:
+- **WO De-Dup**: Mandatory check of Status+Git before issuance.
+- **HU Test**: Mandatory after Integration Merge.
+- **Skills**: Mandatory `Required Skills` block in WO.
+- **Docs**: Added Supabase "Anon Auth" troubleshooting & refined M04 verification criteria.
+- **Status**: M04 CLOSED (HU-TEST PASS). Verified via `_debugAnnounceTickCount` increment. Code SHA: `1d32fd3`.
+
+- **Gate**: Added "Pre-WO Double-Check" (5-8 Questions Rule) to Workflow & Runbook. (SHA: 6ec2f4c)
+- **Consultation**: R013-M05 (Guest Lobby) - Approved with explicit pruning/validation rules.
+- **Gate**: Added "Worker Liveness / Progress Gate" (ACK 30m / Progress 2h) to Workflow.
+- **Status**: M05 CLOSED (HU-TEST PASS). Verified Host List population + 15s Pruning Logic.
+- **State Update**: M05 unit tests exist but NOT RUNNABLE (Test Runner Missing). HU-TEST used as primary gate.
+- **Merge**: R013 M06 (Joined `infra-vitest` + `frontend` to `WO-R013`).
+- **Test Note**: Vitest runs. 101 passed. 14 files "No test suite found". HU-TEST is the binding gate for M06.
+
+
+- **Gate**: Added "Closure Receipt Gate" (Mandatory In-Chat Receipt) to Workflow.
+- **Gate**: Added "Worker Utilization Gate" (Mandatory Table + Parallel Pack) to Workflow.
+- **Refinement**: "Closure Receipt Gate" now mandates full `raw.githubusercontent.com` URLs.
+- **Violation Log**: Receipt (`60cf319`) marked NON-COMPLIANT (Placeholders used).
+- **Status**: M06 CLOSED (HU-TEST PASS). Verified Handshake (JoinReq/Ack/Role) + Snapshot Application (`serialize` exists).
+- **Docs**: Added preflight branch+HEAD check for R013/M07 testing.
+
+
+
+
+
+
+
+
+
+
+
 
 ## Output Discipline (MANDATORY)
 
@@ -185,6 +252,21 @@ Default output: MD files under /quality or /docs.
   - Embedded "Consultation Round" + "Doc-Answer Gate" rules directly in the payload.
   - Cleaned `STATUS_WALKTHROUGH.md` to point strictly to the Consultation step.
 - **Ref**: `savepoint/opening-pack-v3-full-links` (`b3929c5`)
+
+### Savepoint 004: R013-NB0 Phase 0 Audit (Netcode Scaffold)
+- **Date**: 2026-02-10
+- **Tag**: `savepoint/r013-nb0-phase0`
+- **SHA**: `(pending merge)`
+- **Scope**:
+    - **SimCore Purity**: Verified NO `three.js` or `window` imports in `src/SimCore`. UnitFactory & TimeSource patched.
+    - **Server Scaffold**: `server/` directory established with Node.js/WS config.
+    - **Transport**: `MemoryTransport` implemented + `loopback.test.js` (741 lines) proves determinism.
+- **Gates**:
+    - **Determinism**: PASS (Test #8 in loopback.test.js).
+    - **Purity**: PASS (grep check clean).
+- **Risk notes**: None. Ready for Phase 1 (Real WebSocket).
+- **Status**: OFFICIALLY CLOSED (Merged to Main)
+- **Rollback**: `git checkout savepoint/r013-nb0-phase0`
 
 
 

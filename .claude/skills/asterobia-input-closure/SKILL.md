@@ -32,3 +32,36 @@ If commands are not executing:
 1.  Check `Transport` status (Connected?).
 2.  Check `CommandQueue` flush in `simTick`.
 3.  Ensure `InputFactory` is instantiated and wired to Transport.
+
+## Network Flow (M07+)
+
+### Host (Authority)
+```
+Local Input → InputFactory → Transport.send()
+                                ↓
+                         CommandQueue.enqueue()
+                                ↓
+                         SimLoop.tick() executes
+                                ↓
+                         SessionManager.broadcast(CMD_BATCH)
+```
+
+### Guest (Follower)
+```
+Local Input → InputFactory → Transport.send()
+                                ↓
+                         → NetworkTransport → Host (INPUT_CMD)
+
+Host CMD_BATCH arrives via WebSocket
+                                ↓
+                         CommandQueue.enqueueBatch()
+                                ↓
+                         SimLoop.tick() executes (same as host)
+```
+
+### Key Invariant
+**Guests NEVER execute local input directly.**
+- Guest sends INPUT_CMD to host
+- Host includes it in CMD_BATCH
+- Guest receives CMD_BATCH and executes
+- This ensures all clients see identical command sequence

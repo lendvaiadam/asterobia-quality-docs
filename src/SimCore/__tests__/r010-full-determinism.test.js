@@ -5,11 +5,12 @@
  * produce IDENTICAL state hashes at 100% of ticks.
  *
  * REAL PIPELINE COVERAGE:
- *   InputFactory → Transport → CommandQueue → SimTick → StateSurface
+ *   InputFactory -> Transport -> CommandQueue -> SimTick -> StateSurface
  *
- * Run: node --experimental-vm-modules src/SimCore/__tests__/r010-full-determinism.test.js
+ * Run: npx vitest run src/SimCore/__tests__/r010-full-determinism.test.js
  */
 
+import { describe, it, expect } from 'vitest';
 import { SimLoop } from '../runtime/SimLoop.js';
 import { resetGlobalRNG, rngNext } from '../runtime/SeededRNG.js';
 import { resetEntityIdCounter, nextEntityId } from '../runtime/IdGenerator.js';
@@ -96,7 +97,7 @@ class HeadlessSimWithTransport {
         this.transport = new LocalTransport();
         this.inputFactory = new InputFactory(this.transport);
 
-        // Wire transport → commandQueue (like initializeTransport)
+        // Wire transport -> commandQueue (like initializeTransport)
         this.transport.onReceive = (cmd) => this.commandQueue.enqueue(cmd);
         this.transport.connect();
 
@@ -271,250 +272,204 @@ class HeadlessSimWithTransport {
     }
 }
 
-// ============ Test Framework ============
+// ============ Tests ============
 
-let passed = 0;
-let failed = 0;
+describe('R010: Full Determinism Verification', () => {
+    it('R010: Transport -> CommandQueue pipeline works', () => {
+        resetGlobalRNG(42);
+        resetEntityIdCounter();
 
-function test(name, fn) {
-    try {
-        fn();
-        console.log(`✓ ${name}`);
-        passed++;
-    } catch (err) {
-        console.log(`✗ ${name}`);
-        console.log(`  Error: ${err.message}`);
-        failed++;
-    }
-}
+        const sim = new HeadlessSimWithTransport(42);
 
-function assertEqual(actual, expected, msg = '') {
-    if (actual !== expected) {
-        throw new Error(`${msg} Expected ${expected}, got ${actual}`);
-    }
-}
+        // Send command through transport (scheduled for tick 1)
+        sim.commandQueue.enqueue({ type: 'SPAWN', x: 0, y: 10, z: 0 }, 1);
 
-// ============ R010 Verification Tests ============
+        // Verify command is in queue
+        expect(sim.commandQueue.pendingCount).toBe(1);
 
-test('R010: Transport → CommandQueue pipeline works', () => {
-    resetGlobalRNG(42);
-    resetEntityIdCounter();
+        // Run 5 ticks (first call initializes, subsequent run ticks)
+        sim.runTicks(5);
 
-    const sim = new HeadlessSimWithTransport(42);
+        // Verify unit spawned
+        expect(sim.units.length).toBe(1);
+    });
 
-    // Send command through transport (scheduled for tick 1)
-    sim.commandQueue.enqueue({ type: 'SPAWN', x: 0, y: 10, z: 0 }, 1);
+    it('R010: Dual-run produces identical FINAL hash', () => {
+        const SEED = 12345;
+        const TICKS = 100;
 
-    // Verify command is in queue
-    assertEqual(sim.commandQueue.pendingCount, 1, 'command enqueued');
-
-    // Run 5 ticks (first call initializes, subsequent run ticks)
-    sim.runTicks(5);
-
-    // Verify unit spawned
-    assertEqual(sim.units.length, 1, 'unit spawned via Transport→Queue pipeline');
-});
-
-test('R010: Dual-run produces identical FINAL hash', () => {
-    const SEED = 12345;
-    const TICKS = 100;
-
-    // Command sequence (sent through transport)
-    const commandScript = [
-        { tick: 1, cmd: { type: 'SPAWN', x: 0, y: 10, z: 0 } },
-        { tick: 1, cmd: { type: 'SPAWN', x: 5, y: 10, z: 5 } },
-        { tick: 5, cmd: { type: 'MOVE_DIR', unitId: 1, dx: 1, dy: 0, dz: 0 } },
-        { tick: 5, cmd: { type: 'MOVE_DIR', unitId: 2, dx: 0, dy: 0, dz: 1 } },
-        { tick: 30, cmd: { type: 'MOVE_DIR', unitId: 1, dx: 0, dy: 0, dz: -1 } },
-        { tick: 50, cmd: { type: 'STOP', unitId: 2 } },
-        { tick: 70, cmd: { type: 'MOVE_DIR', unitId: 2, dx: -1, dy: 0, dz: 0 } },
-        { tick: 90, cmd: { type: 'STOP', unitId: 1 } }
-    ];
-
-    // Run 1
-    resetGlobalRNG(SEED);
-    resetEntityIdCounter();
-    const sim1 = new HeadlessSimWithTransport(SEED);
-
-    // Schedule commands (converted to tick-scheduled)
-    for (const { tick, cmd } of commandScript) {
-        sim1.commandQueue.enqueue(cmd, tick);
-    }
-    sim1.runTicks(TICKS);
-    const hash1 = sim1.getFinalHash();
-
-    // Run 2
-    resetGlobalRNG(SEED);
-    resetEntityIdCounter();
-    const sim2 = new HeadlessSimWithTransport(SEED);
-
-    for (const { tick, cmd } of commandScript) {
-        sim2.commandQueue.enqueue(cmd, tick);
-    }
-    sim2.runTicks(TICKS);
-    const hash2 = sim2.getFinalHash();
-
-    assertEqual(hash1, hash2, 'Final hashes must match');
-});
-
-test('R010: 100% PER-TICK hash match (DoD requirement)', () => {
-    const SEED = 42;
-    const TICKS = 50;
-
-    const commandScript = [
-        { tick: 1, cmd: { type: 'SPAWN', x: 0, y: 10, z: 0 } },
-        { tick: 1, cmd: { type: 'SPAWN', x: 10, y: 10, z: 10 } },
-        { tick: 3, cmd: { type: 'MOVE_DIR', unitId: 1, dx: 1, dy: 0, dz: 1 } },
-        { tick: 10, cmd: { type: 'MOVE_DIR', unitId: 2, dx: -1, dy: 0, dz: 0 } },
-        { tick: 25, cmd: { type: 'STOP', unitId: 1 } },
-        { tick: 30, cmd: { type: 'MOVE_DIR', unitId: 1, dx: 0, dy: 0, dz: -1 } },
-        { tick: 40, cmd: { type: 'STOP', unitId: 2 } }
-    ];
-
-    // Run 1
-    resetGlobalRNG(SEED);
-    resetEntityIdCounter();
-    const sim1 = new HeadlessSimWithTransport(SEED);
-    for (const { tick, cmd } of commandScript) {
-        sim1.commandQueue.enqueue(cmd, tick);
-    }
-    sim1.runTicks(TICKS);
-
-    // Run 2
-    resetGlobalRNG(SEED);
-    resetEntityIdCounter();
-    const sim2 = new HeadlessSimWithTransport(SEED);
-    for (const { tick, cmd } of commandScript) {
-        sim2.commandQueue.enqueue(cmd, tick);
-    }
-    sim2.runTicks(TICKS);
-
-    // Compare EVERY tick hash
-    assertEqual(sim1.tickHashes.length, sim2.tickHashes.length, 'Same tick count');
-
-    let matchCount = 0;
-    let mismatchTicks = [];
-
-    for (let i = 0; i < sim1.tickHashes.length; i++) {
-        if (sim1.tickHashes[i].hash === sim2.tickHashes[i].hash) {
-            matchCount++;
-        } else {
-            mismatchTicks.push({
-                tick: sim1.tickHashes[i].tick,
-                hash1: sim1.tickHashes[i].hash,
-                hash2: sim2.tickHashes[i].hash
-            });
-        }
-    }
-
-    const matchRate = (matchCount / sim1.tickHashes.length) * 100;
-
-    if (mismatchTicks.length > 0) {
-        throw new Error(`Hash mismatch at ticks: ${mismatchTicks.map(m => m.tick).join(', ')} (${matchRate.toFixed(1)}% match)`);
-    }
-
-    assertEqual(matchRate, 100, 'Must achieve 100% tick match');
-});
-
-test('R010: InputFactory → Transport → Queue → Sim flow', () => {
-    const SEED = 999;
-
-    resetGlobalRNG(SEED);
-    resetEntityIdCounter();
-    const sim = new HeadlessSimWithTransport(SEED);
-
-    // Test the FULL InputFactory → Transport → Queue → Sim pipeline
-    // Note: CommandQueue.enqueue uses nextEntityId() for cmd IDs BEFORE SPAWN runs.
-    // With 3 commands enqueued, the unit will get ID = 4.
-    const EXPECTED_UNIT_ID = 4;
-
-    const commandScript = [
-        { tick: 1, cmd: { type: 'SPAWN', x: 0, y: 10, z: 0 } },
-        { tick: 5, cmd: { type: CommandType.SELECT, unitId: EXPECTED_UNIT_ID } },
-        { tick: 10, cmd: { type: CommandType.MOVE, unitId: EXPECTED_UNIT_ID, position: { x: 100, y: 10, z: 100 } } }
-    ];
-
-    for (const { tick, cmd } of commandScript) {
-        sim.commandQueue.enqueue(cmd, tick);
-    }
-
-    // Run enough ticks to process all commands
-    sim.runTicks(15);
-
-    // Verify full pipeline worked
-    assertEqual(sim.units.length, 1, 'unit spawned');
-    assertEqual(sim.units[0].id, EXPECTED_UNIT_ID, 'unit has expected ID');
-    assertEqual(sim.selectedUnit?.id, EXPECTED_UNIT_ID, 'unit selected');
-
-    // Unit should be moving towards target
-    const u = sim.units[0];
-    const moving = u.velocity.x !== 0 || u.velocity.z !== 0;
-    assertEqual(moving, true, 'unit moving after MOVE command');
-});
-
-test('R010: Stress test - 10 seeds × 100 ticks each', () => {
-    const TICKS = 100;
-    const SEEDS = [1, 42, 100, 256, 512, 1000, 2048, 4096, 8192, 9999];
-
-    let allPassed = true;
-
-    for (const seed of SEEDS) {
+        // Command sequence (sent through transport)
         const commandScript = [
             { tick: 1, cmd: { type: 'SPAWN', x: 0, y: 10, z: 0 } },
-            { tick: 1, cmd: { type: 'SPAWN', x: seed % 20, y: 10, z: seed % 30 } },
+            { tick: 1, cmd: { type: 'SPAWN', x: 5, y: 10, z: 5 } },
             { tick: 5, cmd: { type: 'MOVE_DIR', unitId: 1, dx: 1, dy: 0, dz: 0 } },
-            { tick: 10, cmd: { type: 'MOVE_DIR', unitId: 2, dx: 0, dy: 0, dz: 1 } },
-            { tick: 50, cmd: { type: 'STOP', unitId: 1 } }
+            { tick: 5, cmd: { type: 'MOVE_DIR', unitId: 2, dx: 0, dy: 0, dz: 1 } },
+            { tick: 30, cmd: { type: 'MOVE_DIR', unitId: 1, dx: 0, dy: 0, dz: -1 } },
+            { tick: 50, cmd: { type: 'STOP', unitId: 2 } },
+            { tick: 70, cmd: { type: 'MOVE_DIR', unitId: 2, dx: -1, dy: 0, dz: 0 } },
+            { tick: 90, cmd: { type: 'STOP', unitId: 1 } }
         ];
 
         // Run 1
-        resetGlobalRNG(seed);
+        resetGlobalRNG(SEED);
         resetEntityIdCounter();
-        const sim1 = new HeadlessSimWithTransport(seed);
+        const sim1 = new HeadlessSimWithTransport(SEED);
+
+        // Schedule commands (converted to tick-scheduled)
+        for (const { tick, cmd } of commandScript) {
+            sim1.commandQueue.enqueue(cmd, tick);
+        }
+        sim1.runTicks(TICKS);
+        const hash1 = sim1.getFinalHash();
+
+        // Run 2
+        resetGlobalRNG(SEED);
+        resetEntityIdCounter();
+        const sim2 = new HeadlessSimWithTransport(SEED);
+
+        for (const { tick, cmd } of commandScript) {
+            sim2.commandQueue.enqueue(cmd, tick);
+        }
+        sim2.runTicks(TICKS);
+        const hash2 = sim2.getFinalHash();
+
+        expect(hash1).toBe(hash2);
+    });
+
+    it('R010: 100% PER-TICK hash match (DoD requirement)', () => {
+        const SEED = 42;
+        const TICKS = 50;
+
+        const commandScript = [
+            { tick: 1, cmd: { type: 'SPAWN', x: 0, y: 10, z: 0 } },
+            { tick: 1, cmd: { type: 'SPAWN', x: 10, y: 10, z: 10 } },
+            { tick: 3, cmd: { type: 'MOVE_DIR', unitId: 1, dx: 1, dy: 0, dz: 1 } },
+            { tick: 10, cmd: { type: 'MOVE_DIR', unitId: 2, dx: -1, dy: 0, dz: 0 } },
+            { tick: 25, cmd: { type: 'STOP', unitId: 1 } },
+            { tick: 30, cmd: { type: 'MOVE_DIR', unitId: 1, dx: 0, dy: 0, dz: -1 } },
+            { tick: 40, cmd: { type: 'STOP', unitId: 2 } }
+        ];
+
+        // Run 1
+        resetGlobalRNG(SEED);
+        resetEntityIdCounter();
+        const sim1 = new HeadlessSimWithTransport(SEED);
         for (const { tick, cmd } of commandScript) {
             sim1.commandQueue.enqueue(cmd, tick);
         }
         sim1.runTicks(TICKS);
 
         // Run 2
-        resetGlobalRNG(seed);
+        resetGlobalRNG(SEED);
         resetEntityIdCounter();
-        const sim2 = new HeadlessSimWithTransport(seed);
+        const sim2 = new HeadlessSimWithTransport(SEED);
         for (const { tick, cmd } of commandScript) {
             sim2.commandQueue.enqueue(cmd, tick);
         }
         sim2.runTicks(TICKS);
 
-        // Compare all hashes
+        // Compare EVERY tick hash
+        expect(sim1.tickHashes.length).toBe(sim2.tickHashes.length);
+
+        let matchCount = 0;
+        let mismatchTicks = [];
+
         for (let i = 0; i < sim1.tickHashes.length; i++) {
-            if (sim1.tickHashes[i].hash !== sim2.tickHashes[i].hash) {
-                allPassed = false;
-                throw new Error(`Seed ${seed} mismatch at tick ${sim1.tickHashes[i].tick}`);
+            if (sim1.tickHashes[i].hash === sim2.tickHashes[i].hash) {
+                matchCount++;
+            } else {
+                mismatchTicks.push({
+                    tick: sim1.tickHashes[i].tick,
+                    hash1: sim1.tickHashes[i].hash,
+                    hash2: sim2.tickHashes[i].hash
+                });
             }
         }
-    }
 
-    assertEqual(allPassed, true, 'All seeds passed');
+        const matchRate = (matchCount / sim1.tickHashes.length) * 100;
+
+        expect(mismatchTicks.length).toBe(0);
+        expect(matchRate).toBe(100);
+    });
+
+    it('R010: InputFactory -> Transport -> Queue -> Sim flow', () => {
+        const SEED = 999;
+
+        resetGlobalRNG(SEED);
+        resetEntityIdCounter();
+        const sim = new HeadlessSimWithTransport(SEED);
+
+        // Test the FULL InputFactory -> Transport -> Queue -> Sim pipeline
+        // Note: CommandQueue.enqueue uses nextEntityId() for cmd IDs BEFORE SPAWN runs.
+        // With 3 commands enqueued, the unit will get ID = 4.
+        const EXPECTED_UNIT_ID = 4;
+
+        const commandScript = [
+            { tick: 1, cmd: { type: 'SPAWN', x: 0, y: 10, z: 0 } },
+            { tick: 5, cmd: { type: CommandType.SELECT, unitId: EXPECTED_UNIT_ID } },
+            { tick: 10, cmd: { type: CommandType.MOVE, unitId: EXPECTED_UNIT_ID, position: { x: 100, y: 10, z: 100 } } }
+        ];
+
+        for (const { tick, cmd } of commandScript) {
+            sim.commandQueue.enqueue(cmd, tick);
+        }
+
+        // Run enough ticks to process all commands
+        sim.runTicks(15);
+
+        // Verify full pipeline worked
+        expect(sim.units.length).toBe(1);
+        expect(sim.units[0].id).toBe(EXPECTED_UNIT_ID);
+        expect(sim.selectedUnit?.id).toBe(EXPECTED_UNIT_ID);
+
+        // Unit should be moving towards target
+        const u = sim.units[0];
+        const moving = u.velocity.x !== 0 || u.velocity.z !== 0;
+        expect(moving).toBe(true);
+    });
+
+    it('R010: Stress test - 10 seeds x 100 ticks each', () => {
+        const TICKS = 100;
+        const SEEDS = [1, 42, 100, 256, 512, 1000, 2048, 4096, 8192, 9999];
+
+        let allPassed = true;
+
+        for (const seed of SEEDS) {
+            const commandScript = [
+                { tick: 1, cmd: { type: 'SPAWN', x: 0, y: 10, z: 0 } },
+                { tick: 1, cmd: { type: 'SPAWN', x: seed % 20, y: 10, z: seed % 30 } },
+                { tick: 5, cmd: { type: 'MOVE_DIR', unitId: 1, dx: 1, dy: 0, dz: 0 } },
+                { tick: 10, cmd: { type: 'MOVE_DIR', unitId: 2, dx: 0, dy: 0, dz: 1 } },
+                { tick: 50, cmd: { type: 'STOP', unitId: 1 } }
+            ];
+
+            // Run 1
+            resetGlobalRNG(seed);
+            resetEntityIdCounter();
+            const sim1 = new HeadlessSimWithTransport(seed);
+            for (const { tick, cmd } of commandScript) {
+                sim1.commandQueue.enqueue(cmd, tick);
+            }
+            sim1.runTicks(TICKS);
+
+            // Run 2
+            resetGlobalRNG(seed);
+            resetEntityIdCounter();
+            const sim2 = new HeadlessSimWithTransport(seed);
+            for (const { tick, cmd } of commandScript) {
+                sim2.commandQueue.enqueue(cmd, tick);
+            }
+            sim2.runTicks(TICKS);
+
+            // Compare all hashes
+            for (let i = 0; i < sim1.tickHashes.length; i++) {
+                if (sim1.tickHashes[i].hash !== sim2.tickHashes[i].hash) {
+                    allPassed = false;
+                    expect.unreachable(`Seed ${seed} mismatch at tick ${sim1.tickHashes[i].tick}`);
+                }
+            }
+        }
+
+        expect(allPassed).toBe(true);
+    });
 });
-
-// ============ Summary & Report ============
-
-console.log('\n=== R010: Full Determinism Verification ===\n');
-
-console.log(`\n${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-    process.exit(1);
-} else {
-    console.log('\n✓ All R010 Determinism Verification tests PASS');
-    console.log('\nR010 DoD SATISFIED:');
-    console.log('  - [x] Auto-run 2 instances with same inputs');
-    console.log('  - [x] Hashes of serializeState match 100% of ticks');
-    console.log('\nPIPELINE COVERAGE:');
-    console.log('  InputFactory → Transport → CommandQueue → SimTick → StateSurface');
-    console.log('\nVERIFICATION SUMMARY:');
-    console.log('  - Dual-run with same seed: IDENTICAL final hash');
-    console.log('  - Per-tick hash comparison: 100% match');
-    console.log('  - Stress test (10 seeds × 100 ticks): ALL PASS');
-    process.exit(0);
-}

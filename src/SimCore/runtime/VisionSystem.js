@@ -1,11 +1,22 @@
 /**
  * VisionSystem.js
- * 
+ * @environment client-only
+ *
  * Collects vision sources from units and builds GPU-ready instance buffers
  * for per-unit vision rendering on spherical FogOfWar.
- * 
+ *
+ * PURITY AUDIT (2026-02-10):
+ *   - Marked @environment client-only (builds GPU buffers, references camera).
+ *   - Guarded `performance.now()` default via _perfNow for safe import on Node.js.
+ *   - No Three.js import (uses duck-typed position objects).
+ *
  * Part of Prompt 06: Per-Unit Vision System
  */
+
+/** Isomorphic high-resolution timer (mirrors TimeSource._perfNow) */
+const _perfNow = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? () => performance.now()
+    : () => Date.now();
 
 const DEFAULT_VISION_PERCENT = 50; // Default vision percentage if not set
 const PI = Math.PI;
@@ -80,7 +91,7 @@ export class VisionSystem {
      * @param {THREE.Camera} camera - Current camera (for distance culling)
      * @param {number} now - Current timestamp (performance.now())
      */
-    update(units, camera, now = performance.now()) {
+    update(units, camera, now = _perfNow()) {
         if (!this.config.enabled) {
             return;
         }

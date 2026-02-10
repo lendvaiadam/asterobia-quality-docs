@@ -24,7 +24,7 @@
  *   factory.select(unitId);  // Sends SELECT command through transport
  */
 
-import { CommandType } from './CommandQueue.js';
+import { CommandType, globalCommandQueue } from './CommandQueue.js';
 import { getGlobalTransport } from '../transport/index.js';
 
 /**
@@ -50,11 +50,21 @@ export class InputFactory {
 
     /**
      * Send a command through the transport.
+     * R013 M07: SELECT and DESELECT are UI-only (per-client visual state).
+     * They bypass transport and enqueue directly to local CommandQueue.
      * @param {Object} command - Command to send
      * @returns {Object} The command that was sent
      * @private
      */
     _send(command) {
+        // R013 M07: UI-only commands (SELECT/DESELECT) are per-client visual state.
+        // They apply locally immediately - no network round-trip needed.
+        if (command.type === CommandType.SELECT || command.type === CommandType.DESELECT) {
+            globalCommandQueue.enqueue(command);
+            return command;
+        }
+
+        // All other commands: go through transport for network sync
         const transport = this._getTransport();
         if (!transport) {
             console.error('[InputFactory] No transport available. Call initializeTransport() first.');

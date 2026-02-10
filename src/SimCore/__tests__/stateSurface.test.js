@@ -3,9 +3,10 @@
  *
  * Validates serializeState/serializeUnit produce correct authoritative snapshots.
  *
- * Run: node --experimental-vm-modules src/SimCore/__tests__/stateSurface.test.js
+ * Run: npx vitest run src/SimCore/__tests__/stateSurface.test.js
  */
 
+import { describe, it, expect } from 'vitest';
 import {
     serializeState,
     serializeUnit,
@@ -58,164 +59,114 @@ function createMockGame(units = []) {
 
 // ============ Tests ============
 
-let passed = 0;
-let failed = 0;
+describe('StateSurface', () => {
+    it('serializeUnit returns authoritative fields only', () => {
+        const unit = createMockUnit(1);
+        // Add render-only fields that should be EXCLUDED
+        unit.mesh = { visible: true };
+        unit.isSelected = true;
+        unit.isHovered = true;
+        unit.dustEffect = {};
 
-function test(name, fn) {
-    try {
-        fn();
-        console.log(`✓ ${name}`);
-        passed++;
-    } catch (err) {
-        console.log(`✗ ${name}`);
-        console.log(`  Error: ${err.message}`);
-        failed++;
-    }
-}
+        const serialized = serializeUnit(unit);
 
-function assertEqual(actual, expected, msg = '') {
-    if (actual !== expected) {
-        throw new Error(`${msg} Expected ${expected}, got ${actual}`);
-    }
-}
+        // Check authoritative fields present
+        expect(serialized.id).toBe(1);
+        expect(serialized.health).toBe(100);
+        expect(JSON.stringify(serialized.position)).toBe(JSON.stringify({ x: 11, y: 0, z: 21 }));
 
-function assertDeepEqual(actual, expected, msg = '') {
-    const aStr = JSON.stringify(actual);
-    const eStr = JSON.stringify(expected);
-    if (aStr !== eStr) {
-        throw new Error(`${msg}\nExpected: ${eStr}\nGot: ${aStr}`);
-    }
-}
-
-// Test 1: serializeUnit produces correct structure
-test('serializeUnit returns authoritative fields only', () => {
-    const unit = createMockUnit(1);
-    // Add render-only fields that should be EXCLUDED
-    unit.mesh = { visible: true };
-    unit.isSelected = true;
-    unit.isHovered = true;
-    unit.dustEffect = {};
-
-    const serialized = serializeUnit(unit);
-
-    // Check authoritative fields present
-    assertEqual(serialized.id, 1, 'id');
-    assertEqual(serialized.health, 100, 'health');
-    assertDeepEqual(serialized.position, { x: 11, y: 0, z: 21 }, 'position');
-
-    // Check render-only fields EXCLUDED
-    assertEqual(serialized.mesh, undefined, 'mesh should be excluded');
-    assertEqual(serialized.isSelected, undefined, 'isSelected should be excluded');
-    assertEqual(serialized.isHovered, undefined, 'isHovered should be excluded');
-    assertEqual(serialized.dustEffect, undefined, 'dustEffect should be excluded');
-});
-
-// Test 2: serializeUnit handles null/undefined gracefully
-test('serializeUnit handles null input', () => {
-    const result = serializeUnit(null);
-    assertEqual(result, null, 'null input returns null');
-});
-
-// Test 3: serializeState produces correct structure
-test('serializeState captures game state', () => {
-    const units = [createMockUnit(1), createMockUnit(2)];
-    const game = createMockGame(units);
-
-    const state = serializeState(game);
-
-    assertEqual(state.version, 1, 'version');
-    assertEqual(state.tickCount, 50, 'tickCount');
-    assertEqual(state.units.length, 2, 'unit count');
-    assertEqual(state.selectedUnitId, 1, 'selectedUnitId');
-});
-
-// Test 4: hashState produces deterministic hash
-test('hashState is deterministic', () => {
-    const units = [createMockUnit(1), createMockUnit(2)];
-    const game = createMockGame(units);
-
-    const state = serializeState(game);
-    const hash1 = hashState(state);
-    const hash2 = hashState(state);
-
-    assertEqual(hash1, hash2, 'same state produces same hash');
-    assertEqual(typeof hash1, 'string', 'hash is string');
-});
-
-// Test 5: compareStates detects identical states
-test('compareStates returns equal for identical states', () => {
-    const units1 = [createMockUnit(1)];
-    const units2 = [createMockUnit(1)];
-
-    const state1 = serializeState(createMockGame(units1));
-    const state2 = serializeState(createMockGame(units2));
-
-    const result = compareStates(state1, state2);
-
-    assertEqual(result.equal, true, 'states are equal');
-    assertEqual(result.differences.length, 0, 'no differences');
-});
-
-// Test 6: compareStates detects position differences
-test('compareStates detects position drift', () => {
-    const unit1 = createMockUnit(1);
-    const unit2 = createMockUnit(1);
-    unit2.position.x += 0.001; // Small drift
-
-    const state1 = serializeState(createMockGame([unit1]));
-    const state2 = serializeState(createMockGame([unit2]));
-
-    const result = compareStates(state1, state2);
-
-    assertEqual(result.equal, false, 'states differ');
-    assertEqual(result.differences.length > 0, true, 'has differences');
-});
-
-// Test 7: compareStates respects epsilon tolerance
-test('compareStates with epsilon tolerance', () => {
-    const unit1 = createMockUnit(1);
-    const unit2 = createMockUnit(1);
-    unit2.position.x += 0.0001; // Tiny drift
-
-    const state1 = serializeState(createMockGame([unit1]));
-    const state2 = serializeState(createMockGame([unit2]));
-
-    // With epsilon = 0, should detect difference
-    const exactResult = compareStates(state1, state2, { positionEpsilon: 0 });
-    assertEqual(exactResult.equal, false, 'exact comparison detects drift');
-
-    // With epsilon = 0.001, should be equal
-    const tolerantResult = compareStates(state1, state2, { positionEpsilon: 0.001 });
-    assertEqual(tolerantResult.equal, true, 'tolerant comparison ignores small drift');
-});
-
-// Test 8: serializeUnit handles commands correctly
-test('serializeUnit serializes commands', () => {
-    const unit = createMockUnit(1, {
-        commands: [
-            { id: 'cmd1', type: 'MOVE', params: { position: { x: 5, y: 0, z: 10 } }, status: 'pending' },
-            { id: 'cmd2', type: 'STOP', params: {}, status: 'completed' }
-        ]
+        // Check render-only fields EXCLUDED
+        expect(serialized.mesh).toBe(undefined);
+        expect(serialized.isSelected).toBe(undefined);
+        expect(serialized.isHovered).toBe(undefined);
+        expect(serialized.dustEffect).toBe(undefined);
     });
 
-    const serialized = serializeUnit(unit);
+    it('serializeUnit handles null input', () => {
+        const result = serializeUnit(null);
+        expect(result).toBe(null);
+    });
 
-    assertEqual(serialized.commands.length, 2, 'command count');
-    assertEqual(serialized.commands[0].type, 'MOVE', 'first command type');
-    assertEqual(serialized.commands[1].type, 'STOP', 'second command type');
+    it('serializeState captures game state', () => {
+        const units = [createMockUnit(1), createMockUnit(2)];
+        const game = createMockGame(units);
+
+        const state = serializeState(game);
+
+        expect(state.version).toBe(1);
+        expect(state.tickCount).toBe(50);
+        expect(state.units.length).toBe(2);
+        expect(state.selectedUnitId).toBe(1);
+    });
+
+    it('hashState is deterministic', () => {
+        const units = [createMockUnit(1), createMockUnit(2)];
+        const game = createMockGame(units);
+
+        const state = serializeState(game);
+        const hash1 = hashState(state);
+        const hash2 = hashState(state);
+
+        expect(hash1).toBe(hash2);
+        expect(typeof hash1).toBe('string');
+    });
+
+    it('compareStates returns equal for identical states', () => {
+        const units1 = [createMockUnit(1)];
+        const units2 = [createMockUnit(1)];
+
+        const state1 = serializeState(createMockGame(units1));
+        const state2 = serializeState(createMockGame(units2));
+
+        const result = compareStates(state1, state2);
+
+        expect(result.equal).toBe(true);
+        expect(result.differences.length).toBe(0);
+    });
+
+    it('compareStates detects position drift', () => {
+        const unit1 = createMockUnit(1);
+        const unit2 = createMockUnit(1);
+        unit2.position.x += 0.001; // Small drift
+
+        const state1 = serializeState(createMockGame([unit1]));
+        const state2 = serializeState(createMockGame([unit2]));
+
+        const result = compareStates(state1, state2);
+
+        expect(result.equal).toBe(false);
+        expect(result.differences.length > 0).toBe(true);
+    });
+
+    it('compareStates with epsilon tolerance', () => {
+        const unit1 = createMockUnit(1);
+        const unit2 = createMockUnit(1);
+        unit2.position.x += 0.0001; // Tiny drift
+
+        const state1 = serializeState(createMockGame([unit1]));
+        const state2 = serializeState(createMockGame([unit2]));
+
+        // With epsilon = 0, should detect difference
+        const exactResult = compareStates(state1, state2, { positionEpsilon: 0 });
+        expect(exactResult.equal).toBe(false);
+
+        // With epsilon = 0.001, should be equal
+        const tolerantResult = compareStates(state1, state2, { positionEpsilon: 0.001 });
+        expect(tolerantResult.equal).toBe(true);
+    });
+
+    it('serializeUnit serializes commands', () => {
+        const unit = createMockUnit(1, {
+            commands: [
+                { id: 'cmd1', type: 'MOVE', params: { position: { x: 5, y: 0, z: 10 } }, status: 'pending' },
+                { id: 'cmd2', type: 'STOP', params: {}, status: 'completed' }
+            ]
+        });
+
+        const serialized = serializeUnit(unit);
+
+        expect(serialized.commands.length).toBe(2);
+        expect(serialized.commands[0].type).toBe('MOVE');
+        expect(serialized.commands[1].type).toBe('STOP');
+    });
 });
-
-// ============ Summary ============
-
-console.log('\n=== StateSurface Tests ===\n');
-
-// Run all tests (already run above via test() calls)
-
-console.log(`\n${passed} passed, ${failed} failed`);
-
-if (failed > 0) {
-    process.exit(1);
-} else {
-    console.log('\n✓ All StateSurface tests PASS');
-    process.exit(0);
-}

@@ -1,41 +1,58 @@
 /**
  * TimeSource - Simulation Time Manager for SimCore
- * 
+ * @environment isomorphic
+ *
  * Engine-agnostic time management with pause, speed control, and deterministic ticks.
  * No Three.js or rendering dependencies allowed here.
- * 
+ *
+ * PURITY AUDIT (2026-02-10):
+ *   - Replaced bare `performance.now()` with `_perfNow()` abstraction that
+ *     falls back to `Date.now()` when the Performance API is unavailable
+ *     (older Node.js without globalThis.performance).
+ *
  * @example
  * const time = new TimeSource();
  * time.setTimeScale(2); // 2x speed
  * time.tick(16.67); // Real milliseconds since last frame
  * console.log(time.now()); // Simulation time (affected by scale)
  */
+
+/**
+ * Isomorphic high-resolution timer.
+ * Uses `performance.now()` when available (browser, Node 16+),
+ * falls back to `Date.now()` otherwise.
+ * @returns {number} milliseconds
+ */
+const _perfNow = (typeof performance !== 'undefined' && typeof performance.now === 'function')
+    ? () => performance.now()
+    : () => Date.now();
+
 export class TimeSource {
     constructor() {
         /** @type {number} Accumulated simulation time in milliseconds */
         this._simulatedTime = 0;
-        
+
         /** @type {number} Speed multiplier (0 = paused, 1 = normal, 2 = 2x speed) */
         this._timeScale = 1.0;
-        
+
         /** @type {number} Delta time from last tick (in seconds, for convenience) */
         this._deltaTime = 0;
-        
+
         /** @type {number} Delta time in milliseconds */
         this._deltaTimeMs = 0;
-        
+
         /** @type {number} Total tick count since start */
         this._tickCount = 0;
-        
+
         /** @type {number} Real wall-clock time at start */
-        this._realStartTime = performance.now();
-        
+        this._realStartTime = _perfNow();
+
         /** @type {number} Last real time we recorded */
         this._lastRealTime = this._realStartTime;
-        
+
         /** @type {boolean} Paused state */
         this._paused = false;
-        
+
         /** @type {number} Max delta time cap to prevent spiral of death (ms) */
         this.maxDeltaTime = 100; // 100ms = 10 FPS minimum
     }
@@ -58,7 +75,7 @@ export class TimeSource {
         this._simulatedTime += simDeltaMs;
         this._tickCount++;
         
-        this._lastRealTime = performance.now();
+        this._lastRealTime = _perfNow();
     }
 
     /**
@@ -153,7 +170,7 @@ export class TimeSource {
      * @returns {number}
      */
     getRealElapsedTime() {
-        return performance.now() - this._realStartTime;
+        return _perfNow() - this._realStartTime;
     }
 
     /**
@@ -164,7 +181,7 @@ export class TimeSource {
         this._tickCount = 0;
         this._deltaTime = 0;
         this._deltaTimeMs = 0;
-        this._realStartTime = performance.now();
+        this._realStartTime = _perfNow();
         this._lastRealTime = this._realStartTime;
     }
 

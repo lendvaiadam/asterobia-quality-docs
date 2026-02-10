@@ -7,7 +7,7 @@ export class Planet {
         this.scene = scene;
         this.loadingManager = loadingManager; // Store reference
         this.terrain = new Terrain();
-        this.meshResolution = 308;
+        this.meshResolution = 100;
         this.mesh = this.createMesh();
         this.mesh.receiveShadow = true;
         this.waterMesh = this.createWaterMesh();
@@ -94,8 +94,8 @@ export class Planet {
                 vec3 dimColor = mix(originalColor, desaturated, 0.8) * 0.3; // Explored - dark memory
                 
                 // Smooth transitions using smoothstep (feathered edges)
-                float exploredFactor = smoothstep(0.0, 0.5, isExplored); // Wide feather for FOW edge
-                float visibleFactor = smoothstep(0.05, 0.35, isVisible);
+                float exploredFactor = smoothstep(0.0, 0.8, isExplored); // Wider feather for soft FOW edge
+                float visibleFactor = smoothstep(0.0, 0.5, isVisible);
                 
                 // Discard unexplored water
                 if (exploredFactor < 0.01) discard;
@@ -214,7 +214,7 @@ export class Planet {
                     if (uFowSmoothing <= 0.01) return texture2D(tex, uv);
                     
                     // Simple 4-tap cross pattern (faster than 9-tap)
-                    float offset = uFowSmoothing * 0.002;
+                    float offset = uFowSmoothing * 0.005;
                     vec4 center = texture2D(tex, uv);
                     vec4 right = texture2D(tex, uv + vec2(offset, 0.0));
                     vec4 up = texture2D(tex, uv + vec2(0.0, offset));
@@ -295,9 +295,9 @@ export class Planet {
                 vec3 blackColor = vec3(0.0); // Unexplored - black
                 
                 // Smooth transitions using smoothstep (feathered edges)
-                float exploredFactor = smoothstep(0.0, 0.5, isExplored); // Wide feather for FOW edge
-                float visibleFactor = smoothstep(0.05, 0.35, isVisible);
-                
+                float exploredFactor = smoothstep(0.0, 0.8, isExplored); // Wider feather for soft FOW edge
+                float visibleFactor = smoothstep(0.0, 0.5, isVisible);
+
                 // Layered blend: unexplored → explored → visible
                 // Key: brightColor ALREADY contains shadow from Three.js lighting
                 vec3 finalColor = mix(blackColor, dimColor, exploredFactor);
@@ -397,15 +397,18 @@ export class Planet {
                 varying float vVisible;
                 
                 void main() {
-                    // Hide if explored
-                    if (vVisible < 0.5) discard;
-                    
+                    // Stars should be visible in UNEXPLORED areas and fade away in EXPLORED areas
+                    // vVisible = 1.0 - fog.r means: 1.0 = unexplored, 0.0 = explored
+                    float starAlpha = smoothstep(0.0, 0.6, vVisible);
+                    if (starAlpha < 0.01) discard;
+
                     // Soft circular star
                     float dist = length(gl_PointCoord - vec2(0.5));
                     if (dist > 0.5) discard;
-                    
+
                     float alpha = 1.0 - smoothstep(0.0, 0.5, dist);
                     gl_FragColor = vec4(1.0, 1.0, 1.0, alpha * 0.9);
+                    gl_FragColor.a *= starAlpha;
                 }
             `,
             transparent: true,

@@ -25,6 +25,11 @@ import { TransportBase, TransportState } from './ITransport.js';
 const DEFAULT_THROTTLE_MS = 100;
 
 /**
+ * R013-M06: Channel subscribe timeout (ms) - fail fast if channel doesn't connect
+ */
+const CHANNEL_SUBSCRIBE_TIMEOUT_MS = 10000;
+
+/**
  * Default room name for single-room multiplayer
  */
 const DEFAULT_ROOM = 'asterobia-main';
@@ -89,6 +94,13 @@ export class SupabaseTransport extends TransportBase {
 
         /** @type {number|null} Reconnect timer ID */
         this._reconnectTimer = null;
+
+        /**
+         * R013: Map of additional channels for multiplayer (lobby, session)
+         * Key: channelName, Value: { channel, callback }
+         * @type {Map<string, Object>}
+         */
+        this._channels = new Map();
     }
 
     /**
@@ -278,6 +290,9 @@ export class SupabaseTransport extends TransportBase {
                     commands: batch
                 }
             });
+
+            // R013: Track outbound for diagnostics
+            this._cmdsSentTotal = (this._cmdsSentTotal || 0) + batch.length;
         } catch (err) {
             console.error('[SupabaseTransport] Send failed:', err);
             // Re-queue failed commands (front of batch for ordering)
@@ -294,12 +309,21 @@ export class SupabaseTransport extends TransportBase {
         const { clientId, commands } = payload.payload || {};
 
         if (!commands || !Array.isArray(commands)) {
+            // R013: Debug - log unexpected payload structure
+            console.warn('[SupabaseTransport] Broadcast with no commands. payload keys:', Object.keys(payload || {}), 'payload.payload keys:', Object.keys(payload?.payload || {}));
             return;
         }
 
         // If echoLocal is false, skip our own commands
         if (!this._echoLocal && clientId === this._clientId) {
             return;
+        }
+
+        // R013: Track inbound for diagnostics
+        const isRemote = clientId !== this._clientId;
+        this._cmdsRecvTotal = (this._cmdsRecvTotal || 0) + commands.length;
+        if (isRemote) {
+            this._cmdsRecvRemote = (this._cmdsRecvRemote || 0) + commands.length;
         }
 
         // Deliver each command to the receive callback
@@ -335,6 +359,21 @@ export class SupabaseTransport extends TransportBase {
     }
 
     /**
+     * R013: Get command flow diagnostics for HUD display.
+     * @returns {{ sent: number, recvTotal: number, recvRemote: number, state: string }}
+     */
+    getCmdDiagnostics() {
+        return {
+            sent: this._cmdsSentTotal || 0,
+            recvTotal: this._cmdsRecvTotal || 0,
+            recvRemote: this._cmdsRecvRemote || 0,
+            state: this._state,
+            room: this._room,
+            clientId: this._clientId ? this._clientId.substring(0, 8) : 'N/A'
+        };
+    }
+
+    /**
      * Force immediate flush of outbound batch.
      * Useful for testing or time-critical commands.
      * @returns {Promise<void>}
@@ -345,5 +384,179 @@ export class SupabaseTransport extends TransportBase {
             this._throttleTimer = null;
         }
         await this._flushOutbound();
+    }
+
+    // ========================================
+    // R013: MULTIPLAYER CHANNEL METHODS
+    // ========================================
+
+    /**
+     * Join an arbitrary Realtime channel for multiplayer messaging.
+     * Used for lobby discovery and session communication.
+     *
+     * R013-M06: Includes timeout and comprehensive status handling to ensure
+     * channel is truly SUBSCRIBED before returning.
+     *
+     * @param {string} channelName - Channel name (e.g., 'asterobia:lobby')
+     * @param {Function} [callback] - Optional callback for incoming messages
+     * @returns {Promise<void>}
+     */
+    async joinChannel(channelName, callback = null) {
+        if (!channelName) {
+            throw new Error('Channel name is required');
+        }
+
+        // Check if already joined
+        if (this._channels.has(channelName)) {
+            console.log(`[SupabaseTransport] Already joined channel: ${channelName}`);
+            return;
+        }
+
+        console.log(`[SupabaseTransport] Joining channel: ${channelName}`);
+
+        let channel = null;
+
+        try {
+            // Create channel with broadcast config
+            channel = this._supabase.channel(channelName, {
+                config: {
+                    broadcast: {
+                        ack: false,
+                        self: true // Receive own broadcasts for debugging
+                    }
+                }
+            });
+
+            // Set up message handler for 'message' event
+            channel.on('broadcast', { event: 'message' }, (payload) => {
+                const msg = payload.payload;
+                if (msg && callback) {
+                    callback(msg);
+                }
+            });
+
+            // R013-M06: Subscribe with timeout to prevent hanging
+            await Promise.race([
+                // Subscribe promise
+                new Promise((resolve, reject) => {
+                    channel.subscribe((status) => {
+                        console.log(`[SupabaseTransport] Channel ${channelName} status: ${status}`);
+                        if (status === 'SUBSCRIBED') {
+                            resolve();
+                        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                            reject(new Error(`Channel subscription failed: ${status}`));
+                        }
+                        // SUBSCRIBING status is ignored (intermediate state)
+                    });
+                }),
+                // Timeout promise
+                new Promise((_, reject) => {
+                    setTimeout(() => {
+                        reject(new Error(`Channel subscribe timeout after ${CHANNEL_SUBSCRIBE_TIMEOUT_MS}ms`));
+                    }, CHANNEL_SUBSCRIBE_TIMEOUT_MS);
+                })
+            ]);
+
+            // R013-M06: Store channel reference ONLY after confirmed SUBSCRIBED
+            this._channels.set(channelName, { channel, callback });
+
+            // R013-M06: Verify storage succeeded (defensive)
+            if (!this._channels.has(channelName)) {
+                throw new Error(`Channel storage verification failed: ${channelName}`);
+            }
+
+            console.log(`[SupabaseTransport] Joined channel: ${channelName} (ready)`);
+
+        } catch (err) {
+            // Clean up channel on failure
+            if (channel) {
+                try {
+                    await this._supabase.removeChannel(channel);
+                } catch (cleanupErr) {
+                    console.warn(`[SupabaseTransport] Cleanup failed for ${channelName}:`, cleanupErr);
+                }
+            }
+            console.error(`[SupabaseTransport] Failed to join channel ${channelName}:`, err);
+            throw err;
+        }
+    }
+
+    /**
+     * Broadcast a message to a specific channel.
+     * Used for HOST_ANNOUNCE, JOIN_REQ, etc.
+     *
+     * R013-M06: Enhanced validation to ensure channel is ready before broadcast.
+     *
+     * @param {string} channelName - Channel name
+     * @param {Object} msg - Message object to broadcast
+     * @returns {Promise<void>}
+     */
+    async broadcastToChannel(channelName, msg) {
+        if (!channelName) {
+            throw new Error('Channel name is required');
+        }
+
+        const channelEntry = this._channels.get(channelName);
+        if (!channelEntry || !channelEntry.channel) {
+            throw new Error(`Not joined to channel: ${channelName}. Call joinChannel() first.`);
+        }
+
+        try {
+            await channelEntry.channel.send({
+                type: 'broadcast',
+                event: 'message',
+                payload: msg
+            });
+
+            console.log(`[SupabaseTransport] Broadcast to ${channelName}: ${msg.type || 'unknown'}`);
+
+        } catch (err) {
+            console.error(`[SupabaseTransport] Broadcast to ${channelName} failed:`, err);
+            throw err;
+        }
+    }
+
+    /**
+     * Leave a specific channel.
+     *
+     * @param {string} channelName - Channel name to leave
+     * @returns {Promise<void>}
+     */
+    async leaveChannel(channelName) {
+        const channelEntry = this._channels.get(channelName);
+        if (!channelEntry) {
+            return; // Not joined
+        }
+
+        try {
+            await this._supabase.removeChannel(channelEntry.channel);
+            this._channels.delete(channelName);
+            console.log(`[SupabaseTransport] Left channel: ${channelName}`);
+        } catch (err) {
+            console.error(`[SupabaseTransport] Failed to leave channel ${channelName}:`, err);
+        }
+    }
+
+    /**
+     * Leave all joined channels.
+     * Called during disconnect cleanup.
+     *
+     * @returns {Promise<void>}
+     */
+    async leaveAllChannels() {
+        const channelNames = Array.from(this._channels.keys());
+        for (const name of channelNames) {
+            await this.leaveChannel(name);
+        }
+    }
+
+    /**
+     * Check if joined to a specific channel.
+     *
+     * @param {string} channelName - Channel name
+     * @returns {boolean}
+     */
+    isJoinedToChannel(channelName) {
+        return this._channels.has(channelName);
     }
 }

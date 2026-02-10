@@ -109,9 +109,16 @@ export class RockSystem {
                     float isExplored = explored.r;
                     
                     // Smooth transitions
-                    float exploredFactor = smoothstep(0.0, 0.6, isExplored);
-                    float visibleFactor = smoothstep(0.05, 0.4, isVisible);
+                    float exploredFactor = smoothstep(0.0, 0.8, isExplored);
+                    float visibleFactor = smoothstep(0.0, 0.5, isVisible);
                     
+                    // Back face = interior of rock. Show as solid dark surface
+                    // so rocks appear opaque from unexplored territory
+                    if (!gl_FrontFacing) {
+                        gl_FragColor = vec4(0.01, 0.02, 0.04, 1.0);
+                        return;
+                    }
+
                     // Unexplored = transparent
                     if (exploredFactor < 0.01) {
                         discard;

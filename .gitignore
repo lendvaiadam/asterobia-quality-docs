@@ -11,3 +11,10 @@ run_r004_tests.mjs
 
 # Local Development Config (Secrets)
 public/config.js
+
+# Dependencies
+node_modules/
+server/node_modules/
+server/coverage/
+server/dist/
+*.log

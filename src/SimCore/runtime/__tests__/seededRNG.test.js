@@ -1,11 +1,10 @@
 /**
  * Determinism tests for SeededRNG.
  *
- * Run in browser console:
- *   import('./src/SimCore/runtime/__tests__/seededRNG.test.js')
- *     .then(m => m.runAllTests())
+ * Run: npx vitest run
  */
 
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
     SeededRNG,
     createRNG,
@@ -14,215 +13,115 @@ import {
     globalRNG
 } from '../SeededRNG.js';
 
-/**
- * Test: Same seed produces same sequence
- */
-function testSameSeedSameSequence() {
-    const rng1 = createRNG(12345);
-    const rng2 = createRNG(12345);
+describe('SeededRNG', () => {
+    beforeEach(() => {
+        resetGlobalRNG(0);
+    });
 
-    const seq1 = [rng1.next(), rng1.next(), rng1.next(), rng1.next(), rng1.next()];
-    const seq2 = [rng2.next(), rng2.next(), rng2.next(), rng2.next(), rng2.next()];
+    it('same seed produces same sequence', () => {
+        const rng1 = createRNG(12345);
+        const rng2 = createRNG(12345);
 
-    for (let i = 0; i < seq1.length; i++) {
-        if (seq1[i] !== seq2[i]) {
-            throw new Error(`Mismatch at index ${i}: ${seq1[i]} !== ${seq2[i]}`);
+        const seq1 = [rng1.next(), rng1.next(), rng1.next(), rng1.next(), rng1.next()];
+        const seq2 = [rng2.next(), rng2.next(), rng2.next(), rng2.next(), rng2.next()];
+
+        for (let i = 0; i < seq1.length; i++) {
+            expect(seq1[i]).toBe(seq2[i]);
         }
-    }
+    });
 
-    console.log('✓ testSameSeedSameSequence passed');
-    return true;
-}
+    it('different seeds produce different sequences', () => {
+        const rng1 = createRNG(12345);
+        const rng2 = createRNG(54321);
 
-/**
- * Test: Different seeds produce different sequences
- */
-function testDifferentSeedDifferentSequence() {
-    const rng1 = createRNG(12345);
-    const rng2 = createRNG(54321);
+        const seq1 = [rng1.next(), rng1.next(), rng1.next()];
+        const seq2 = [rng2.next(), rng2.next(), rng2.next()];
 
-    const seq1 = [rng1.next(), rng1.next(), rng1.next()];
-    const seq2 = [rng2.next(), rng2.next(), rng2.next()];
-
-    // At least one value should differ
-    let allSame = true;
-    for (let i = 0; i < seq1.length; i++) {
-        if (seq1[i] !== seq2[i]) {
-            allSame = false;
-            break;
+        let allSame = true;
+        for (let i = 0; i < seq1.length; i++) {
+            if (seq1[i] !== seq2[i]) {
+                allSame = false;
+                break;
+            }
         }
-    }
 
-    if (allSame) {
-        throw new Error('Different seeds produced identical sequences');
-    }
+        expect(allSame).toBe(false);
+    });
 
-    console.log('✓ testDifferentSeedDifferentSequence passed');
-    return true;
-}
+    it('reset returns to the same sequence', () => {
+        const rng = createRNG(99999);
 
-/**
- * Test: Reset returns to same sequence
- */
-function testResetSequence() {
-    const rng = createRNG(99999);
+        const first = [rng.next(), rng.next(), rng.next()];
+        rng.reset();
+        const second = [rng.next(), rng.next(), rng.next()];
 
-    const first = [rng.next(), rng.next(), rng.next()];
-    rng.reset();
-    const second = [rng.next(), rng.next(), rng.next()];
-
-    for (let i = 0; i < first.length; i++) {
-        if (first[i] !== second[i]) {
-            throw new Error(`Mismatch after reset at index ${i}`);
+        for (let i = 0; i < first.length; i++) {
+            expect(first[i]).toBe(second[i]);
         }
-    }
+    });
 
-    console.log('✓ testResetSequence passed');
-    return true;
-}
+    it('output is in [0, 1) range', () => {
+        const rng = createRNG(42);
 
-/**
- * Test: Output is in [0, 1) range
- */
-function testOutputRange() {
-    const rng = createRNG(42);
-
-    for (let i = 0; i < 1000; i++) {
-        const val = rng.next();
-        if (val < 0 || val >= 1) {
-            throw new Error(`Value out of range: ${val}`);
+        for (let i = 0; i < 1000; i++) {
+            const val = rng.next();
+            expect(val >= 0).toBe(true);
+            expect(val < 1).toBe(true);
         }
-    }
+    });
 
-    console.log('✓ testOutputRange passed');
-    return true;
-}
+    it('nextInt produces integers in [0, max) range', () => {
+        const rng = createRNG(777);
 
-/**
- * Test: nextInt produces integers in range
- */
-function testNextInt() {
-    const rng = createRNG(777);
-
-    for (let i = 0; i < 100; i++) {
-        const val = rng.nextInt(10);
-        if (!Number.isInteger(val) || val < 0 || val >= 10) {
-            throw new Error(`nextInt(10) produced invalid value: ${val}`);
+        for (let i = 0; i < 100; i++) {
+            const val = rng.nextInt(10);
+            expect(Number.isInteger(val)).toBe(true);
+            expect(val >= 0).toBe(true);
+            expect(val < 10).toBe(true);
         }
-    }
+    });
 
-    console.log('✓ testNextInt passed');
-    return true;
-}
+    it('global RNG is deterministic across resets with same seed', () => {
+        resetGlobalRNG(88888);
+        const first = [rngNext(), rngNext(), rngNext()];
 
-/**
- * Test: Global RNG determinism
- */
-function testGlobalRNGDeterminism() {
-    resetGlobalRNG(88888);
-    const first = [rngNext(), rngNext(), rngNext()];
+        resetGlobalRNG(88888);
+        const second = [rngNext(), rngNext(), rngNext()];
 
-    resetGlobalRNG(88888);
-    const second = [rngNext(), rngNext(), rngNext()];
-
-    for (let i = 0; i < first.length; i++) {
-        if (first[i] !== second[i]) {
-            throw new Error(`Global RNG not deterministic at index ${i}`);
+        for (let i = 0; i < first.length; i++) {
+            expect(first[i]).toBe(second[i]);
         }
-    }
+    });
 
-    console.log('✓ testGlobalRNGDeterminism passed');
-    return true;
-}
+    it('state serialization roundtrip preserves sequence', () => {
+        const rng = createRNG(11111);
+        rng.next();
+        rng.next();
 
-/**
- * Test: State serialization roundtrip
- */
-function testStateSerialization() {
-    const rng = createRNG(11111);
-    rng.next();
-    rng.next();
+        const state = rng.getState();
+        const val1 = rng.next();
 
-    const state = rng.getState();
-    const val1 = rng.next();
+        // Create new RNG and restore state
+        const rng2 = createRNG(0);
+        rng2.setState(state);
+        const val2 = rng2.next();
 
-    // Create new RNG and restore state
-    const rng2 = createRNG(0);
-    rng2.setState(state);
-    const val2 = rng2.next();
+        expect(val1).toBe(val2);
+    });
 
-    if (val1 !== val2) {
-        throw new Error(`State restoration failed: ${val1} !== ${val2}`);
-    }
+    it('tracks call count and resets it', () => {
+        const rng = createRNG(22222);
 
-    console.log('✓ testStateSerialization passed');
-    return true;
-}
+        expect(rng.callCount).toBe(0);
 
-/**
- * Test: Call count tracking
- */
-function testCallCount() {
-    const rng = createRNG(22222);
+        rng.next();
+        rng.next();
+        rng.next();
 
-    if (rng.callCount !== 0) {
-        throw new Error(`Initial callCount should be 0, got ${rng.callCount}`);
-    }
+        expect(rng.callCount).toBe(3);
 
-    rng.next();
-    rng.next();
-    rng.next();
+        rng.reset();
 
-    if (rng.callCount !== 3) {
-        throw new Error(`After 3 calls, callCount should be 3, got ${rng.callCount}`);
-    }
-
-    rng.reset();
-
-    if (rng.callCount !== 0) {
-        throw new Error(`After reset, callCount should be 0, got ${rng.callCount}`);
-    }
-
-    console.log('✓ testCallCount passed');
-    return true;
-}
-
-/**
- * Run all tests
- */
-export function runAllTests() {
-    console.log('=== SeededRNG Determinism Tests ===');
-    let passed = 0;
-    let failed = 0;
-
-    const tests = [
-        testSameSeedSameSequence,
-        testDifferentSeedDifferentSequence,
-        testResetSequence,
-        testOutputRange,
-        testNextInt,
-        testGlobalRNGDeterminism,
-        testStateSerialization,
-        testCallCount,
-    ];
-
-    for (const test of tests) {
-        try {
-            test();
-            passed++;
-        } catch (err) {
-            console.error(`✗ ${test.name} FAILED:`, err.message);
-            failed++;
-        }
-    }
-
-    // Cleanup
-    resetGlobalRNG(0);
-
-    console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
-    return { passed, failed };
-}
-
-if (typeof window !== 'undefined') {
-    console.log('SeededRNG tests loaded. Call runAllTests() to execute.');
-}
+        expect(rng.callCount).toBe(0);
+    });
+});

@@ -50,6 +50,39 @@ function quatToPlain(quat) {
 }
 
 /**
+ * Sanitize command params for JSON serialization.
+ * Only includes known safe primitive/vector fields.
+ * @param {Object} params - Command params object
+ * @returns {Object} JSON-safe params
+ */
+function sanitizeCommandParams(params) {
+    if (!params) return {};
+
+    const safe = {};
+
+    // Known Vector3 fields - convert to plain
+    if (params.position) safe.position = vec3ToPlain(params.position);
+    if (params.target) safe.target = vec3ToPlain(params.target);
+    if (params.destination) safe.destination = vec3ToPlain(params.destination);
+
+    // Known primitive fields - copy directly
+    if (typeof params.unitId === 'number' || typeof params.unitId === 'string') {
+        safe.unitId = params.unitId;
+    }
+    if (typeof params.targetId === 'number' || typeof params.targetId === 'string') {
+        safe.targetId = params.targetId;
+    }
+    if (typeof params.waypointId === 'number' || typeof params.waypointId === 'string') {
+        safe.waypointId = params.waypointId;
+    }
+    if (typeof params.radius === 'number') safe.radius = params.radius;
+    if (typeof params.speed === 'number') safe.speed = params.speed;
+    if (typeof params.action === 'string') safe.action = params.action;
+
+    return safe;
+}
+
+/**
  * Serialize a single unit's authoritative state.
  * Excludes all render-only properties.
  *
@@ -63,6 +96,17 @@ export function serializeUnit(unit) {
         // Identity
         id: unit.id,
         name: unit.name,
+        ownerSlot: unit.ownerSlot ?? 0, // R013 M07: Ownership tracking
+        ownerHistory: (unit.ownerHistory || []).map(entry => ({
+            slot: entry.slot,
+            previousSlot: entry.previousSlot,
+            acquiredAt: entry.acquiredAt,
+            method: entry.method
+        })),
+        // M07 Unit Authority v0: selectedBySlot is the canonical field name
+        // seatPinDigit is Host-only, intentionally NOT serialized (privacy)
+        selectedBySlot: unit.selectedBySlot ?? null, // null = empty seat (AI/Idle)
+        seatPolicy: unit.seatPolicy ?? 'OPEN', // 'OPEN' | 'PIN_1DIGIT'
 
         // Position & Orientation (convert Vector3/Quaternion to plain)
         position: vec3ToPlain(unit.position),
@@ -91,15 +135,11 @@ export function serializeUnit(unit) {
         targetWaypointId: unit.targetWaypointId,
         lastWaypointId: unit.lastWaypointId,
 
-        // Commands
+        // Commands (sanitized for JSON - no circular refs or Three.js objects)
         commands: (unit.commands || []).map(cmd => ({
             id: cmd.id,
             type: cmd.type,
-            params: cmd.params ? {
-                position: cmd.params.position ? vec3ToPlain(cmd.params.position) : undefined,
-                ...cmd.params,
-                position: undefined // Remove after spreading to avoid duplication
-            } : {},
+            params: sanitizeCommandParams(cmd.params),
             status: cmd.status
         })),
         currentCommandIndex: unit.currentCommandIndex ?? 0,
@@ -155,13 +195,21 @@ export function serializeState(game, options = {}) {
 /**
  * Deserialize a unit state back to plain object.
  * Note: Does NOT create Three.js objects - use UnitFactory for that.
+ * M07 Unit Authority v0: Normalizes old `controllerSlot` to `selectedBySlot`.
  *
  * @param {Object} data - Serialized unit data
  * @returns {Object} Unit data (ready for UnitModel or reconstruction)
  */
 export function deserializeUnit(data) {
-    // Return as-is since it's already plain objects
-    return { ...data };
+    const result = { ...data };
+
+    // M07 Compatibility: Normalize old controllerSlot to selectedBySlot
+    if (result.controllerSlot !== undefined && result.selectedBySlot === undefined) {
+        result.selectedBySlot = result.controllerSlot;
+        delete result.controllerSlot;
+    }
+
+    return result;
 }
 
 /**

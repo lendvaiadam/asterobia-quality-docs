@@ -17,10 +17,14 @@ export class Input {
     }
 
     onKeyDown(event) {
+        // Don't capture keys when typing in input fields
+        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
         this.updateKey(event.code, true);
     }
 
     onKeyUp(event) {
+        // Don't capture keys when typing in input fields
+        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
         this.updateKey(event.code, false);
     }
 
