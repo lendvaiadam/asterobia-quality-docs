@@ -1,35 +1,39 @@
 /**
- * Asterobia Server - Entry Point (Phase 0 scaffold)
+ * Asterobia Server - Entry Point (Phase 1: WS Channel Relay)
  *
- * Verifies that SimCore modules can be imported cleanly from the server
- * context (Node.js, no browser globals, no Three.js).
+ * Starts a WebSocket relay server that acts as a dumb channel-based
+ * message broker (drop-in replacement for Supabase Realtime).
+ *
+ * Clients connect and subscribe to named channels, then broadcast
+ * JSON payloads to other subscribers on the same channel.
  *
  * Usage:
  *   cd server && node index.js
+ *   PORT=8080 node index.js
  */
 
-import { GameServer } from './GameServer.js';
-import { SimLoop } from '../src/SimCore/runtime/SimLoop.js';
-import { CommandQueue, CommandType } from '../src/SimCore/runtime/CommandQueue.js';
-import { HeadlessUnit } from './HeadlessUnit.js';
+import { WsRelay } from './WsRelay.js';
 
-console.log('[Asterobia Server] Phase 0 scaffold');
-console.log('[Asterobia Server] SimLoop imported:', typeof SimLoop === 'function' ? 'OK' : 'FAIL');
-console.log('[Asterobia Server] CommandQueue imported:', typeof CommandQueue === 'function' ? 'OK' : 'FAIL');
-console.log('[Asterobia Server] CommandType keys:', Object.keys(CommandType).join(', '));
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const relay = new WsRelay({ port: PORT });
 
-const server = new GameServer({ tickRate: 20 });
-const room = server.createRoom('test-room');
-console.log('[Asterobia Server] Room created:', room.roomId, '| state:', room.state);
+relay.start();
 
-// Verify HeadlessUnit works
-const unit = new HeadlessUnit(1, 0);
-unit.position.x = 10;
-unit.position.z = 20;
-room.units.push(unit);
+console.log('[Asterobia Server] Phase 1 - WS Channel Relay');
+console.log(`[Asterobia Server] Listening on ws://localhost:${PORT}`);
+console.log('[Asterobia Server] Press Ctrl+C to stop');
 
-const snapshot = room.getSnapshot();
-console.log('[Asterobia Server] Snapshot tick:', snapshot.tick, '| units:', snapshot.units.length);
-console.log('[Asterobia Server] Unit snapshot:', JSON.stringify(snapshot.units[0]));
+// Graceful shutdown
+process.on('SIGINT', () => {
+    console.log('\n[Asterobia Server] Shutting down...');
+    relay.stop().then(() => {
+        process.exit(0);
+    });
+});
 
-console.log('[Asterobia Server] Ready. (No WebSocket yet - Phase 0)');
+process.on('SIGTERM', () => {
+    console.log('\n[Asterobia Server] Shutting down (SIGTERM)...');
+    relay.stop().then(() => {
+        process.exit(0);
+    });
+});
