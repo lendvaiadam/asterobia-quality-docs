@@ -26,6 +26,7 @@ import { WebSocketTransport } from '../SimCore/transport/WebSocketTransport.js';
 import { SaveManager, MemoryStorageAdapter, LocalStorageAdapter, SupabaseStorageAdapter } from '../SimCore/persistence/index.js';
 import { serializeState, hashState } from '../SimCore/runtime/StateSurface.js';
 import { SessionManager } from '../SimCore/multiplayer/SessionManager.js';
+import { SnapshotBuffer } from '../SimCore/net/SnapshotBuffer.js';
 
 import { WaypointDebugOverlay } from '../UI/WaypointDebugOverlay.js';
 import { globalCommandDebugOverlay } from '../UI/CommandDebugOverlay.js';
@@ -348,6 +349,16 @@ export class Game {
          * @type {boolean}
          */
         this._guestExecutionEnabled = true; // Slice 2: enabled
+
+        // Phase 2A: Mirror mode state
+        // Activated when first SERVER_SNAPSHOT is received. Deactivated on disconnect.
+        this._mirrorMode = false;
+        this._snapshotBuffer = new SnapshotBuffer(); // Ring buffer for server snapshot interpolation
+
+        // Phase 2A: MOVE_INPUT latching (captures key presses between 20Hz sends)
+        this._latchedKeys = { forward: false, backward: false, left: false, right: false };
+        this._lastMoveInputSendMs = 0;
+        this._MOVE_INPUT_INTERVAL_MS = 50; // 20Hz send rate
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();
@@ -931,6 +942,22 @@ export class Game {
                 unit.isFollowingPath = false;
             }
         }
+    }
+
+    /**
+     * Phase 2A: Apply SERVER_SNAPSHOT from authoritative server.
+     * Pushes to SnapshotBuffer and activates mirror mode on first snapshot.
+     * @param {Object} msg - SERVER_SNAPSHOT message { type, version, tick, serverTimeMs, units }
+     */
+    applyServerSnapshot(msg) {
+        // Activate mirror mode on first SERVER_SNAPSHOT
+        if (!this._mirrorMode) {
+            this._mirrorMode = true;
+            this._snapshotBuffer.reset();
+            console.log('[Game] Mirror mode ACTIVATED (first SERVER_SNAPSHOT received)');
+        }
+
+        this._snapshotBuffer.push(msg);
     }
 
     // R012: Update DB status in unified NetworkDebugPanel (called by save/load)
@@ -2882,6 +2909,9 @@ export class Game {
     }
 
     startPathDrawing(unit) {
+        // Phase 2A: Path drawing disabled in mirror mode (server controls movement)
+        if (this._mirrorMode) return;
+
         // Direct Steering Start
         // Maybe show a line to cursor?
         if (this.pathLine) this.scene.add(this.pathLine);
@@ -3751,6 +3781,12 @@ export class Game {
      * @param {number} tickCount - Current tick number
      */
     simTick(fixedDt, tickCount) {
+        // Phase 2A: Mirror mode — skip local simulation, render from SnapshotBuffer
+        if (this._mirrorMode) {
+            this._mirrorModeSimTick(tickCount);
+            return;
+        }
+
         // R006: Process input commands from queue first
         this._processInputCommands(tickCount);
 
@@ -3826,6 +3862,83 @@ export class Game {
         if (tickCount % 3 === 0 && this.sessionManager?.sendPositionSync) {
             this.sessionManager.sendPositionSync();
         }
+    }
+
+    /**
+     * Phase 2A: Mirror mode sim tick — replaces normal simTick when server-authoritative.
+     * Does NOT call Unit.update(). Instead reads from SnapshotBuffer and sets interpolation targets.
+     * @param {number} tickCount - Current tick number
+     */
+    _mirrorModeSimTick(tickCount) {
+        // 1. Get interpolation pair from SnapshotBuffer
+        const pair = this._snapshotBuffer.getInterpolationPair();
+        if (!pair.prev || !pair.next) return; // No snapshots yet
+
+        // 2. Apply snapshot positions to unit interpolation targets
+        const prevUnits = new Map();
+        for (const u of pair.prev.units) prevUnits.set(u.id, u);
+        const nextUnits = new Map();
+        for (const u of pair.next.units) nextUnits.set(u.id, u);
+
+        for (const unit of this.units) {
+            if (!unit) continue;
+
+            const prevU = prevUnits.get(unit.id);
+            const nextU = nextUnits.get(unit.id);
+            if (!nextU) continue; // Unit not in server snapshot
+
+            const isTeleport = pair.teleports.has(unit.id);
+
+            if (isTeleport || !prevU) {
+                // Teleport or new unit: snap instantly
+                unit._interpPrevPos.set(nextU.px, nextU.py, nextU.pz);
+                unit._interpCurrPos.set(nextU.px, nextU.py, nextU.pz);
+                unit.position.set(nextU.px, nextU.py, nextU.pz);
+            } else {
+                // Normal interpolation targets
+                unit._interpPrevPos.set(prevU.px, prevU.py, prevU.pz);
+                unit._interpCurrPos.set(nextU.px, nextU.py, nextU.pz);
+                // Update authoritative position to latest for other systems (FOW, etc.)
+                unit.position.set(nextU.px, nextU.py, nextU.pz);
+            }
+
+            // Initialize headingQuaternion if not yet set (prevents crash in render path)
+            if (!unit.headingQuaternion && unit.mesh) {
+                unit.headingQuaternion = unit.mesh.quaternion.clone();
+            }
+
+            unit._interpInitialized = true;
+        }
+
+        // 3. Send MOVE_INPUT at ~20Hz with latching
+        const now = performance.now();
+        if (now - this._lastMoveInputSendMs >= this._MOVE_INPUT_INTERVAL_MS) {
+            this._lastMoveInputSendMs = now;
+
+            const currentKeys = this.input.getKeys();
+            const keys = {
+                forward: this._latchedKeys.forward || currentKeys.forward,
+                backward: this._latchedKeys.backward || currentKeys.backward,
+                left: this._latchedKeys.left || currentKeys.left,
+                right: this._latchedKeys.right || currentKeys.right
+            };
+
+            // Clear latches after sampling
+            this._latchedKeys.forward = false;
+            this._latchedKeys.backward = false;
+            this._latchedKeys.left = false;
+            this._latchedKeys.right = false;
+
+            // Only send if any key is pressed (save bandwidth)
+            if (keys.forward || keys.backward || keys.left || keys.right) {
+                if (this.sessionManager?.sendMoveInput) {
+                    this.sessionManager.sendMoveInput(keys);
+                }
+            }
+        }
+
+        // 4. Suppress Phase 1 POSITION_SYNC (do NOT call sendPositionSync in mirror mode)
+        // This is already handled by the early return at the top of simTick()
     }
 
     /**
@@ -4246,6 +4359,15 @@ export class Game {
      * Called every frame after simTick(s). Does NOT mutate sim state.
      */
     renderUpdate() {
+        // Phase 2A: Latch key presses for MOVE_INPUT (capture between 20Hz send intervals)
+        if (this._mirrorMode) {
+            const keys = this.input.getKeys();
+            if (keys.forward) this._latchedKeys.forward = true;
+            if (keys.backward) this._latchedKeys.backward = true;
+            if (keys.left) this._latchedKeys.left = true;
+            if (keys.right) this._latchedKeys.right = true;
+        }
+
         this.cameraControls.update(0.016); // Update State
 
 

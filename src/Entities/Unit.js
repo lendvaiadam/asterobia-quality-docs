@@ -2965,6 +2965,8 @@ export class Unit {
 
     updateTireTracks(dt) {
         if (!this.scene || !this.tireTrackSegments) return;
+        // Phase 2A safety: headingQuaternion may not exist if Unit.update() was never called (mirror mode)
+        if (!this.headingQuaternion) return;
 
         // CHECK TOGGLE
         if (Unit.enableTracks === false) return;

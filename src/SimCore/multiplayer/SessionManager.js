@@ -549,6 +549,35 @@ export class SessionManager {
   }
 
   /**
+   * Phase 2A: Send MOVE_INPUT to server (client intent-based input).
+   * Called at ~20Hz by Game.js when in mirror mode.
+   * @param {Object} keys - { forward, backward, left, right } booleans
+   * @returns {Promise<void>}
+   */
+  async sendMoveInput(keys) {
+    if (this.state.isOffline()) return;
+    if (!this.transport || !this._sessionChannel) return;
+
+    const msg = {
+      type: 'MOVE_INPUT',
+      forward: !!keys.forward,
+      backward: !!keys.backward,
+      left: !!keys.left,
+      right: !!keys.right,
+      timestamp: Date.now()
+    };
+
+    try {
+      await this.transport.broadcastToChannel(this._sessionChannel, msg);
+      this._debugCounters.moveInputSentCount = (this._debugCounters.moveInputSentCount || 0) + 1;
+    } catch (err) {
+      if (this.game._isDevMode) {
+        console.warn('[SessionManager] sendMoveInput failed:', err.message);
+      }
+    }
+  }
+
+  /**
    * M07: Add input command to buffer (Host-side)
    * Called when Host receives INPUT_CMD from guests or local input.
    * @param {Object} entry - { slot, seq, command }
@@ -972,6 +1001,10 @@ export class SessionManager {
 
       case MSG.POSITION_SYNC:
         this._handlePositionSync(msg);
+        break;
+
+      case MSG.SERVER_SNAPSHOT:
+        this._handleServerSnapshot(msg);
         break;
 
       default:
@@ -2023,6 +2056,23 @@ export class SessionManager {
 
     // Track for diagnostics
     this._debugCounters.positionSyncRecvCount = (this._debugCounters.positionSyncRecvCount || 0) + 1;
+  }
+
+  /**
+   * Phase 2A: Handle SERVER_SNAPSHOT from authoritative server.
+   * Delegates to Game.applyServerSnapshot() for SnapshotBuffer push + mirror mode.
+   * @param {Object} msg - SERVER_SNAPSHOT message
+   */
+  _handleServerSnapshot(msg) {
+    if (this.state.isOffline()) return;
+
+    // Delegate to Game.js which has SnapshotBuffer and Three.js
+    if (this.game?.applyServerSnapshot) {
+      this.game.applyServerSnapshot(msg);
+    }
+
+    // Track for diagnostics
+    this._debugCounters.serverSnapshotRecvCount = (this._debugCounters.serverSnapshotRecvCount || 0) + 1;
   }
 
   /**
