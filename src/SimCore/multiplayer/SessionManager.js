@@ -477,13 +477,13 @@ export class SessionManager {
 
   /**
    * Send authoritative unit positions to all guests (Host-side).
-   * Called periodically from SimLoop or game tick to keep guest-side
-   * unit positions in sync with the Host's authoritative state.
+   * Called periodically from SimLoop or game tick to broadcast local
+   * unit positions to the other client(s). Both Host and Guest send.
    * @returns {Promise<void>}
    */
   async sendPositionSync() {
-    // Only Host sends position sync
-    if (!this.state.isHost()) return;
+    // Both Host and Guest send position sync in networked mode
+    if (this.state.isOffline()) return;
     if (!this.transport || !this._sessionChannel) return;
 
     const units = this.game.units;
@@ -2005,13 +2005,13 @@ export class SessionManager {
   }
 
   /**
-   * Handle POSITION_SYNC message (Guest-side).
-   * Applies authoritative unit positions from the Host, skipping the
-   * Guest's own currently controlled unit to avoid overriding local movement.
+   * Handle POSITION_SYNC message (bidirectional).
+   * Applies remote unit positions, skipping the local client's own
+   * currently controlled unit to avoid overriding local movement.
    * @param {Object} msg - POSITION_SYNC message
    */
   _handlePositionSync(msg) {
-    if (!this.state.isGuest()) return;
+    if (this.state.isOffline()) return;
 
     const units = msg.units;
     if (!units || !Array.isArray(units)) return;
