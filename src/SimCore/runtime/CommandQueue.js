@@ -20,7 +20,8 @@ export const CommandType = {
     DESELECT: 'DESELECT',
     MOVE: 'MOVE',
     SET_PATH: 'SET_PATH',
-    CLOSE_PATH: 'CLOSE_PATH'
+    CLOSE_PATH: 'CLOSE_PATH',
+    MOVE_INPUT: 'MOVE_INPUT'
 };
 
 /**

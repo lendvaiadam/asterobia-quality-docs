@@ -1,25 +1,32 @@
 /**
- * Asterobia Server - Entry Point (Phase 1: WS Channel Relay)
+ * Asterobia Server - Entry Point
  *
- * Starts a WebSocket relay server that acts as a dumb channel-based
- * message broker (drop-in replacement for Supabase Realtime).
- *
- * Clients connect and subscribe to named channels, then broadcast
- * JSON payloads to other subscribers on the same channel.
+ * Phase 1 (default): WS Channel Relay only.
+ * Phase 2A (PHASE2A=1): Relay + Authoritative GameServer.
  *
  * Usage:
- *   cd server && node index.js
- *   PORT=8080 node index.js
+ *   node server/index.js              # Phase 1 relay only
+ *   PHASE2A=1 node server/index.js    # Phase 2A server authority
  */
 
 import { WsRelay } from './WsRelay.js';
+import { GameServer } from './GameServer.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
-const relay = new WsRelay({ port: PORT });
+const PHASE2A = process.env.PHASE2A === '1';
 
+const relay = new WsRelay({ port: PORT });
 relay.start();
 
-console.log('[Asterobia Server] Phase 1 - WS Channel Relay');
+if (PHASE2A) {
+    const server = new GameServer({ tickRate: 20 });
+    server.wireToRelay(relay);
+    server.start();
+    console.log('[Asterobia Server] Phase 2A - Server Authority + WS Relay');
+} else {
+    console.log('[Asterobia Server] Phase 1 - WS Channel Relay');
+}
+
 console.log(`[Asterobia Server] Listening on ws://localhost:${PORT}`);
 console.log('[Asterobia Server] Press Ctrl+C to stop');
 

@@ -38,6 +38,9 @@ export class HeadlessUnit {
         this.selectedBySlot = null;
     }
 
+    /** @type {number} Fixed movement speed (world units per second) */
+    static MOVE_SPEED = 2.0;
+
     /**
      * Produce a minimal JSON-safe snapshot for network transmission.
      * Uses short keys to minimize bandwidth.
@@ -61,13 +64,36 @@ export class HeadlessUnit {
     }
 
     /**
-     * Process a movement/action command for this unit.
-     * Phase 0: stub -- will be filled in when ENABLE_COMMAND_EXECUTION lands.
+     * Process a MOVE_INPUT command: convert WASD booleans to velocity.
+     * Diagonal normalization prevents √2 speed boost.
      *
-     * @param {Object} command - Command object from CommandQueue
+     * @param {Object} command - { type: 'MOVE_INPUT', forward, backward, left, right }
      */
     applyInput(command) {
-        // Phase 0 stub: no-op
-        // Phase 1 will implement MOVE, SET_PATH, CLOSE_PATH handling
+        if (command.type !== 'MOVE_INPUT') return;
+
+        let dx = 0;
+        let dz = 0;
+
+        if (command.forward)  dz -= 1;
+        if (command.backward) dz += 1;
+        if (command.left)     dx -= 1;
+        if (command.right)    dx += 1;
+
+        // Diagonal normalization: prevent √2 speed boost
+        const len = Math.sqrt(dx * dx + dz * dz);
+        if (len > 0) {
+            dx /= len;
+            dz /= len;
+        }
+
+        this.velocity.x = dx * HeadlessUnit.MOVE_SPEED;
+        this.velocity.z = dz * HeadlessUnit.MOVE_SPEED;
+        this.speed = len > 0 ? HeadlessUnit.MOVE_SPEED : 0;
+
+        // Update heading when moving
+        if (len > 0) {
+            this.heading = Math.atan2(dx, -dz);
+        }
     }
 }

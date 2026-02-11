@@ -32,8 +32,8 @@ import {
 } from '../multiplayer/MessageSerializer.js';
 
 describe('MessageTypes', () => {
-  it('exports all 18 message types', () => {
-    expect(Object.keys(MSG)).toHaveLength(18);
+  it('exports all 20 message types', () => {
+    expect(Object.keys(MSG)).toHaveLength(20);
     expect(MSG.HELLO).toBe('HELLO');
     expect(MSG.HOST_ANNOUNCE).toBe('HOST_ANNOUNCE');
     expect(MSG.JOIN_REQ).toBe('JOIN_REQ');
@@ -52,6 +52,9 @@ describe('MessageTypes', () => {
     expect(MSG.HOST_LEAVE).toBe('HOST_LEAVE');
     expect(MSG.GUEST_LEAVE).toBe('GUEST_LEAVE');
     expect(MSG.POSITION_SYNC).toBe('POSITION_SYNC');
+    // Phase 2A: Server authority messages
+    expect(MSG.SERVER_SNAPSHOT).toBe('SERVER_SNAPSHOT');
+    expect(MSG.MOVE_INPUT).toBe('MOVE_INPUT');
   });
 
   it('exports frozen MSG object', () => {

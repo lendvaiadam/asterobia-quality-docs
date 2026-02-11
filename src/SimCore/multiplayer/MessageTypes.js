@@ -29,7 +29,10 @@ export const MSG = Object.freeze({
   HOST_LEAVE: 'HOST_LEAVE',
   GUEST_LEAVE: 'GUEST_LEAVE',
   // Position sync: periodic authoritative unit positions from host
-  POSITION_SYNC: 'POSITION_SYNC'
+  POSITION_SYNC: 'POSITION_SYNC',
+  // Phase 2A: Server-authority messages
+  SERVER_SNAPSHOT: 'SERVER_SNAPSHOT',  // Authoritative server snapshot (separate from Phase 1 SNAPSHOT)
+  MOVE_INPUT: 'MOVE_INPUT'            // Client intent-based input for server authority
 });
 
 /**
@@ -94,7 +97,11 @@ export const MESSAGE_SCHEMAS = Object.freeze({
   [MSG.GUEST_LEAVE]: ['type', 'slot', 'timestamp'],
 
   // Position sync
-  [MSG.POSITION_SYNC]: ['type', 'tick', 'units', 'timestamp']
+  [MSG.POSITION_SYNC]: ['type', 'tick', 'units', 'timestamp'],
+
+  // Phase 2A: Server-authority message schemas
+  [MSG.SERVER_SNAPSHOT]: ['type', 'version', 'tick', 'serverTimeMs', 'units'],  // No timestamp — server uses serverTimeMs
+  [MSG.MOVE_INPUT]: ['type', 'forward', 'backward', 'left', 'right', 'timestamp']
 });
 
 /**

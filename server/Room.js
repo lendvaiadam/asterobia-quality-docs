@@ -50,6 +50,9 @@ export class Room {
         /** @type {number} Next slot to assign */
         this._nextSlot = 1;
 
+        /** @type {Function|null} Optional broadcast callback for sending snapshots */
+        this._broadcastFn = options.broadcast || null;
+
         /** @type {ReturnType<typeof setInterval>|null} Server tick interval handle */
         this._tickInterval = null;
     }
@@ -71,6 +74,23 @@ export class Room {
         const slot = this._nextSlot++;
         this.players.set(slot, { id: playerId, name, endpoint });
         return slot;
+    }
+
+    /**
+     * Create a HeadlessUnit for a player at a deterministic start position.
+     *
+     * @param {number} slot - Player slot
+     * @param {number} unitId - Deterministic entity ID
+     * @returns {HeadlessUnit}
+     */
+    createUnitForPlayer(slot, unitId) {
+        const unit = new HeadlessUnit(unitId, slot);
+        // Deterministic start position based on slot (spread on X axis)
+        unit.position.x = slot * 5;
+        unit.position.y = 0;
+        unit.position.z = 0;
+        this.units.push(unit);
+        return unit;
     }
 
     /**
@@ -136,13 +156,17 @@ export class Room {
         // 1. Flush commands ready for this tick
         const commands = this.commandQueue.flush(tickCount);
 
-        // 2. Process each command (Phase 0: log only)
+        // 2. Route commands to target units
         for (const cmd of commands) {
-            // Future: route command to target unit via cmd.unitId
-            // For now, just record that we processed it
+            if (cmd.type === 'MOVE_INPUT' && cmd.sourceSlot != null) {
+                const unit = this.units.find(u => u.ownerSlot === cmd.sourceSlot);
+                if (unit) {
+                    unit.applyInput(cmd);
+                }
+            }
         }
 
-        // 3. Update unit positions (simple linear movement)
+        // 3. Update unit positions (velocity * dt)
         for (const unit of this.units) {
             if (unit.speed > 0) {
                 unit.position.x += unit.velocity.x * dtSec;
@@ -151,7 +175,29 @@ export class Room {
             }
         }
 
-        // 4. (Future: collision, physics, combat)
+        // 4. Broadcast SERVER_SNAPSHOT to all connected clients
+        this._broadcastSnapshot(tickCount);
+    }
+
+    /**
+     * Broadcast a SERVER_SNAPSHOT to all connected players.
+     * Only runs if a broadcast function was provided.
+     *
+     * @param {number} tickCount - Current tick number
+     * @private
+     */
+    _broadcastSnapshot(tickCount) {
+        if (!this._broadcastFn) return;
+
+        const snapshot = {
+            type: 'SERVER_SNAPSHOT',
+            version: 1,
+            tick: tickCount,
+            serverTimeMs: Date.now(),
+            units: this.units.map(u => u.toSnapshot())
+        };
+
+        this._broadcastFn(this.roomId, snapshot);
     }
 
     /**

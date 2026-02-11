@@ -194,10 +194,25 @@ export function validateMessage(msg) {
       if (typeof msg.tick !== 'number') errors.push('tick must be a number');
       if (!Array.isArray(msg.units)) errors.push('units must be an array');
       break;
+
+    // Phase 2A: Server-authority messages
+    case MSG.SERVER_SNAPSHOT:
+      if (typeof msg.version !== 'number') errors.push('version must be a number');
+      if (typeof msg.tick !== 'number') errors.push('tick must be a number');
+      if (typeof msg.serverTimeMs !== 'number') errors.push('serverTimeMs must be a number');
+      if (!Array.isArray(msg.units)) errors.push('units must be an array');
+      break;
+
+    case MSG.MOVE_INPUT:
+      if (typeof msg.forward !== 'boolean') errors.push('forward must be a boolean');
+      if (typeof msg.backward !== 'boolean') errors.push('backward must be a boolean');
+      if (typeof msg.left !== 'boolean') errors.push('left must be a boolean');
+      if (typeof msg.right !== 'boolean') errors.push('right must be a boolean');
+      break;
   }
 
-  // Validate timestamp is a number
-  if (typeof msg.timestamp !== 'number') {
+  // Validate timestamp is a number (SERVER_SNAPSHOT uses serverTimeMs instead)
+  if (msg.type !== MSG.SERVER_SNAPSHOT && typeof msg.timestamp !== 'number') {
     errors.push('timestamp must be a number');
   }
 
@@ -595,6 +610,52 @@ export function createGuestLeave({ slot }) {
   return {
     type: MSG.GUEST_LEAVE,
     slot,
+    timestamp: Date.now()
+  };
+}
+
+// ========================================
+// Phase 2A: Server-Authority Messages
+// ========================================
+
+/**
+ * Creates a SERVER_SNAPSHOT message (Server -> Broadcast)
+ * Phase 2A authoritative server snapshot with full unit state.
+ * Uses serverTimeMs instead of timestamp for server-authoritative timing.
+ * @param {Object} params
+ * @param {number} params.version - Snapshot schema version
+ * @param {number} params.tick - The simulation tick this snapshot corresponds to
+ * @param {number} params.serverTimeMs - Server-authoritative timestamp in ms
+ * @param {Array} params.units - Array of authoritative unit state data
+ * @returns {Object}
+ */
+export function createServerSnapshot({ version, tick, serverTimeMs, units }) {
+  return {
+    type: MSG.SERVER_SNAPSHOT,
+    version,
+    tick,
+    serverTimeMs,
+    units
+  };
+}
+
+/**
+ * Creates a MOVE_INPUT message (Client -> Server)
+ * Phase 2A intent-based input: client sends directional intent, server resolves movement.
+ * @param {Object} params
+ * @param {boolean} params.forward - Forward key pressed
+ * @param {boolean} params.backward - Backward key pressed
+ * @param {boolean} params.left - Left key pressed
+ * @param {boolean} params.right - Right key pressed
+ * @returns {Object}
+ */
+export function createMoveInput({ forward, backward, left, right }) {
+  return {
+    type: MSG.MOVE_INPUT,
+    forward: !!forward,
+    backward: !!backward,
+    left: !!left,
+    right: !!right,
     timestamp: Date.now()
   };
 }
