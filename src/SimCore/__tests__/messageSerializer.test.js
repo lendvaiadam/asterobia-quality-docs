@@ -28,7 +28,10 @@ import {
   createResyncReq,
   createResyncAck,
   createPing,
-  createPong
+  createPong,
+  createSpawnManifest,
+  createPathData,
+  createMoveInput
 } from '../multiplayer/MessageSerializer.js';
 
 describe('MessageTypes', () => {
@@ -384,6 +387,54 @@ describe('MessageSerializer - handle missing optional fields', () => {
     });
     const result = validateMessage(msg);
     expect(result.valid).toBe(true);
+  });
+});
+
+describe('MessageSerializer - Phase 2A round-trips', () => {
+  it('SPAWN_MANIFEST round-trip', () => {
+    const units = [{ id: 1, ownerSlot: 0, modelIndex: 2, px: 10, py: 20, pz: 30 }];
+    const msg = createSpawnManifest({ units });
+    const encoded = encode(msg);
+    const decoded = decode(encoded);
+
+    expect(decoded.type).toBe(MSG.SPAWN_MANIFEST);
+    expect(decoded.units).toEqual(units);
+    expect(typeof decoded.timestamp).toBe('number');
+  });
+
+  it('PATH_DATA round-trip', () => {
+    const waypoints = [{ x: 0, y: 0, z: 0 }, { x: 10, y: 5, z: 10 }];
+    const msg = createPathData({ unitId: 42, waypoints });
+    const encoded = encode(msg);
+    const decoded = decode(encoded);
+
+    expect(decoded.type).toBe(MSG.PATH_DATA);
+    expect(decoded.unitId).toBe(42);
+    expect(decoded.waypoints).toEqual(waypoints);
+  });
+
+  it('MOVE_INPUT round-trip', () => {
+    const msg = createMoveInput({ forward: true, backward: false, left: true, right: false });
+    const encoded = encode(msg);
+    const decoded = decode(encoded);
+
+    expect(decoded.type).toBe(MSG.MOVE_INPUT);
+    expect(decoded.forward).toBe(true);
+    expect(decoded.backward).toBe(false);
+    expect(decoded.left).toBe(true);
+    expect(decoded.right).toBe(false);
+  });
+
+  it('PATH_DATA rejects non-number unitId', () => {
+    const badMsg = {
+      type: MSG.PATH_DATA,
+      unitId: 'not-a-number',
+      waypoints: [],
+      timestamp: Date.now()
+    };
+    const result = validateMessage(badMsg);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('unitId must be a number'))).toBe(true);
   });
 });
 
