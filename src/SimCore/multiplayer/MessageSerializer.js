@@ -208,6 +208,9 @@ export function validateMessage(msg) {
       if (typeof msg.backward !== 'boolean') errors.push('backward must be a boolean');
       if (typeof msg.left !== 'boolean') errors.push('left must be a boolean');
       if (typeof msg.right !== 'boolean') errors.push('right must be a boolean');
+      if (msg.unitId !== undefined && typeof msg.unitId !== 'number') {
+        errors.push('unitId must be a number');
+      }
       break;
 
     case MSG.SPAWN_MANIFEST:
@@ -690,8 +693,8 @@ export function createServerSnapshot({ version, tick, serverTimeMs, units }) {
  * @param {boolean} params.right - Right key pressed
  * @returns {Object}
  */
-export function createMoveInput({ forward, backward, left, right }) {
-  return {
+export function createMoveInput({ forward, backward, left, right, unitId }) {
+  const msg = {
     type: MSG.MOVE_INPUT,
     forward: !!forward,
     backward: !!backward,
@@ -699,4 +702,8 @@ export function createMoveInput({ forward, backward, left, right }) {
     right: !!right,
     timestamp: Date.now()
   };
+  if (unitId != null) {
+    msg.unitId = unitId;
+  }
+  return msg;
 }

@@ -552,9 +552,10 @@ export class SessionManager {
    * Phase 2A: Send MOVE_INPUT to server (client intent-based input).
    * Called at ~20Hz by Game.js when in mirror mode.
    * @param {Object} keys - { forward, backward, left, right } booleans
+   * @param {number} [unitId] - Optional target unit ID (seated/selected unit)
    * @returns {Promise<void>}
    */
-  async sendMoveInput(keys) {
+  async sendMoveInput(keys, unitId) {
     if (this.state.isOffline()) return;
     if (!this.transport || !this._sessionChannel) return;
 
@@ -566,6 +567,10 @@ export class SessionManager {
       right: !!keys.right,
       timestamp: Date.now()
     };
+
+    if (unitId != null) {
+      msg.unitId = unitId;
+    }
 
     try {
       await this.transport.broadcastToChannel(this._sessionChannel, msg);

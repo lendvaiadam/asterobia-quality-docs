@@ -436,6 +436,37 @@ describe('MessageSerializer - Phase 2A round-trips', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.includes('unitId must be a number'))).toBe(true);
   });
+
+  it('MOVE_INPUT with unitId round-trips correctly', () => {
+    const msg = createMoveInput({ forward: true, backward: false, left: false, right: true, unitId: 42 });
+    expect(msg.unitId).toBe(42);
+    const encoded = encode(msg);
+    const decoded = decode(encoded);
+
+    expect(decoded.type).toBe(MSG.MOVE_INPUT);
+    expect(decoded.unitId).toBe(42);
+    expect(decoded.forward).toBe(true);
+    expect(decoded.right).toBe(true);
+  });
+
+  it('MOVE_INPUT without unitId is valid (unitId optional)', () => {
+    const msg = createMoveInput({ forward: false, backward: true, left: false, right: false });
+    expect(msg.unitId).toBeUndefined();
+    const result = validateMessage(msg);
+    expect(result.valid).toBe(true);
+  });
+
+  it('MOVE_INPUT with non-number unitId fails validation', () => {
+    const badMsg = {
+      type: MSG.MOVE_INPUT,
+      forward: true, backward: false, left: false, right: false,
+      unitId: 'not-a-number',
+      timestamp: Date.now()
+    };
+    const result = validateMessage(badMsg);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.includes('unitId must be a number'))).toBe(true);
+  });
 });
 
 describe('MessageSerializer - edge cases', () => {

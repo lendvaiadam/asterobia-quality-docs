@@ -214,6 +214,8 @@ export class Game {
                 this.clientId = 'room-' + roomCode;
                 try {
                     await this.sessionManager.hostGame('Room ' + roomCode);
+                    // Phase 2A: Send SPAWN_MANIFEST to server (idempotent, gated by _manifestSent)
+                    this._sendSpawnManifest();
                     // Don't hide overlay - host stays on screen showing room code
                     // Host clicks START GAME to dismiss (handled by onStart)
                 } catch (err) {
@@ -359,6 +361,7 @@ export class Game {
         this._latchedKeys = { forward: false, backward: false, left: false, right: false };
         this._lastMoveInputSendMs = 0;
         this._MOVE_INPUT_INTERVAL_MS = 50; // 20Hz send rate
+        this._manifestSent = false; // Phase 2A: SPAWN_MANIFEST sent exactly once
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();
@@ -1061,6 +1064,7 @@ export class Game {
                 // R013 M07: Ownership tracking (0 = Host, assigned on join for guests)
                 unit.ownerSlot = 0; // Default: Host owns all initial units
                 unit.recordOwnershipChange(0, null, this.simLoop?.tickCount || 0, 'SPAWN');
+                unit.modelIndex = index % availableModels.length; // Phase 2A: for SPAWN_MANIFEST
 
                 // M07 GAP-0: PIN protection for testing
                 // First unit (index 0) stays OPEN for immediate host control.
@@ -1179,6 +1183,8 @@ export class Game {
                 if (loadedCount === models.length) {
                     this.generateUnitTabs();
                     this.setupPanelControls();
+                    // Phase 2A: If already hosting, send manifest now (idempotent)
+                    this._sendSpawnManifest();
                 }
 
                 // #1: No auto-select at startup. Camera positions on first unit but nothing is selected.
@@ -1187,6 +1193,112 @@ export class Game {
                 }
             });
         });
+    }
+
+    // === Phase 2A: Manifest & Visual Shells ===
+
+    /**
+     * Phase 2A: Send SPAWN_MANIFEST to server (host only, exactly once).
+     * Called after hostGame() and/or after all units finish loading.
+     * Gated by _manifestSent to guarantee single delivery.
+     * @private
+     */
+    _sendSpawnManifest() {
+        if (this._manifestSent) return;
+        if (!this.sessionManager?.isHost?.()) return;
+        const channel = this.sessionManager?._sessionChannel;
+        if (!channel || !this.sessionManager?.transport?.broadcastToChannel) return;
+
+        const manifest = this.units.filter(u => u).map(u => ({
+            id: u.id,
+            ownerSlot: u.ownerSlot ?? 0,
+            modelIndex: u.modelIndex ?? 0,
+            px: u.position.x,
+            py: u.position.y,
+            pz: u.position.z
+        }));
+
+        if (manifest.length === 0) return;
+
+        this.sessionManager.transport.broadcastToChannel(channel, {
+            type: 'SPAWN_MANIFEST',
+            units: manifest,
+            timestamp: Date.now()
+        });
+
+        this._manifestSent = true;
+        if (this._isDevMode) {
+            console.log(`[Game] SPAWN_MANIFEST sent (${manifest.length} units)`);
+        }
+    }
+
+    /**
+     * Phase 2A: Create a visual-only Unit shell from a server snapshot entry.
+     * Used when reconciliation detects a server unit with no local counterpart.
+     * Loads the correct GLTF model asynchronously (non-blocking).
+     *
+     * @param {Object} snap - Snapshot unit: { id, ownerSlot, modelIndex, px, py, pz, qx, qy, qz, qw }
+     * @private
+     */
+    _createVisualShellFromSnapshot(snap) {
+        if (!this.planet || !this.planet.terrain) return;
+
+        const unit = new Unit(this.planet, snap.id);
+        unit.name = `Unit ${snap.id}`;
+        unit.ownerSlot = snap.ownerSlot ?? 0;
+        unit.selectedBySlot = null;
+        unit.modelIndex = snap.modelIndex ?? 0;
+
+        // Position from snapshot
+        unit.position.set(snap.px, snap.py, snap.pz);
+        unit._interpPrevPos.set(snap.px, snap.py, snap.pz);
+        unit._interpCurrPos.set(snap.px, snap.py, snap.pz);
+        unit._interpInitialized = true;
+
+        // Orientation from snapshot (if available)
+        if (snap.qw !== undefined && unit.mesh) {
+            unit.mesh.quaternion.set(snap.qx, snap.qy, snap.qz, snap.qw);
+            unit._interpPrevQuat.set(snap.qx, snap.qy, snap.qz, snap.qw);
+            unit._interpCurrQuat.set(snap.qx, snap.qy, snap.qz, snap.qw);
+        }
+
+        // Sync mesh position
+        unit.mesh.position.copy(unit.position);
+
+        // Add to scene
+        this.scene.add(unit.mesh);
+        unit.mesh.scale.set(0.5, 0.5, 0.5);
+
+        // Load correct GLTF model async (non-blocking placeholder until loaded)
+        const availableModels = ['1.glb', '2.glb', '3.glb', '4.glb', '5.glb'];
+        const modelName = availableModels[snap.modelIndex % availableModels.length];
+        const loader = new GLTFLoader(this.loadingManager);
+        loader.load(`./modellek/${modelName}`, (gltf) => {
+            const model = gltf.scene;
+            if (unit.bodyMesh) unit.mesh.remove(unit.bodyMesh);
+            unit.mesh.add(model);
+            model.traverse(child => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    child.renderOrder = 20;
+                }
+            });
+        });
+
+        // Add audio if available
+        if (this.audioManager) {
+            this.audioManager.addUnitSound(unit);
+        }
+
+        // Add to units array (becomes visible to interpolation on next tick)
+        this.units.push(unit);
+
+        if (this._isDevMode) {
+            console.log(`[Game] Visual shell created for server unit ${snap.id} (slot ${snap.ownerSlot}, model ${snap.modelIndex})`);
+        }
+
+        this.generateUnitTabs();
     }
 
     // === R013: Guest Unit Spawning ===
@@ -1200,6 +1312,14 @@ export class Game {
      * @returns {Unit|null} The spawned unit, or null if planet not ready
      */
     _spawnUnitForPlayer(slot) {
+        // Phase 2A: Suppress local spawns when server authority is active
+        if (this._mirrorMode) {
+            if (this._isDevMode) {
+                console.log(`[Game] Spawn suppressed for slot ${slot} (mirror mode active)`);
+            }
+            return null;
+        }
+
         if (!this.planet || !this.planet.terrain) {
             console.warn('[Game] Cannot spawn unit: planet not ready');
             return null;
@@ -1211,6 +1331,7 @@ export class Game {
         unit.ownerSlot = slot;
         unit.selectedBySlot = null; // Not seated yet - will be seated on select
         unit.seatPolicy = 'OPEN'; // Guest units are open for their owner
+        unit.modelIndex = unitId % 5; // Phase 2A: track which GLTF model (for manifest/snapshot)
         // Position: random safe location on planet surface (same logic as loadUnits)
         const randomPos = new THREE.Vector3();
         let safeFound = false;
@@ -3945,6 +4066,13 @@ export class Game {
             unit._interpInitialized = true;
         }
 
+        // 2b. Reconcile: create visual shells for server units missing locally
+        for (const [id, snapUnit] of nextUnits) {
+            if (!this.units.some(u => u && u.id === id)) {
+                this._createVisualShellFromSnapshot(snapUnit);
+            }
+        }
+
         // 3. Send MOVE_INPUT at ~20Hz with latching
         const now = performance.now();
         if (now - this._lastMoveInputSendMs >= this._MOVE_INPUT_INTERVAL_MS) {
@@ -3967,7 +4095,7 @@ export class Game {
             // Only send if any key is pressed (save bandwidth)
             if (keys.forward || keys.backward || keys.left || keys.right) {
                 if (this.sessionManager?.sendMoveInput) {
-                    this.sessionManager.sendMoveInput(keys);
+                    this.sessionManager.sendMoveInput(keys, this.selectedUnit?.id);
                 }
             }
         }
