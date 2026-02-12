@@ -5,7 +5,8 @@
  * No Three.js, no mesh, no rendering. Suitable for server tick loop.
  *
  * Movement model:
- *   - Position is always ON the terrain surface (reprojected each tick)
+ *   - GROUNDED: position reprojected to terrain surface each tick
+ *   - AIRBORNE: position above terrain, subject to gravity (no terrain snap)
  *   - WASD input moves in the tangent plane (not flat XZ)
  *   - Heading is a scalar angle relative to a reference-forward in the tangent plane
  *   - Orientation quaternion computed each tick, included in snapshot for client rendering
@@ -22,22 +23,30 @@
 
 import { Vec3, Quat } from './SphereMath.js';
 
+/** @type {number} Gravity acceleration (world units per second²) */
+const GRAVITY = 9.81;
+
 export class HeadlessUnit {
-    /** @type {number} Fixed movement speed (world units per second) */
-    static MOVE_SPEED = 2.0;
+    /** @type {number} Fixed movement speed (world units per second) — matches client Unit.speed */
+    static MOVE_SPEED = 5.0;
 
     /**
-     * @param {number} id - Deterministic entity ID (from IdGenerator)
+     * @param {number} id - Deterministic entity ID (from IdGenerator or manifest)
      * @param {number} ownerSlot - Player slot that owns this unit (economic identity)
+     * @param {Object} [options]
+     * @param {number} [options.modelIndex=0] - Index into the client model array (for rendering)
      */
-    constructor(id, ownerSlot) {
+    constructor(id, ownerSlot, options = {}) {
         /** @type {number} */
         this.id = id;
 
         /** @type {number} Economic owner slot */
         this.ownerSlot = ownerSlot;
 
-        /** @type {{ x: number, y: number, z: number }} World position (on terrain surface) */
+        /** @type {number} Index into client model array (0-4 for 5 GLB models) */
+        this.modelIndex = options.modelIndex ?? 0;
+
+        /** @type {{ x: number, y: number, z: number }} World position (on terrain surface or above) */
         this.position = { x: 0, y: 60, z: 0 };
 
         /** @type {{ x: number, y: number, z: number }} Current velocity (tangential to sphere) */
@@ -60,6 +69,16 @@ export class HeadlessUnit {
 
         /** @type {import('./ServerTerrain.js').ServerTerrain|null} Terrain reference (set by Room) */
         this.terrain = null;
+
+        // Flight-readiness fields
+        /** @type {'GROUNDED' | 'AIRBORNE'} Movement mode */
+        this.mode = 'GROUNDED';
+
+        /** @type {number} Height above terrain surface (0 = on surface) */
+        this.altitude = 0;
+
+        /** @type {number} Velocity along radial direction (m/s, negative = falling) */
+        this.verticalVelocity = 0;
     }
 
     /**
@@ -73,6 +92,9 @@ export class HeadlessUnit {
         const dir = Vec3.normalize(direction);
         const radius = terrain.getRadiusAt(dir);
         this.position = Vec3.scale(dir, radius);
+        this.mode = 'GROUNDED';
+        this.altitude = 0;
+        this.verticalVelocity = 0;
         this._updateOrientation();
     }
 
@@ -87,6 +109,7 @@ export class HeadlessUnit {
         return {
             id: this.id,
             ownerSlot: this.ownerSlot,
+            modelIndex: this.modelIndex,
             px: this.position.x,
             py: this.position.y,
             pz: this.position.z,
@@ -96,7 +119,10 @@ export class HeadlessUnit {
             qw: this.orientation.w,
             heading: this.heading,
             speed: this.speed,
-            hp: this.hp
+            state: this.speed > 0 ? 'MOVING' : 'IDLE',
+            hp: this.hp,
+            mode: this.mode,
+            altitude: this.altitude
         };
     }
 
@@ -149,27 +175,36 @@ export class HeadlessUnit {
     }
 
     /**
-     * Advance position by velocity and reproject to terrain surface.
-     * Called by Room._onSimTick() after all applyInput() calls.
+     * Advance position by velocity and reproject to terrain surface (GROUNDED)
+     * or apply gravity (AIRBORNE). Called by Room._onSimTick().
      *
      * @param {number} dtSec - Timestep in seconds
      */
     updatePosition(dtSec) {
-        if (this.speed <= 0) return;
+        if (this.speed <= 0 && this.mode === 'GROUNDED') return;
 
-        // Move in tangent direction
+        // Horizontal: tangent-plane movement
         const displacement = Vec3.scale(this.velocity, dtSec);
         const newPos = Vec3.add(this.position, displacement);
-
-        // Reproject onto terrain surface
         const dir = Vec3.normalize(newPos);
-        if (this.terrain) {
-            const radius = this.terrain.getRadiusAt(dir);
-            this.position = Vec3.scale(dir, radius);
-        } else {
-            // Fallback: bare sphere with default radius
-            this.position = Vec3.scale(dir, 60);
+
+        // Vertical: gravity for airborne units
+        if (this.mode === 'AIRBORNE') {
+            this.verticalVelocity -= GRAVITY * dtSec;
+            this.altitude += this.verticalVelocity * dtSec;
+            if (this.altitude <= 0) {
+                this.altitude = 0;
+                this.verticalVelocity = 0;
+                this.mode = 'GROUNDED';
+            }
         }
+
+        // Reproject: grounded = terrain surface, airborne = terrain + altitude
+        const terrainRadius = this.terrain
+            ? this.terrain.getRadiusAt(dir)
+            : 60;
+        const finalRadius = terrainRadius + this.altitude;
+        this.position = Vec3.scale(dir, finalRadius);
 
         // Update cached orientation for snapshot
         this._updateOrientation();

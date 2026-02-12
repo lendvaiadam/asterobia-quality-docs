@@ -213,8 +213,8 @@ describe('Phase 2A: HeadlessUnit.applyInput', () => {
         expect(unit.velocity.z).toBe(prevVel.z);
     });
 
-    it('MOVE_SPEED is 2.0', () => {
-        expect(HeadlessUnit.MOVE_SPEED).toBe(2.0);
+    it('MOVE_SPEED is 5.0 (matches client Unit.speed)', () => {
+        expect(HeadlessUnit.MOVE_SPEED).toBe(5.0);
     });
 
     it('velocity is tangential to terrain surface (perpendicular to surface normal)', () => {
@@ -528,5 +528,282 @@ describe('Phase 2A: Environment gating', () => {
 
         // Ticking works without errors, but no snapshots are sent
         expect(() => tickRoom(room, 5)).not.toThrow();
+    });
+});
+
+// ========================================
+// 8. SPAWN_MANIFEST — Room.createUnitsFromManifest
+// ========================================
+
+describe('Phase 2A: SPAWN_MANIFEST lifecycle', () => {
+    let room;
+    let broadcastLog;
+
+    beforeEach(() => {
+        resetEntityIdCounter();
+        broadcastLog = [];
+        room = new Room('manifest-test', {
+            broadcast: (rid, snapshot) => {
+                broadcastLog.push(JSON.parse(JSON.stringify(snapshot)));
+            }
+        });
+        room.addPlayer('host', 'Host', null);
+    });
+
+    afterEach(() => {
+        if (room.state === 'RUNNING') room.stop();
+    });
+
+    it('createUnitsFromManifest creates N units with client-provided IDs', () => {
+        const manifest = [
+            { id: 100, ownerSlot: 0, modelIndex: 0 },
+            { id: 101, ownerSlot: 0, modelIndex: 1 },
+            { id: 102, ownerSlot: 0, modelIndex: 2 },
+        ];
+        const created = room.createUnitsFromManifest(manifest);
+
+        expect(created).toHaveLength(3);
+        expect(room.units).toHaveLength(3);
+        expect(room.units[0].id).toBe(100);
+        expect(room.units[1].id).toBe(101);
+        expect(room.units[2].id).toBe(102);
+    });
+
+    it('manifest units preserve modelIndex', () => {
+        const manifest = [
+            { id: 10, ownerSlot: 0, modelIndex: 3 },
+            { id: 11, ownerSlot: 0, modelIndex: 4 },
+        ];
+        room.createUnitsFromManifest(manifest);
+
+        expect(room.units[0].modelIndex).toBe(3);
+        expect(room.units[1].modelIndex).toBe(4);
+    });
+
+    it('manifest units spawn on terrain surface', () => {
+        const manifest = [
+            { id: 10, ownerSlot: 0, modelIndex: 0, px: 1, py: 0, pz: 0 },
+        ];
+        room.createUnitsFromManifest(manifest);
+
+        expect(distFromOrigin(room.units[0].position)).toBeGreaterThan(50);
+    });
+
+    it('10-unit manifest creates 10 HeadlessUnits with correct IDs', () => {
+        const manifest = Array.from({ length: 10 }, (_, i) => ({
+            id: 200 + i,
+            ownerSlot: 0,
+            modelIndex: i % 5,
+            px: Math.sin(i), py: 0, pz: Math.cos(i)
+        }));
+        room.createUnitsFromManifest(manifest);
+
+        expect(room.units).toHaveLength(10);
+        for (let i = 0; i < 10; i++) {
+            expect(room.units[i].id).toBe(200 + i);
+            expect(room.units[i].modelIndex).toBe(i % 5);
+            expect(room.units[i].ownerSlot).toBe(0);
+        }
+    });
+
+    it('room stays in WAITING until start() is called', () => {
+        room.createUnitsFromManifest([{ id: 1, ownerSlot: 0, modelIndex: 0 }]);
+        expect(room.state).toBe('WAITING');
+    });
+
+    it('room transitions WAITING → RUNNING on start()', () => {
+        room.createUnitsFromManifest([{ id: 1, ownerSlot: 0, modelIndex: 0 }]);
+        room.start();
+        expect(room.state).toBe('RUNNING');
+    });
+});
+
+// ========================================
+// 9. Transport-authenticated slot routing
+// ========================================
+
+describe('Phase 2A: Authority + slot routing', () => {
+    let room;
+
+    beforeEach(() => {
+        resetEntityIdCounter();
+        room = new Room('auth-test', {});
+        room.addPlayer('host', 'Host', null);
+    });
+
+    it('MOVE_INPUT with unitId routes to specific unit', () => {
+        const u1 = room.createUnitForPlayer(0, 100);
+        const u2 = room.createUnitForPlayer(0, 101);
+        const u1Start = { ...u1.position };
+        const u2Start = { ...u2.position };
+
+        // Send MOVE_INPUT targeting unit 101 only
+        room.receiveInput(0, {
+            type: 'MOVE_INPUT', unitId: 101,
+            forward: true, backward: false, left: false, right: false
+        });
+        tickRoom(room, 1);
+
+        // Unit 100 should NOT have moved
+        expect(u1.position.x).toBe(u1Start.x);
+        expect(u1.position.y).toBe(u1Start.y);
+
+        // Unit 101 should have moved
+        const moved = Math.sqrt(
+            (u2.position.x - u2Start.x) ** 2 +
+            (u2.position.y - u2Start.y) ** 2 +
+            (u2.position.z - u2Start.z) ** 2
+        );
+        expect(moved).toBeGreaterThan(0);
+    });
+
+    it('MOVE_INPUT from wrong slot is rejected (authority check)', () => {
+        room.createUnitForPlayer(0, 100); // Owned by slot 0
+        const startPos = { ...room.units[0].position };
+
+        // Slot 1 tries to move slot 0's unit
+        room.receiveInput(1, {
+            type: 'MOVE_INPUT', unitId: 100,
+            forward: true, backward: false, left: false, right: false
+        });
+        tickRoom(room, 1);
+
+        // Unit should NOT have moved
+        expect(room.units[0].position.x).toBe(startPos.x);
+        expect(room.units[0].position.y).toBe(startPos.y);
+        expect(room.units[0].position.z).toBe(startPos.z);
+    });
+
+    it('MOVE_INPUT without unitId falls back to ownerSlot routing', () => {
+        room.createUnitForPlayer(0, 100);
+        const startPos = { ...room.units[0].position };
+
+        // No unitId — legacy routing by ownerSlot
+        room.receiveInput(0, {
+            type: 'MOVE_INPUT',
+            forward: true, backward: false, left: false, right: false
+        });
+        tickRoom(room, 1);
+
+        const moved = Math.sqrt(
+            (room.units[0].position.x - startPos.x) ** 2 +
+            (room.units[0].position.y - startPos.y) ** 2 +
+            (room.units[0].position.z - startPos.z) ** 2
+        );
+        expect(moved).toBeGreaterThan(0);
+    });
+});
+
+// ========================================
+// 10. GameServer: _clientSlots transport auth
+// ========================================
+
+describe('Phase 2A: GameServer._clientSlots', () => {
+    it('_clientSlots map exists and starts empty', () => {
+        const server = new GameServer({ tickRate: 20 });
+        expect(server._clientSlots).toBeInstanceOf(Map);
+        expect(server._clientSlots.size).toBe(0);
+        server.stop();
+    });
+
+    it('stop() clears _clientSlots', () => {
+        const server = new GameServer({ tickRate: 20 });
+        server._clientSlots.set(1, { roomId: 'r1', slot: 0 });
+        server.stop();
+        expect(server._clientSlots.size).toBe(0);
+    });
+});
+
+// ========================================
+// 11. Flight readiness: GROUNDED vs AIRBORNE
+// ========================================
+
+describe('Phase 2A: Flight readiness', () => {
+    let terrain;
+
+    beforeEach(() => {
+        terrain = new ServerTerrain();
+    });
+
+    it('new HeadlessUnit defaults to GROUNDED with altitude=0', () => {
+        const unit = new HeadlessUnit(1, 0);
+        expect(unit.mode).toBe('GROUNDED');
+        expect(unit.altitude).toBe(0);
+        expect(unit.verticalVelocity).toBe(0);
+    });
+
+    it('GROUNDED unit terrain-snaps (position on surface)', () => {
+        const unit = new HeadlessUnit(1, 0);
+        unit.spawnOnSurface({ x: 1, y: 0, z: 0 }, terrain);
+        const surfaceRadius = distFromOrigin(unit.position);
+
+        unit.applyInput({ type: 'MOVE_INPUT', forward: true, backward: false, left: false, right: false });
+        unit.updatePosition(0.05);
+
+        // Should still be at terrain surface radius (within tolerance)
+        const newRadius = distFromOrigin(unit.position);
+        expect(Math.abs(newRadius - surfaceRadius)).toBeLessThan(0.5);
+        expect(unit.mode).toBe('GROUNDED');
+    });
+
+    it('AIRBORNE unit does NOT terrain-snap', () => {
+        const unit = new HeadlessUnit(1, 0);
+        unit.spawnOnSurface({ x: 1, y: 0, z: 0 }, terrain);
+        const surfaceRadius = distFromOrigin(unit.position);
+
+        // Set airborne manually (future: launch/jump will set this)
+        unit.mode = 'AIRBORNE';
+        unit.altitude = 10;
+        unit.verticalVelocity = 0;
+        unit.speed = 1; // needs speed > 0 or altitude to trigger update
+
+        unit.updatePosition(0.05);
+
+        // Should be above terrain surface
+        const newRadius = distFromOrigin(unit.position);
+        expect(newRadius).toBeGreaterThan(surfaceRadius + 5);
+    });
+
+    it('AIRBORNE → GROUNDED transition when altitude ≤ 0', () => {
+        const unit = new HeadlessUnit(1, 0);
+        unit.spawnOnSurface({ x: 1, y: 0, z: 0 }, terrain);
+
+        unit.mode = 'AIRBORNE';
+        unit.altitude = 0.1;
+        unit.verticalVelocity = -10; // Falling fast
+        unit.speed = 1;
+
+        unit.updatePosition(0.05); // 0.1 - 10*0.05 = -0.4 → clamped to 0
+
+        expect(unit.mode).toBe('GROUNDED');
+        expect(unit.altitude).toBe(0);
+        expect(unit.verticalVelocity).toBe(0);
+    });
+
+    it('toSnapshot includes mode, altitude, and modelIndex', () => {
+        const unit = new HeadlessUnit(1, 0, { modelIndex: 3 });
+        unit.spawnOnSurface({ x: 1, y: 0, z: 0 }, terrain);
+
+        const snap = unit.toSnapshot();
+        expect(snap.mode).toBe('GROUNDED');
+        expect(snap.altitude).toBe(0);
+        expect(snap.modelIndex).toBe(3);
+        expect(snap).toHaveProperty('id');
+        expect(snap).toHaveProperty('ownerSlot');
+        expect(snap).toHaveProperty('px');
+        expect(snap).toHaveProperty('qx');
+        expect(snap).toHaveProperty('qw');
+    });
+
+    it('GROUNDED updatePosition is no-op when speed is 0', () => {
+        const unit = new HeadlessUnit(1, 0);
+        unit.spawnOnSurface({ x: 1, y: 0, z: 0 }, terrain);
+        const startPos = { ...unit.position };
+
+        unit.updatePosition(0.05);
+
+        expect(unit.position.x).toBe(startPos.x);
+        expect(unit.position.y).toBe(startPos.y);
+        expect(unit.position.z).toBe(startPos.z);
     });
 });

@@ -2,8 +2,11 @@
  * GameServer - Main server class for the Asterobia authoritative server.
  *
  * Manages Room instances (each Room is one active match).
- * Phase 0: No networking -- rooms are created and ticked in-process.
- * Phase 1 will add WebSocket listener and client connection handling.
+ * Phase 2A: Server authority — owns entity lifecycle, routes inputs via
+ * transport-authenticated identity, broadcasts SERVER_SNAPSHOT.
+ *
+ * Security: NEVER trusts payload.sourceSlot. Uses _clientSlots map
+ * populated from relay's server-assigned client.id.
  *
  * @module server/GameServer
  */
@@ -25,6 +28,17 @@ export class GameServer {
 
         /** @type {boolean} Whether the server is running */
         this.isRunning = false;
+
+        /**
+         * Transport-authenticated identity mapping.
+         * Maps WsRelay client.id (server-assigned, trusted) -> { roomId, slot }.
+         * NEVER populated from client payload.
+         * @type {Map<number, { roomId: string, slot: number }>}
+         */
+        this._clientSlots = new Map();
+
+        /** @type {import('./WsRelay.js').WsRelay|null} */
+        this._relay = null;
     }
 
     /**
@@ -89,13 +103,14 @@ export class GameServer {
             room.stop();
         }
         this.rooms.clear();
+        this._clientSlots.clear();
     }
 
     /**
      * Wire this GameServer to a WsRelay instance.
      * Intercepts channel broadcasts to create rooms and route inputs.
      *
-     * Phase 2A: Listens for HOST_ANNOUNCE to create rooms, MOVE_INPUT to route inputs.
+     * Phase 2A: Listens for HOST_ANNOUNCE, SPAWN_MANIFEST, MOVE_INPUT, JOIN_REQ.
      * Injects SERVER_SNAPSHOT back into the relay for delivery to clients.
      *
      * @param {import('./WsRelay.js').WsRelay} relay - The relay to wire to
@@ -110,65 +125,200 @@ export class GameServer {
             originalBroadcast(ws, client, channelName, payload);
 
             // Then intercept for server authority
-            if (payload && payload.type === 'HOST_ANNOUNCE') {
-                this._onHostAnnounce(channelName, payload, client);
-            } else if (payload && payload.type === 'MOVE_INPUT') {
-                this._onMoveInput(channelName, payload, client);
+            if (!payload || !payload.type) return;
+
+            switch (payload.type) {
+                case 'HOST_ANNOUNCE':
+                    this._onHostAnnounce(channelName, payload, client);
+                    break;
+                case 'SPAWN_MANIFEST':
+                    this._onSpawnManifest(channelName, payload, client);
+                    break;
+                case 'MOVE_INPUT':
+                    this._onMoveInput(channelName, payload, client);
+                    break;
+                case 'JOIN_ACK':
+                    this._onJoinAck(channelName, payload, client);
+                    break;
             }
         };
+
+        // Hook into disconnect to clean up slot mapping
+        const originalDisconnect = relay._handleDisconnect?.bind(relay);
+        if (originalDisconnect) {
+            relay._handleDisconnect = (ws) => {
+                const client = relay.clients.get(ws);
+                if (client) {
+                    this._onClientDisconnect(client);
+                }
+                originalDisconnect(ws);
+            };
+        }
 
         console.log('[GameServer] Wired to WsRelay (Phase 2A authority mode)');
     }
 
     /**
-     * Handle HOST_ANNOUNCE: create a Room and start ticking.
+     * Handle HOST_ANNOUNCE: create a Room in WAITING state.
+     * Room does NOT start ticking — waits for SPAWN_MANIFEST.
      * @private
      */
     _onHostAnnounce(channelName, payload, client) {
-        // Use hostId as roomId (matches client session channel naming)
         const roomId = payload.hostId;
         if (!roomId || this.rooms.has(roomId)) return;
 
-        // Create room with broadcast callback that injects into relay
+        // Create room with broadcast callback (stays in WAITING state)
         const room = this.createRoom(roomId, {
             broadcast: (rid, snapshot) => {
                 this._injectToChannel(`asterobia:session:${rid}`, snapshot);
             }
         });
 
-        // Create a unit for the host (slot 0)
+        // Map host: transport-authenticated client.id -> slot 0
         const hostSlot = 0;
-        room.addPlayer(roomId, payload.hostDisplayName || 'Host', null);
-        room.createUnitForPlayer(hostSlot, nextEntityId());
+        this._clientSlots.set(client.id, { roomId, slot: hostSlot });
 
-        room.start();
-        console.log(`[GameServer] Room ${roomId} created and started (Phase 2A)`);
+        room.addPlayer(roomId, payload.hostDisplayName || 'Host', null);
+
+        console.log(`[GameServer] Room ${roomId} created (WAITING for SPAWN_MANIFEST)`);
     }
 
     /**
-     * Handle MOVE_INPUT: route to the correct room.
+     * Handle SPAWN_MANIFEST: create HeadlessUnits from host's entity list.
+     * Uses client-provided IDs — guarantees 1:1 mapping by construction.
+     * Transitions room from WAITING to RUNNING.
      * @private
      */
-    _onMoveInput(channelName, payload, client) {
-        // Extract roomId from channel name: "asterobia:session:<roomId>"
-        const parts = channelName.split(':');
-        if (parts.length < 3) return;
-        const roomId = parts[2];
+    _onSpawnManifest(channelName, payload, client) {
+        // Only accept from authenticated host (slot 0)
+        const auth = this._clientSlots.get(client.id);
+        if (!auth || auth.slot !== 0) {
+            console.warn(`[GameServer] SPAWN_MANIFEST rejected: client ${client.id} is not host`);
+            return;
+        }
+
+        const room = this.rooms.get(auth.roomId);
+        if (!room) return;
+
+        // Only accept manifest once (room must be in WAITING state)
+        if (room.state !== 'WAITING') {
+            console.warn(`[GameServer] SPAWN_MANIFEST rejected: room ${auth.roomId} already in ${room.state}`);
+            return;
+        }
+
+        if (!Array.isArray(payload.units) || payload.units.length === 0) {
+            console.warn('[GameServer] SPAWN_MANIFEST rejected: empty or invalid units array');
+            return;
+        }
+
+        // Create HeadlessUnits from manifest (client-provided IDs)
+        room.createUnitsFromManifest(payload.units);
+
+        // Start ticking
+        room.start();
+        console.log(`[GameServer] Room ${auth.roomId} received manifest (${payload.units.length} units) — RUNNING`);
+    }
+
+    /**
+     * Handle JOIN_ACK (sent by host to guest): learn the guest's assigned slot.
+     * This lets us map the guest's WebSocket to their slot when they send MOVE_INPUT.
+     *
+     * We observe the JOIN_ACK broadcast to learn {guestId -> slot} without modifying
+     * the Phase 1 join flow.
+     * @private
+     */
+    _onJoinAck(channelName, payload, client) {
+        if (!payload.accepted || payload.assignedSlot == null) return;
+
+        const roomId = this._extractRoomId(channelName);
+        if (!roomId) return;
 
         const room = this.rooms.get(roomId);
         if (!room) return;
 
-        // Determine source slot from client ID (simple: host=0, guests=1+)
-        // For Phase 2A, use the sourceSlot from payload if present, otherwise client.id - 1
-        const sourceSlot = payload.sourceSlot ?? (client.id - 1);
+        // Note: we can't map the GUEST's client.id here because this broadcast
+        // comes from the HOST's WebSocket. We'll map the guest when they send
+        // their first MOVE_INPUT (see _onMoveInput fallback).
+        // For now, create a guest unit on the server so it appears in snapshots.
+        const guestSlot = payload.assignedSlot;
+        const unitId = nextEntityId();
+        const modelIndex = unitId % 5;
+        room.createUnitForPlayer(guestSlot, unitId, { modelIndex });
 
-        room.receiveInput(sourceSlot, {
+        console.log(`[GameServer] Guest unit created for slot ${guestSlot} (id=${unitId}) in room ${roomId}`);
+    }
+
+    /**
+     * Handle MOVE_INPUT: route to the correct room using transport-auth identity.
+     * NEVER trusts payload.sourceSlot.
+     * @private
+     */
+    _onMoveInput(channelName, payload, client) {
+        const roomId = this._extractRoomId(channelName);
+        if (!roomId) return;
+
+        const room = this.rooms.get(roomId);
+        if (!room) return;
+
+        // Look up transport-authenticated slot
+        let auth = this._clientSlots.get(client.id);
+
+        // Fallback: if this client isn't mapped yet (guest's first message),
+        // try to find their slot by checking room players.
+        // This handles the race between JOIN_ACK and first MOVE_INPUT.
+        if (!auth && roomId) {
+            // Find unmatched guest slot by checking which slots have no client mapping
+            for (const [slot] of room.players) {
+                const alreadyMapped = [...this._clientSlots.values()].some(
+                    a => a.roomId === roomId && a.slot === slot
+                );
+                if (!alreadyMapped && slot > 0) {
+                    // This is likely the guest — map them
+                    this._clientSlots.set(client.id, { roomId, slot });
+                    auth = { roomId, slot };
+                    console.log(`[GameServer] Auto-mapped client ${client.id} to slot ${slot} in room ${roomId}`);
+                    break;
+                }
+            }
+        }
+
+        if (!auth) return; // Unknown client, silently drop
+
+        const command = {
             type: 'MOVE_INPUT',
             forward: !!payload.forward,
             backward: !!payload.backward,
             left: !!payload.left,
             right: !!payload.right
-        });
+        };
+
+        // Pass unitId if present (multi-unit control)
+        if (payload.unitId != null) {
+            command.unitId = payload.unitId;
+        }
+
+        room.receiveInput(auth.slot, command);
+    }
+
+    /**
+     * Clean up client slot mapping on disconnect.
+     * @private
+     */
+    _onClientDisconnect(client) {
+        if (this._clientSlots.has(client.id)) {
+            const auth = this._clientSlots.get(client.id);
+            console.log(`[GameServer] Client ${client.id} disconnected (was slot ${auth.slot} in room ${auth.roomId})`);
+            this._clientSlots.delete(client.id);
+        }
+    }
+
+    /**
+     * Extract roomId from channel name: "asterobia:session:<roomId>"
+     * @private
+     */
+    _extractRoomId(channelName) {
+        const parts = channelName.split(':');
+        return parts.length >= 3 ? parts[2] : null;
     }
 
     /**

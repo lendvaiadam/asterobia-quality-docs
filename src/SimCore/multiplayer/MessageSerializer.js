@@ -209,6 +209,15 @@ export function validateMessage(msg) {
       if (typeof msg.left !== 'boolean') errors.push('left must be a boolean');
       if (typeof msg.right !== 'boolean') errors.push('right must be a boolean');
       break;
+
+    case MSG.SPAWN_MANIFEST:
+      if (!Array.isArray(msg.units)) errors.push('units must be an array');
+      break;
+
+    case MSG.PATH_DATA:
+      if (typeof msg.unitId !== 'number') errors.push('unitId must be a number');
+      if (!Array.isArray(msg.waypoints)) errors.push('waypoints must be an array');
+      break;
   }
 
   // Validate timestamp is a number (SERVER_SNAPSHOT uses serverTimeMs instead)
@@ -617,6 +626,38 @@ export function createGuestLeave({ slot }) {
 // ========================================
 // Phase 2A: Server-Authority Messages
 // ========================================
+
+/**
+ * Creates a SPAWN_MANIFEST message (Host -> Server)
+ * Request to spawn specific units for the game session.
+ * @param {Object} params
+ * @param {Array} params.units - Array of unit configs { type, count, team... }
+ * @returns {Object}
+ */
+export function createSpawnManifest({ units }) {
+  return {
+    type: MSG.SPAWN_MANIFEST,
+    units,
+    timestamp: Date.now()
+  };
+}
+
+/**
+ * Creates a PATH_DATA message (Client -> Server)
+ * List of waypoints for a unit to follow (RTS navigation).
+ * @param {Object} params
+ * @param {number} params.unitId - ID of the unit to move
+ * @param {Array} params.waypoints - Array of {x,y,z} points
+ * @returns {Object}
+ */
+export function createPathData({ unitId, waypoints }) {
+  return {
+    type: MSG.PATH_DATA,
+    unitId,
+    waypoints,
+    timestamp: Date.now()
+  };
+}
 
 /**
  * Creates a SERVER_SNAPSHOT message (Server -> Broadcast)

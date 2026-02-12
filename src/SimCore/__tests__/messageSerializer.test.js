@@ -32,8 +32,8 @@ import {
 } from '../multiplayer/MessageSerializer.js';
 
 describe('MessageTypes', () => {
-  it('exports all 20 message types', () => {
-    expect(Object.keys(MSG)).toHaveLength(20);
+  it('exports all 22 message types', () => {
+    expect(Object.keys(MSG)).toHaveLength(22);
     expect(MSG.HELLO).toBe('HELLO');
     expect(MSG.HOST_ANNOUNCE).toBe('HOST_ANNOUNCE');
     expect(MSG.JOIN_REQ).toBe('JOIN_REQ');

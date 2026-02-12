@@ -11,6 +11,9 @@
  * Units spawn ON the terrain surface and move tangentially.
  *
  * Lifecycle: WAITING -> RUNNING -> ENDED
+ *   WAITING: Room created, no units yet. Waits for SPAWN_MANIFEST.
+ *   RUNNING: Manifest received, units exist, ticking at 20Hz.
+ *   ENDED:   Stopped, cleaned up.
  *
  * @module server/Room
  */
@@ -93,10 +96,12 @@ export class Room {
      *
      * @param {number} slot - Player slot
      * @param {number} unitId - Deterministic entity ID
+     * @param {Object} [options]
+     * @param {number} [options.modelIndex=0] - Client model index for rendering
      * @returns {HeadlessUnit}
      */
-    createUnitForPlayer(slot, unitId) {
-        const unit = new HeadlessUnit(unitId, slot);
+    createUnitForPlayer(slot, unitId, options = {}) {
+        const unit = new HeadlessUnit(unitId, slot, { modelIndex: options.modelIndex ?? 0 });
 
         // Distribute spawn positions around the equator
         const angle = slot * (Math.PI * 2 / this.maxPlayers);
@@ -105,6 +110,36 @@ export class Room {
         unit.spawnOnSurface(direction, this.terrain);
         this.units.push(unit);
         return unit;
+    }
+
+    /**
+     * Create units from a SPAWN_MANIFEST sent by the host client.
+     * Uses client-provided IDs and positions — this guarantees 1:1 mapping.
+     *
+     * @param {Array<{id: number, ownerSlot: number, modelIndex: number, px?: number, py?: number, pz?: number}>} manifestUnits
+     * @returns {HeadlessUnit[]} Created units
+     */
+    createUnitsFromManifest(manifestUnits) {
+        const created = [];
+        for (const mu of manifestUnits) {
+            const unit = new HeadlessUnit(mu.id, mu.ownerSlot, { modelIndex: mu.modelIndex ?? 0 });
+
+            // If manifest includes a position, use it as spawn direction
+            if (mu.px != null && mu.py != null && mu.pz != null) {
+                const dir = { x: mu.px, y: mu.py, z: mu.pz };
+                unit.spawnOnSurface(dir, this.terrain);
+            } else {
+                // Fallback: equatorial distribution
+                const idx = this.units.length;
+                const angle = idx * (Math.PI * 2 / this.maxPlayers);
+                const dir = { x: Math.sin(angle), y: 0, z: Math.cos(angle) };
+                unit.spawnOnSurface(dir, this.terrain);
+            }
+
+            this.units.push(unit);
+            created.push(unit);
+        }
+        return created;
     }
 
     /**
@@ -170,8 +205,19 @@ export class Room {
 
         // 2. Route commands to target units
         for (const cmd of commands) {
-            if (cmd.type === 'MOVE_INPUT' && cmd.sourceSlot != null) {
-                const unit = this.units.find(u => u.ownerSlot === cmd.sourceSlot);
+            if (cmd.type === 'MOVE_INPUT') {
+                // Route by unitId if present, else fall back to ownerSlot
+                let unit = null;
+                if (cmd.unitId != null) {
+                    unit = this.units.find(u => u.id === cmd.unitId);
+                    // Authority check: sender must own this unit
+                    if (unit && cmd.sourceSlot != null && unit.ownerSlot !== cmd.sourceSlot) {
+                        unit = null; // Rejected: not your unit
+                    }
+                } else if (cmd.sourceSlot != null) {
+                    // Legacy fallback: route by ownerSlot (pre-manifest mode)
+                    unit = this.units.find(u => u.ownerSlot === cmd.sourceSlot);
+                }
                 if (unit) {
                     unit.applyInput(cmd);
                 }
@@ -226,7 +272,7 @@ export class Room {
      * Accept an input command from a client.
      * The command is buffered in the CommandQueue for deterministic processing.
      *
-     * @param {number} slot - Player slot that sent the command
+     * @param {number} slot - Player slot that sent the command (transport-authenticated)
      * @param {Object} command - Command object (must have .type from CommandType)
      */
     receiveInput(slot, command) {

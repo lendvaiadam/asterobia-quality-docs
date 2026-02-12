@@ -32,7 +32,9 @@ export const MSG = Object.freeze({
   POSITION_SYNC: 'POSITION_SYNC',
   // Phase 2A: Server-authority messages
   SERVER_SNAPSHOT: 'SERVER_SNAPSHOT',  // Authoritative server snapshot (separate from Phase 1 SNAPSHOT)
-  MOVE_INPUT: 'MOVE_INPUT'            // Client intent-based input for server authority
+  MOVE_INPUT: 'MOVE_INPUT',           // Client intent-based input (WASD / debug)
+  SPAWN_MANIFEST: 'SPAWN_MANIFEST',    // Host -> Server: Request to spawn units
+  PATH_DATA: 'PATH_DATA'              // Client -> Server: Waypoint list for navigation
 });
 
 /**
@@ -100,8 +102,17 @@ export const MESSAGE_SCHEMAS = Object.freeze({
   [MSG.POSITION_SYNC]: ['type', 'tick', 'units', 'timestamp'],
 
   // Phase 2A: Server-authority message schemas
-  [MSG.SERVER_SNAPSHOT]: ['type', 'version', 'tick', 'serverTimeMs', 'units'],  // No timestamp — server uses serverTimeMs
-  [MSG.MOVE_INPUT]: ['type', 'forward', 'backward', 'left', 'right', 'timestamp']
+  [MSG.SERVER_SNAPSHOT]: ['type', 'version', 'tick', 'serverTimeMs', 'units'],
+  // units: [{id, ownerSlot, modelIndex, px,py,pz, qx,qy,qz,qw, heading, speed, state, hp, mode, altitude}]
+
+  [MSG.MOVE_INPUT]: ['type', 'forward', 'backward', 'left', 'right', 'timestamp'],
+  // unitId is optional (multi-unit control); omitted = first unit owned by sender
+
+  [MSG.SPAWN_MANIFEST]: ['type', 'units', 'timestamp'],
+  // units: [{id, ownerSlot, modelIndex, px, py, pz}]
+
+  [MSG.PATH_DATA]: ['type', 'unitId', 'waypoints', 'timestamp']
+  // waypoints: [{x,y,z}...]
 });
 
 /**
