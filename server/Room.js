@@ -6,6 +6,9 @@
  *   - A CommandQueue for incoming player inputs
  *   - A list of connected players (slot -> endpoint mapping)
  *   - Game state: HeadlessUnit[] (pure data, no Three.js)
+ *   - A ServerTerrain instance (same procedural sphere as client)
+ *
+ * Units spawn ON the terrain surface and move tangentially.
  *
  * Lifecycle: WAITING -> RUNNING -> ENDED
  *
@@ -15,6 +18,7 @@
 import { SimLoop } from '../src/SimCore/runtime/SimLoop.js';
 import { CommandQueue, CommandType } from '../src/SimCore/runtime/CommandQueue.js';
 import { HeadlessUnit } from './HeadlessUnit.js';
+import { ServerTerrain } from './ServerTerrain.js';
 
 /** @typedef {'WAITING' | 'RUNNING' | 'ENDED'} RoomState */
 
@@ -24,6 +28,8 @@ export class Room {
      * @param {Object} [options]
      * @param {number} [options.tickMs=50] - Fixed timestep in ms (default 50ms = 20 Hz)
      * @param {number} [options.maxPlayers=10] - Maximum player slots
+     * @param {Object} [options.terrainParams] - Terrain parameters (passed to ServerTerrain)
+     * @param {Function} [options.broadcast] - Callback for broadcasting snapshots
      */
     constructor(roomId, options = {}) {
         /** @type {string} */
@@ -55,6 +61,9 @@ export class Room {
 
         /** @type {ReturnType<typeof setInterval>|null} Server tick interval handle */
         this._tickInterval = null;
+
+        /** @type {ServerTerrain} Authoritative terrain (same math as client) */
+        this.terrain = new ServerTerrain(options.terrainParams);
     }
 
     /**
@@ -77,7 +86,10 @@ export class Room {
     }
 
     /**
-     * Create a HeadlessUnit for a player at a deterministic start position.
+     * Create a HeadlessUnit for a player, spawned ON the terrain surface.
+     *
+     * Units are distributed around the equator, spaced by slot index.
+     * Each unit spawns at the terrain surface height for its direction.
      *
      * @param {number} slot - Player slot
      * @param {number} unitId - Deterministic entity ID
@@ -85,10 +97,12 @@ export class Room {
      */
     createUnitForPlayer(slot, unitId) {
         const unit = new HeadlessUnit(unitId, slot);
-        // Deterministic start position based on slot (spread on X axis)
-        unit.position.x = slot * 5;
-        unit.position.y = 0;
-        unit.position.z = 0;
+
+        // Distribute spawn positions around the equator
+        const angle = slot * (Math.PI * 2 / this.maxPlayers);
+        const direction = { x: Math.sin(angle), y: 0, z: Math.cos(angle) };
+
+        unit.spawnOnSurface(direction, this.terrain);
         this.units.push(unit);
         return unit;
     }
@@ -120,12 +134,10 @@ export class Room {
 
         // Server-driven tick: push time into SimLoop at fixed intervals
         const tickMs = this.simLoop.fixedDtMs;
-        let lastMs = Date.now();
 
         this._tickInterval = setInterval(() => {
             const nowMs = Date.now();
             this.simLoop.step(nowMs);
-            lastMs = nowMs;
         }, tickMs);
     }
 
@@ -146,7 +158,7 @@ export class Room {
 
     /**
      * Called by SimLoop on each fixed simulation tick.
-     * Processes commands and advances unit state.
+     * Processes commands and advances unit state on the spherical terrain.
      *
      * @param {number} dtSec - Fixed timestep in seconds
      * @param {number} tickCount - Current tick number
@@ -166,13 +178,9 @@ export class Room {
             }
         }
 
-        // 3. Update unit positions (velocity * dt)
+        // 3. Update unit positions (spherical terrain movement)
         for (const unit of this.units) {
-            if (unit.speed > 0) {
-                unit.position.x += unit.velocity.x * dtSec;
-                unit.position.y += unit.velocity.y * dtSec;
-                unit.position.z += unit.velocity.z * dtSec;
-            }
+            unit.updatePosition(dtSec);
         }
 
         // 4. Broadcast SERVER_SNAPSHOT to all connected clients

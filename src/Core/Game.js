@@ -894,6 +894,21 @@ export class Game {
         el.style.color = (role === 'GUEST' && recv === 0 && tick > 200) ? '#f44' : '#0f0';
     }
 
+    /**
+     * Show a temporary on-screen notice (visible without dev console).
+     * Auto-fades after 5 seconds.
+     * @param {string} text - Message to display
+     * @param {string} [color='#0f0'] - CSS color
+     */
+    _showScreenNotice(text, color = '#0f0') {
+        const el = document.createElement('div');
+        el.style.cssText = `position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.85);color:${color};font-family:monospace;font-size:18px;padding:16px 32px;z-index:99999;border-radius:8px;border:2px solid ${color};pointer-events:none;transition:opacity 1s;`;
+        el.textContent = text;
+        document.body.appendChild(el);
+        setTimeout(() => { el.style.opacity = '0'; }, 4000);
+        setTimeout(() => { el.remove(); }, 5000);
+    }
+
     // R013: Apply position sync from Host (called by SessionManager._handlePositionSync)
     // Lives here because Game.js has THREE.Vector3 for path reconstruction
     applyPositionSync(msg) {
@@ -955,6 +970,7 @@ export class Game {
             this._mirrorMode = true;
             this._snapshotBuffer.reset();
             console.log('[Game] Mirror mode ACTIVATED (first SERVER_SNAPSHOT received)');
+            this._showScreenNotice('MIRROR MODE ACTIVE — Server Authority', '#00ff88');
         }
 
         this._snapshotBuffer.push(msg);
@@ -3902,8 +3918,27 @@ export class Game {
                 unit.position.set(nextU.px, nextU.py, nextU.pz);
             }
 
-            // Initialize headingQuaternion if not yet set (prevents crash in render path)
-            if (!unit.headingQuaternion && unit.mesh) {
+            // Phase 2A: Apply orientation quaternion from server snapshot
+            // Server sends qx/qy/qz/qw aligned to terrain normal + heading direction.
+            // Client applies directly — no local terrain fixup (prevents vibration).
+            if (nextU.qw !== undefined && unit.mesh) {
+                if (isTeleport || !prevU || prevU.qw === undefined) {
+                    // Snap quaternion (teleport or first frame)
+                    unit._interpPrevQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+                    unit._interpCurrQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+                } else {
+                    // Smooth interpolation between prev and next quaternions
+                    unit._interpPrevQuat.set(prevU.qx, prevU.qy, prevU.qz, prevU.qw);
+                    unit._interpCurrQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+                }
+
+                // Keep headingQuaternion in sync (used by camera, tire tracks, etc.)
+                if (!unit.headingQuaternion) {
+                    unit.headingQuaternion = unit.mesh.quaternion.clone();
+                }
+                unit.headingQuaternion.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+            } else if (!unit.headingQuaternion && unit.mesh) {
+                // Fallback for snapshots without quaternion data
                 unit.headingQuaternion = unit.mesh.quaternion.clone();
             }
 

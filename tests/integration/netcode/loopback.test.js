@@ -219,18 +219,26 @@ describe('Netcode Integration: Loopback', () => {
 
         it('unit position updates with velocity on tick', () => {
             const unit = new HeadlessUnit(1, 1);
-            unit.position = { x: 0, y: 0, z: 0 };
-            unit.velocity = { x: 10, y: 0, z: 0 };
+            // Start on sphere surface (spherical movement reprojects to terrain)
+            unit.position = { x: 60, y: 0, z: 0 };
+            unit.velocity = { x: 0, y: 0, z: 10 };
             unit.speed = 10; // Must be > 0 for position update
             room.units.push(unit);
 
-            // Room fixedDtSec = 50ms = 0.05s
-            // After 1 tick: x = 0 + 10 * 0.05 = 0.5
+            const startPos = { ...unit.position };
             tickRoom(room, 1);
 
-            expect(unit.position.x).toBeCloseTo(0.5, 6);
-            expect(unit.position.y).toBeCloseTo(0, 6);
-            expect(unit.position.z).toBeCloseTo(0, 6);
+            // Unit should have moved (position changed from start)
+            const moved = Math.sqrt(
+                (unit.position.x - startPos.x) ** 2 +
+                (unit.position.y - startPos.y) ** 2 +
+                (unit.position.z - startPos.z) ** 2
+            );
+            expect(moved).toBeGreaterThan(0);
+            // Unit stays near sphere surface (~60 radius)
+            const dist = Math.sqrt(unit.position.x ** 2 + unit.position.y ** 2 + unit.position.z ** 2);
+            expect(dist).toBeGreaterThan(50);
+            expect(dist).toBeLessThan(70);
         });
 
         it('unit with speed=0 does not move', () => {
@@ -558,18 +566,25 @@ describe('Netcode Integration: Loopback', () => {
 
         it('room continues ticking after player disconnect', () => {
             const unit = new HeadlessUnit(1, 1);
-            unit.position = { x: 0, y: 0, z: 0 };
-            unit.velocity = { x: 20, y: 0, z: 0 };
+            // Start on sphere surface with tangential velocity
+            unit.position = { x: 60, y: 0, z: 0 };
+            unit.velocity = { x: 0, y: 0, z: 20 };
             unit.speed = 20;
             room.units.push(unit);
 
+            const startPos = { ...unit.position };
             room.removePlayer(2);
 
             tickRoom(room, 5);
 
             expect(room.simLoop.getTickCount()).toBe(5);
-            // 5 ticks * 0.05s * 20 units/s = 5.0
-            expect(unit.position.x).toBeCloseTo(5.0, 6);
+            // Unit should have moved from start position
+            const moved = Math.sqrt(
+                (unit.position.x - startPos.x) ** 2 +
+                (unit.position.y - startPos.y) ** 2 +
+                (unit.position.z - startPos.z) ** 2
+            );
+            expect(moved).toBeGreaterThan(0);
         });
 
         it('transport endpoint disconnect cleans up channels', async () => {
