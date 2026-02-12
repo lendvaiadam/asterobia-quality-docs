@@ -17,4 +17,17 @@
 - Status: Draft | Accepted | Scheduled | Rejected
 
 ## ITEMS
-(None yet)
+
+- ID: IDEA-001 (Floating Camera)
+- Date: 2026-02-12
+- Proposed by: User
+- Summary: Add subtle idle sway to the camera (water-like floating motion: left/right/up/down) when stationary.
+- Urgency: LATER (Low Priority)
+- Impact: S (Visual Polish)
+- Consequences:
+    - Needs integration with existing camera controller.
+    - Should be subtle to avoid motion sickness.
+- Target release: Post-Multiplayer
+- Owner: TBD
+- Status: Accepted
+

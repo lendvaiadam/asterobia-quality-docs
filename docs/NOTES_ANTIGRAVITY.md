@@ -266,7 +266,22 @@ Default output: MD files under /quality or /docs.
     - **Purity**: PASS (grep check clean).
 - **Risk notes**: None. Ready for Phase 1 (Real WebSocket).
 - **Status**: OFFICIALLY CLOSED (Merged to Main)
-- **Rollback**: `git checkout savepoint/r013-nb0-phase0`
+### 2026-02-12: Phase 2A Commit 1 Merged (Manifest-Lite)
+- **SHA**: `801b317` (Merge to Main)
+- **Tag**: `savepoint/r013-phase2a-manifest-lite`
+- **Scope**: Server Core (Manifest/Flight fields), Protocol Update.
+- **Tests**: 690 PASS (Clean).
+- **Decision**: Locked **Option 3: Manifest-Lite**. "Commit 1.5" integrated into Commit 2.
+### 2026-02-12: Phase 2A Commit 1.1 Merged (Cleanup)
+- **SHA**: `deba991` (Merge to Main)
+- **Tag**: `savepoint/r013-phase2a-commit1.1`
+- **Scope**: Migrated `Phase2A_Protocol.test.js` to canonical `tests/integration/netcode`.
+### 2026-02-12: Phase 2A Commit 2 Merged (Client Wiring)
+- **SHA**: `33e230d` (Reachable on Main)
+- **Tag**: `savepoint/r013-phase2a-commit2`
+- **Scope**: Client Spawn Guard, `SPAWN_MANIFEST`, `SERVER_SNAPSHOT` Mirroring, Input `unitId`.
+- **Tests**: 712 PASS (Clean). +18 New Tests.
+- **Next**: Commit 3 (Integration & Verification).
 
 
 

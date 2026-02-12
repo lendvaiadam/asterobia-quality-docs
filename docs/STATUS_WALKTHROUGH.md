@@ -55,12 +55,16 @@
 - **Verified**: M05 HU-TEST PASS (Host appears in list, disappears after 15s prune).
 - **Previous Step**: M06 (Join Request Handshake) — **CLOSED** (HU-TEST PASS)
 - **Current Step**: M07-NB0 (Phase 0 Scaffolding) — **VERIFIED** (Audit PASS 2026-02-10)
-- **Next Step**: M07-NB1 (Phase 1 Minimal Loop) — **READY**
-- **Focus**: Implement WebSocket Transport and real-time loop.
-- **Fallback Policy**: M06 (Handshake) closure ACCEPTABLE.
+- **Current Step**: **Phase 2A (Option 3: Manifest-Lite)** — **IN PROGRESS**
+    - **Goal:** Strict Server Authority, Scale, Flight.
+    - [x] **Commit 1 (Server Core)**: `GameServer` Manifest/Flight Fields. **MERGED** (SHA: `801b317`).
+    - [x] **Commit 1.1 (Cleanup):** Protocol Test Migration. **MERGED** (SHA: `deba991`).
+    - [x] **Commit 2 (Client Wiring):** Client gates spawn, mirrors snapshot. **MERGED** (SHA: `33e230d`).
+    - [ ] **Commit 3 (Integration)**: End-to-end test.
+- **Fallback Policy**: Phase 1 verification point LOCKED.
 - **CTO Ping #1**: APPROVED (2026-02-10)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
-- **Test State**: Vitest installed. 101 tests passed. 14 empty suites. M06 relying on HU-TEST.
+- **Test State**: Vitest installed. 690 tests passed! (Clean).
 
 
 ---
