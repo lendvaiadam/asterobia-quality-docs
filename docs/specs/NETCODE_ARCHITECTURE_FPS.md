@@ -1,6 +1,6 @@
 # Netcode Architecture Specification: FPS/Combat Layer
-**Version:** 1.0 (Draft)
-**Status:** PROPOSAL - UNDER CRITICAL REVIEW
+**Version:** 1.1 (Phase 2A Implemented)
+**Status:** Phase 0-1 MERGED, Phase 2A IN PROGRESS
 **Reference:** `docs/prompts/CHATGPT_PROMPT_R013_SLICE2_START.md`
 
 ---
@@ -110,11 +110,52 @@ We are moving from a "Simple Peer-to-Peer" model to a "Complex Client-Server" mo
 2.  **Server Scaffold**: `npm init` in `/server`. Configure `package.json` to treat `type: module`.
 3.  **Test Harness**: Create `tests/integration/netcode/setup.js` that loads `Server` and `Client` in the same process.
 
-### Phase 1: Minimal Viable Loop
+### Phase 1: Minimal Viable Loop (MERGED)
 **Goal:** 2 Clients connecting and seeing each other.
 1.  **WebSocket Server**: Simple `ws` server in `server/index.js`.
 2.  **ITransport**: Implement `WebSocketTransport` in Client (mirroring `SupabaseTransport`).
 3.  **Match Loop**: Server accepts `JOIN`, sends `SNAPSHOT` (empty), accepts `INPUT`.
+
+### Phase 2A: Server Authority — "Manifest-Lite" (IN PROGRESS)
+**Goal:** Server is the single source of truth for all entity state. Clients are input senders + render mirrors.
+
+**Authority Model:**
+*   **Server** runs Room with HeadlessUnits at 20Hz. Owns CommandQueue. All sim-state mutations inside `Room._onSimTick()`. Broadcasts compact `SERVER_SNAPSHOT` every tick.
+*   **Clients** (Host AND Guest equally) capture WASD input, send `MOVE_INPUT` commands. Do NOT run `Unit.update()` for authoritative entities. Buffer incoming snapshots, render smooth 60fps via `SnapshotBuffer` interpolation.
+
+**Lifecycle:**
+```
+HOST_ANNOUNCE → Room created (WAITING)
+    → SPAWN_MANIFEST (host sends client entity IDs) → Room.createUnitsFromManifest() → Room.start() (RUNNING)
+    → SERVER_SNAPSHOT broadcast every tick (20Hz)
+    → Guest JOIN_ACK observed → server creates guest HeadlessUnit
+    → MOVE_INPUT routed by transport-authenticated slot → CommandQueue → _onSimTick
+```
+
+**Key Design Decisions:**
+1.  **Manifest-Lite**: Host sends `SPAWN_MANIFEST` with client-provided entity IDs. Server mirrors them 1:1. No server-side entity ID generation for manifest units. Guarantees ID mapping by construction.
+2.  **Transport-Authenticated Identity**: `GameServer._clientSlots: Map<clientId, {roomId, slot}>` populated from server-assigned `client.id` (relay's internal ID). **NEVER** trusts `payload.sourceSlot`.
+3.  **MOVE_INPUT.unitId**: Optional field for multi-unit control. Server routes by `unitId` if present, falls back to `ownerSlot`. Authority check: sender must own the unit.
+4.  **Spawn Suppression**: Client's `_spawnUnitForPlayer()` returns null when `_mirrorMode === true`. Prevents double-spawn in server-authoritative mode.
+5.  **Snapshot Reconciliation**: ID-based mapping (not ownerSlot — N:1 relationship). Creates visual shells for server units missing locally. Stale local units tolerated (not deleted).
+
+**Env Gating:** `PHASE2A=1 node server/index.js` enables `GameServer.wireToRelay()`. Without this, server runs Phase 1 relay-only.
+
+**Latency:** ~150-200ms input-to-visual (RTT + interpolation buffer). Intentionally "heavy/tank-like." Client-side prediction is Phase 2B scope.
+
+**Files:**
+| File | Role |
+|------|------|
+| `server/GameServer.js` | wireToRelay, message routing, _clientSlots |
+| `server/Room.js` | WAITING→RUNNING lifecycle, createUnitsFromManifest, _onSimTick |
+| `server/HeadlessUnit.js` | Spherical movement, applyInput, GROUNDED/AIRBORNE |
+| `src/SimCore/net/SnapshotBuffer.js` | Ring buffer, smooth clock EMA, teleport threshold |
+| `src/Core/Game.js` | Mirror mode, _sendSpawnManifest, snapshot reconciliation |
+| `src/SimCore/multiplayer/SessionManager.js` | sendMoveInput(keys, unitId), SNAPSHOT wiring |
+
+**Testing:** `tests/integration/netcode/phase2a-lifecycle.test.js` — Full GameServer.wireToRelay pipeline via mock relay. No real WebSockets.
+
+**HU Test:** `LAUNCH_HU_TEST_PHASE2A.bat` — 2 tabs with `PHASE2A=1`.
 
 ---
 
