@@ -128,7 +128,9 @@ export class Game {
             }
         } else if (netMode === 'ws') {
             // R013-NB1: WebSocket direct-connect mode
-            const wsUrl = urlParams.get('wsUrl') || 'ws://localhost:3000';
+            // Priority: ?wsUrl= (full URL) > ?wsPort= (localhost shorthand) > default :3000
+            const wsPort = urlParams.get('wsPort');
+            const wsUrl = urlParams.get('wsUrl') || (wsPort ? `ws://localhost:${wsPort}` : 'ws://localhost:3000');
             console.log('[Game] Initializing WebSocket Transport to', wsUrl);
 
             const wsTransport = new WebSocketTransport({ url: wsUrl });

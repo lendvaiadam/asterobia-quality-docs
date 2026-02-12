@@ -1,8 +1,8 @@
 @echo off
 setlocal EnableDelayedExpansion
 echo ===========================================
-echo   ASTEROBIA PHASE 2A HU TEST LAUNCHER
-echo   (Server Authority - Manifest-Lite)
+echo   ASTEROBIA WEBSOCKET TEST LAUNCHER
+echo   (Phase 1 - WS Relay Only)
 echo ===========================================
 echo.
 
@@ -18,7 +18,7 @@ if errorlevel 1 (
     echo [ERROR] Port %WS_PORT% is already in use!
     echo   Another server or previous test may still be running.
     echo   Fix: Close it, or set a different port:
-    echo     set WS_PORT=3001 ^&^& LAUNCH_HU_TEST_PHASE2A.bat
+    echo     set WS_PORT=3001 ^&^& LAUNCH_WS_TEST.bat
     echo.
     pause
     goto :eof
@@ -29,9 +29,9 @@ echo 1. Starting static file server (port 8081)...
 start "Asterobia Static Server" cmd /c "cd /d "%~dp0" && npx http-server . -c-1 -p 8081"
 echo.
 
-REM --- 3. Start WS relay + GameServer with PHASE2A=1 ---
-echo 2. Starting WS server with PHASE2A=1 (port %WS_PORT%)...
-start "Asterobia WS Server (Phase 2A)" cmd /k "cd /d "%~dp0" && set PHASE2A=1 && set PORT=%WS_PORT% && node server/index.js"
+REM --- 3. Start WS relay (Phase 1 only, no PHASE2A) ---
+echo 2. Starting WS relay server (port %WS_PORT%)...
+start "Asterobia WS Server" cmd /k "cd /d "%~dp0" && set PORT=%WS_PORT% && node server/index.js"
 echo.
 
 REM --- 4. Wait for WS port to accept connections ---
@@ -45,42 +45,25 @@ if errorlevel 1 (
 echo    WS server is ready.
 echo.
 
-REM --- 5. Open browser tabs (pass wsPort so client connects to the right server) ---
-echo 4. Opening Host Client (Tab 1)...
+REM --- 5. Open browser tabs ---
+echo 4. Opening Host Client...
 start http://127.0.0.1:8081/game.html?net=ws^&dev=1^&wsPort=%WS_PORT%
 echo.
-echo 5. Opening Guest Client (Tab 2)...
+echo 5. Opening Guest Client...
 start http://127.0.0.1:8081/game.html?net=ws^&dev=1^&wsPort=%WS_PORT%
 echo.
 
 echo ===========================================
-echo   PHASE 2A HU TEST RUNNING
-echo ===========================================
-echo.
-echo   SERVERS:
+echo   TEST RUNNING
 echo   - Static files: http://127.0.0.1:8081
-echo   - WS relay:     ws://127.0.0.1:%WS_PORT%  (PHASE2A=1)
-echo.
-echo   EXPECTED BEHAVIOR:
-echo   - Host: Click HOST GAME, wait for START GAME
-echo   - Guest: Click JOIN GAME, enter room code, JOIN
-echo   - Both: WASD movement should be smooth (interpolated)
-echo   - Both: ~150ms input latency is EXPECTED (no prediction)
-echo   - Both: Units should move on the sphere surface
-echo   - Check 'Asterobia WS Server (Phase 2A)' window for logs
-echo.
-echo   PASS CRITERIA:
-echo   - No visible snapping or teleporting at normal speed
-echo   - Both tabs see each other's movement
-echo   - Server window shows SPAWN_MANIFEST received
-echo   - Server window shows MOVE_INPUT routing
-echo.
+echo   - WS relay:     ws://127.0.0.1:%WS_PORT%
+echo   Check 'Asterobia WS Server' window for logs.
 echo ===========================================
 echo   Press any key to stop all servers and exit.
 pause >nul
 
-REM --- Cleanup: kill server processes ---
-taskkill /FI "WINDOWTITLE eq Asterobia WS Server (Phase 2A)" /F >nul 2>&1
+REM --- Cleanup ---
+taskkill /FI "WINDOWTITLE eq Asterobia WS Server" /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq Asterobia Static Server" /F >nul 2>&1
 echo Servers stopped.
 endlocal

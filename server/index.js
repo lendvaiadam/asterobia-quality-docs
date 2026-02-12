@@ -5,8 +5,9 @@
  * Phase 2A (PHASE2A=1): Relay + Authoritative GameServer.
  *
  * Usage:
- *   node server/index.js              # Phase 1 relay only
+ *   node server/index.js              # Phase 1 relay only (port 3000)
  *   PHASE2A=1 node server/index.js    # Phase 2A server authority
+ *   PORT=3001 node server/index.js    # Custom port
  */
 
 import { WsRelay } from './WsRelay.js';
@@ -17,6 +18,19 @@ const PHASE2A = process.env.PHASE2A === '1';
 
 const relay = new WsRelay({ port: PORT });
 relay.start();
+
+// Handle port-in-use: fail fast with clear instructions
+relay.wss.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`\n[ERROR] Port ${PORT} is already in use.`);
+        console.error('  Another server or previous instance may still be running.');
+        console.error(`  Fix: Close the other process, or use a different port:`);
+        console.error(`    set PORT=3001 && node server/index.js          (Windows)`);
+        console.error(`    PORT=3001 node server/index.js                 (Linux/Mac)\n`);
+        process.exit(1);
+    }
+    throw err;
+});
 
 if (PHASE2A) {
     const server = new GameServer({ tickRate: 20 });

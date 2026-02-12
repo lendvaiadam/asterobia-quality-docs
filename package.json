@@ -2,9 +2,11 @@
     "name": "spherical-planet-rts",
     "version": "1.0.0",
     "description": "A spherical planet RTS game",
+    "type": "module",
     "main": "src/Main.js",
     "scripts": {
         "start": "npx http-server . -c-1 -p 8081",
+        "start:server": "node server/index.js",
         "test": "vitest"
     },
     "keywords": [],
@@ -15,6 +17,7 @@
         "vitest": "^4.0.18"
     },
     "dependencies": {
-        "@supabase/supabase-js": "^2.93.3"
+        "@supabase/supabase-js": "^2.93.3",
+        "ws": "^8.19.0"
     }
 }
