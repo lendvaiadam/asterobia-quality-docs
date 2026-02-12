@@ -128,9 +128,9 @@ export class Game {
             }
         } else if (netMode === 'ws') {
             // R013-NB1: WebSocket direct-connect mode
-            // Priority: ?wsUrl= (full URL) > ?wsPort= (localhost shorthand) > default :3000
-            const wsPort = urlParams.get('wsPort');
-            const wsUrl = urlParams.get('wsUrl') || (wsPort ? `ws://localhost:${wsPort}` : 'ws://localhost:3000');
+            // Default: same port as page (8081). Override: ?wsPort= or ?wsUrl=
+            const wsPort = urlParams.get('wsPort') || window.location.port || '8081';
+            const wsUrl = urlParams.get('wsUrl') || `ws://localhost:${wsPort}`;
             console.log('[Game] Initializing WebSocket Transport to', wsUrl);
 
             const wsTransport = new WebSocketTransport({ url: wsUrl });

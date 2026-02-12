@@ -42,14 +42,14 @@ import { TransportBase, TransportState } from './ITransport.js';
 export class WebSocketTransport extends TransportBase {
     /**
      * @param {Object} [options]
-     * @param {string} [options.url='ws://localhost:3000'] - WebSocket server URL
+     * @param {string} [options.url='ws://localhost:8081'] - WebSocket server URL
      * @param {number} [options.connectTimeoutMs=5000] - Max wait for WS connection
      */
     constructor(options = {}) {
         super();
 
         /** @type {string} WebSocket server URL */
-        this._url = options.url || 'ws://localhost:3000';
+        this._url = options.url || 'ws://localhost:8081';
 
         /** @type {number} Connection timeout in ms */
         this._connectTimeoutMs = options.connectTimeoutMs || 5000;

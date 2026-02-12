@@ -1,30 +1,91 @@
 /**
  * Asterobia Server - Entry Point
  *
- * Phase 1 (default): WS Channel Relay only.
- * Phase 2A (PHASE2A=1): Relay + Authoritative GameServer.
+ * Combined HTTP static file server + WebSocket relay on a SINGLE port.
+ * Default port: 8081 (same as the old http-server, so bookmarks work).
+ *
+ * Phase 1 (default): Static files + WS Channel Relay.
+ * Phase 2A (PHASE2A=1): Static files + Relay + Authoritative GameServer.
  *
  * Usage:
- *   node server/index.js              # Phase 1 relay only (port 3000)
- *   PHASE2A=1 node server/index.js    # Phase 2A server authority
- *   PORT=3001 node server/index.js    # Custom port
+ *   node server/index.js                          # Phase 1 on :8081
+ *   set PHASE2A=1 && node server/index.js         # Phase 2A on :8081
+ *   set PORT=9000 && node server/index.js         # Custom port
  */
 
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WsRelay } from './WsRelay.js';
 import { GameServer } from './GameServer.js';
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '..');
+
+const PORT = parseInt(process.env.PORT || '8081', 10);
 const PHASE2A = process.env.PHASE2A === '1';
 
-const relay = new WsRelay({ port: PORT });
-relay.start();
+// ── Minimal static file server ─────────────────────────────────
+const MIME = {
+    '.html': 'text/html',
+    '.js':   'application/javascript',
+    '.mjs':  'application/javascript',
+    '.css':  'text/css',
+    '.json': 'application/json',
+    '.png':  'image/png',
+    '.jpg':  'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif':  'image/gif',
+    '.svg':  'image/svg+xml',
+    '.ico':  'image/x-icon',
+    '.glb':  'model/gltf-binary',
+    '.gltf': 'model/gltf+json',
+    '.woff2':'font/woff2',
+    '.mp3':  'audio/mpeg',
+    '.ogg':  'audio/ogg',
+    '.wav':  'audio/wav',
+    '.wasm': 'application/wasm',
+};
 
-// Handle port-in-use: fail fast with clear instructions
-relay.wss.on('error', (err) => {
+function serveStatic(req, res) {
+    const urlPath = (req.url || '/').split('?')[0];
+    let filePath = path.join(ROOT, urlPath === '/' ? '/game.html' : urlPath);
+
+    // Security: prevent path traversal
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(ROOT)) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+    }
+
+    fs.stat(resolved, (statErr, stats) => {
+        if (statErr || !stats.isFile()) {
+            res.writeHead(404);
+            res.end('Not Found');
+            return;
+        }
+        const ext = path.extname(resolved).toLowerCase();
+        res.writeHead(200, {
+            'Content-Type': MIME[ext] || 'application/octet-stream',
+            'Cache-Control': 'no-cache',
+        });
+        fs.createReadStream(resolved).pipe(res);
+    });
+}
+
+// ── HTTP server + WS relay on one port ─────────────────────────
+const httpServer = http.createServer(serveStatic);
+
+// Register error handler BEFORE listen() and startOnServer() —
+// EADDRINUSE fires synchronously on listen(); ws re-emits it on its
+// WebSocketServer. If we register after, it becomes an unhandled error.
+httpServer.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
         console.error(`\n[ERROR] Port ${PORT} is already in use.`);
         console.error('  Another server or previous instance may still be running.');
-        console.error(`  Fix: Close the other process, or use a different port:`);
+        console.error('  Fix: Close the other process, or use a different port:');
         console.error(`    set PORT=3001 && node server/index.js          (Windows)`);
         console.error(`    PORT=3001 node server/index.js                 (Linux/Mac)\n`);
         process.exit(1);
@@ -32,29 +93,29 @@ relay.wss.on('error', (err) => {
     throw err;
 });
 
+const relay = new WsRelay();
+relay.startOnServer(httpServer);
+
+httpServer.listen(PORT, () => {
+    const mode = PHASE2A ? 'Phase 2A - Server Authority' : 'Phase 1 - WS Relay';
+    console.log(`[Asterobia Server] ${mode}`);
+    console.log(`[Asterobia Server] http + ws on http://localhost:${PORT}`);
+    console.log('[Asterobia Server] Press Ctrl+C to stop');
+});
+
+// ── Phase 2A: wire authoritative GameServer ────────────────────
 if (PHASE2A) {
-    const server = new GameServer({ tickRate: 20 });
-    server.wireToRelay(relay);
-    server.start();
-    console.log('[Asterobia Server] Phase 2A - Server Authority + WS Relay');
-} else {
-    console.log('[Asterobia Server] Phase 1 - WS Channel Relay');
+    const gameServer = new GameServer({ tickRate: 20 });
+    gameServer.wireToRelay(relay);
+    gameServer.start();
 }
 
-console.log(`[Asterobia Server] Listening on ws://localhost:${PORT}`);
-console.log('[Asterobia Server] Press Ctrl+C to stop');
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-    console.log('\n[Asterobia Server] Shutting down...');
+// ── Graceful shutdown ──────────────────────────────────────────
+function shutdown(signal) {
+    console.log(`\n[Asterobia Server] Shutting down (${signal})...`);
     relay.stop().then(() => {
-        process.exit(0);
+        httpServer.close(() => process.exit(0));
     });
-});
-
-process.on('SIGTERM', () => {
-    console.log('\n[Asterobia Server] Shutting down (SIGTERM)...');
-    relay.stop().then(() => {
-        process.exit(0);
-    });
-});
+}
+process.on('SIGINT',  () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

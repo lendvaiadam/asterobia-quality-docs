@@ -159,36 +159,23 @@ HOST_ANNOUNCE → Room created (WAITING)
 
 **Local Run Commands:**
 ```bash
-# Phase 1 (relay only):
-node server/index.js                    # WS relay on ws://localhost:3000
-npx http-server . -c-1 -p 8081         # Static files on http://localhost:8081
+# Single combined server: static files + WS relay on ONE port (8081).
+node server/index.js                              # Phase 1, port 8081
+set PHASE2A=1 && node server/index.js             # Phase 2A, port 8081
+set PORT=9000 && node server/index.js             # Custom port
+npm run start:server                              # Shortcut for above
+
 # Open: http://localhost:8081/game.html?net=ws&dev=1
 
-# Phase 2A (server authority):
-set PHASE2A=1 && node server/index.js   # WS relay + GameServer (Windows)
-PHASE2A=1 node server/index.js          # (Linux/Mac)
-
-# Custom port (if 3000 is busy):
-set PORT=3001 && node server/index.js   # Server on port 3001
-# Open: http://localhost:8081/game.html?net=ws&dev=1&wsPort=3001
-
-# npm shortcuts:
-npm run start:server                    # WS server (port 3000)
-npm start                               # Static file server (port 8081)
-
-# Windows launcher BATs (start both servers + 2 browser tabs):
-LAUNCH_WS_TEST.bat                      # Phase 1
-LAUNCH_HU_TEST_PHASE2A.bat              # Phase 2A
-# Override port: set WS_PORT=3001 && LAUNCH_HU_TEST_PHASE2A.bat
+# Windows launcher BATs (start server + 2 browser tabs):
+LAUNCH_WS_TEST.bat                                # Phase 1
+LAUNCH_HU_TEST_PHASE2A.bat                        # Phase 2A
+# Override port: set PORT=9000 && LAUNCH_HU_TEST_PHASE2A.bat
 ```
 
-**Ports:**
-| Service | Port | Configurable via |
-|---------|------|------------------|
-| Static files (http-server) | 8081 | n/a |
-| WS relay (WsRelay) | 3000 | `PORT` env var, `WS_PORT` in BAT |
+**Port:** Default `8081` (HTTP + WS on same port). Override with `PORT` env var.
 
-**Client WS URL:** Default `ws://localhost:3000`. Override: `?wsPort=3001` (shorthand) or `?wsUrl=ws://host:port` (full URL).
+**Client WS URL:** Auto-detects from `window.location.port`. Override: `?wsPort=9000` or `?wsUrl=ws://host:port`.
 
 ---
 
