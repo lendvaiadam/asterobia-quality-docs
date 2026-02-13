@@ -25,6 +25,7 @@ import { ServerTerrain } from './ServerTerrain.js';
 import { PhysicsWorld } from './PhysicsWorld.js';
 import { TerrainColliderManager } from './TerrainColliderManager.js';
 import { PhysicsEventService } from './PhysicsEventService.js';
+import { CollisionService } from './CollisionService.js';
 import { Vec3 } from './SphereMath.js';
 
 /** @typedef {'WAITING' | 'RUNNING' | 'ENDED'} RoomState */
@@ -103,6 +104,9 @@ export class Room {
 
         /** @type {PhysicsEventService|null} Gameplay impulse/event service (null until physics init) */
         this.physicsEvents = null;
+
+        /** @type {CollisionService|null} Kinematic collision + mine service (null until physics init) */
+        this.collisions = null;
     }
 
     /**
@@ -208,6 +212,7 @@ export class Room {
                 this.physics, this.terrain, this._physicsOptions.terrain
             );
             this.physicsEvents = new PhysicsEventService(this._physicsOptions.events);
+            this.collisions = new CollisionService(this._physicsOptions.collisions);
         }
 
         this.state = 'RUNNING';
@@ -315,6 +320,13 @@ export class Room {
 
             // Pre-step: check slope triggers (may transition units to DYNAMIC)
             this._checkSlopeTriggers();
+
+            // Pre-step: kinematic proximity collisions (unit↔unit, unit↔obstacle)
+            if (this.collisions) {
+                this.collisions.checkKinematicCollisions(this.units, this.physics);
+                this.collisions.checkObstacleCollisions(this.units, this._obstacles, this.physics);
+                this.collisions.checkMineContacts(this.units, this.physics, this.physicsEvents);
+            }
 
             // Pre-step: sync KINEMATIC unit positions TO their rigid bodies
             for (const unit of this.units) {
@@ -431,6 +443,29 @@ export class Room {
         const unit = this.units.find(u => u && u.id === unitId);
         if (!unit) return null;
         return this.triggerExplosion(unit.position, radius, strength);
+    }
+
+    /**
+     * Place a mine at a world position.
+     * No-op if physics is not enabled.
+     *
+     * @param {{ x: number, y: number, z: number }} position
+     * @param {Object} [options] - Override mine defaults (triggerRadius, upwardImpulse, etc.)
+     * @returns {number|null} Mine ID, or null
+     */
+    addMine(position, options) {
+        if (!this.collisions) return null;
+        return this.collisions.addMine(position, options);
+    }
+
+    /**
+     * Remove a mine by ID.
+     * @param {number} id
+     * @returns {boolean}
+     */
+    removeMine(id) {
+        if (!this.collisions) return false;
+        return this.collisions.removeMine(id);
     }
 
     /**
