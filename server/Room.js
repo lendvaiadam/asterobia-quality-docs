@@ -24,6 +24,7 @@ import { HeadlessUnit } from './HeadlessUnit.js';
 import { ServerTerrain } from './ServerTerrain.js';
 import { PhysicsWorld } from './PhysicsWorld.js';
 import { TerrainColliderManager } from './TerrainColliderManager.js';
+import { PhysicsEventService } from './PhysicsEventService.js';
 import { Vec3 } from './SphereMath.js';
 
 /** @typedef {'WAITING' | 'RUNNING' | 'ENDED'} RoomState */
@@ -99,6 +100,9 @@ export class Room {
 
         /** @type {number} Hard cap on static obstacles */
         this._maxObstacles = options.maxObstacles || 64;
+
+        /** @type {PhysicsEventService|null} Gameplay impulse/event service (null until physics init) */
+        this.physicsEvents = null;
     }
 
     /**
@@ -203,6 +207,7 @@ export class Room {
             this.terrainColliders = new TerrainColliderManager(
                 this.physics, this.terrain, this._physicsOptions.terrain
             );
+            this.physicsEvents = new PhysicsEventService(this._physicsOptions.events);
         }
 
         this.state = 'RUNNING';
@@ -382,6 +387,50 @@ export class Room {
         // Tag command with source slot for authority checks
         command.sourceSlot = slot;
         this.commandQueue.enqueue(command);
+    }
+
+    // ========================================
+    // Gameplay physics API (delegates to PhysicsEventService)
+    // ========================================
+
+    /**
+     * Trigger a radial explosion at a world position.
+     * All KINEMATIC units within radius are knocked back with linear falloff.
+     *
+     * No-op if physics is not enabled.
+     *
+     * @param {{ x: number, y: number, z: number }} center - World position of explosion
+     * @param {number} radius - Blast radius (world units)
+     * @param {number} strength - Base impulse magnitude at center
+     * @returns {import('./PhysicsEventService.js').ImpulseResult[]} Affected units
+     */
+    triggerExplosion(center, radius, strength) {
+        if (!this.physicsEvents || !this.physics) return [];
+
+        return this.physicsEvents.applyRadialImpulse({
+            center,
+            radius,
+            strength,
+            units: this.units,
+            physicsWorld: this.physics
+        });
+    }
+
+    /**
+     * Dev/test verification hook: trigger an explosion centered on a unit.
+     * Uses moderate defaults (radius=8, strength=6) for visual verification.
+     *
+     * Server-only. No protocol message — callable from test harness or console.
+     *
+     * @param {number} unitId - Target unit ID (explosion centered on this unit)
+     * @param {number} [radius=8] - Blast radius
+     * @param {number} [strength=6] - Impulse strength
+     * @returns {import('./PhysicsEventService.js').ImpulseResult[]|null} Results, or null if unit not found
+     */
+    _devTriggerExplosion(unitId, radius = 8, strength = 6) {
+        const unit = this.units.find(u => u && u.id === unitId);
+        if (!unit) return null;
+        return this.triggerExplosion(unit.position, radius, strength);
     }
 
     /**
