@@ -46,6 +46,21 @@ export class HeadlessUnit {
     /** @type {number} Consecutive ticks below threshold to trigger settle */
     static SETTLE_TICK_COUNT = 10;
 
+    /** @type {number} Slope angle threshold for rollover trigger (radians). Default ~1° */
+    static SLOPE_THRESHOLD_RAD = (1 * Math.PI) / 180;
+
+    /** @type {number} Consecutive ticks on steep slope before entering DYNAMIC */
+    static SLOPE_DEBOUNCE_TICKS = 3;
+
+    /** @type {number} Impulse magnitude for slope-triggered rollover (m/s) */
+    static SLOPE_IMPULSE_STRENGTH = 2.0;
+
+    /** @type {number} Impulse magnitude for collision-triggered knockback (m/s) */
+    static COLLISION_IMPULSE_STRENGTH = 5.0;
+
+    /** @type {number} Minimum ticks in KINEMATIC after exiting DYNAMIC before re-triggering */
+    static REENTRY_COOLDOWN_TICKS = 20;
+
     /**
      * @param {number} id - Deterministic entity ID (from IdGenerator or manifest)
      * @param {number} ownerSlot - Player slot that owns this unit (economic identity)
@@ -115,6 +130,12 @@ export class HeadlessUnit {
 
         /** @type {number} Consecutive ticks with velocity below settle threshold */
         this._settleCounter = 0;
+
+        /** @type {number} Consecutive ticks on steep slope (for debounce) */
+        this._slopeTriggerCounter = 0;
+
+        /** @type {number} Cooldown ticks remaining after exiting DYNAMIC */
+        this._reentryCooldown = 0;
     }
 
     /**
@@ -405,6 +426,8 @@ export class HeadlessUnit {
 
         this.physicsMode = 'KINEMATIC';
         this._settleCounter = 0;
+        this._slopeTriggerCounter = 0;
+        this._reentryCooldown = HeadlessUnit.REENTRY_COOLDOWN_TICKS;
 
         // Snap to terrain surface, reset vertical state
         this.mode = 'GROUNDED';
@@ -416,6 +439,45 @@ export class HeadlessUnit {
 
         // Derive heading from position (face "north" in tangent plane)
         this._updateOrientation();
+    }
+
+    /**
+     * Check terrain slope at current position and update debounce counter.
+     * Returns a down-slope impulse vector if the trigger threshold is met,
+     * or null if slope is safe / on cooldown / already DYNAMIC.
+     *
+     * @returns {{ x: number, y: number, z: number } | null} Impulse vector or null
+     */
+    checkSlopeTrigger() {
+        if (this.physicsMode === 'DYNAMIC') return null;
+        if (this._reentryCooldown > 0) {
+            this._reentryCooldown--;
+            return null;
+        }
+        if (!this.terrain) return null;
+
+        // Compute slope: angle between radial direction and terrain surface normal
+        const radial = Vec3.normalize(this.position);
+        const normal = Vec3.normalize(this.terrain.getNormalAt(this.position));
+        const dot = Math.min(1, Math.max(-1, Vec3.dot(radial, normal)));
+        const slopeAngle = Math.acos(dot); // 0 = flat, PI/2 = vertical
+
+        if (slopeAngle > HeadlessUnit.SLOPE_THRESHOLD_RAD) {
+            this._slopeTriggerCounter++;
+            if (this._slopeTriggerCounter >= HeadlessUnit.SLOPE_DEBOUNCE_TICKS) {
+                this._slopeTriggerCounter = 0;
+                // Down-slope direction: project gravity direction onto tangent plane
+                const downSlope = Vec3.normalize(Vec3.projectOnPlane(
+                    Vec3.scale(radial, -1), // gravity direction (toward center)
+                    normal
+                ));
+                return Vec3.scale(downSlope, HeadlessUnit.SLOPE_IMPULSE_STRENGTH);
+            }
+        } else {
+            this._slopeTriggerCounter = 0;
+        }
+
+        return null;
     }
 
     /**

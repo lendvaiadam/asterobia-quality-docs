@@ -24,6 +24,7 @@ import { HeadlessUnit } from './HeadlessUnit.js';
 import { ServerTerrain } from './ServerTerrain.js';
 import { PhysicsWorld } from './PhysicsWorld.js';
 import { TerrainColliderManager } from './TerrainColliderManager.js';
+import { Vec3 } from './SphereMath.js';
 
 /** @typedef {'WAITING' | 'RUNNING' | 'ENDED'} RoomState */
 
@@ -83,6 +84,21 @@ export class Room {
 
         /** @type {TerrainColliderManager|null} Terrain collider patch manager (null until initialized) */
         this.terrainColliders = null;
+
+        /**
+         * Body handle → HeadlessUnit lookup (populated when rigid bodies are attached).
+         * @type {Map<number, HeadlessUnit>}
+         */
+        this._bodyToUnit = new Map();
+
+        /**
+         * Static obstacle registry (rocks, etc). Body handle → obstacle info.
+         * @type {Map<number, { body: import('@dimforge/rapier3d-compat').RigidBody, position: {x:number,y:number,z:number} }>}
+         */
+        this._obstacles = new Map();
+
+        /** @type {number} Hard cap on static obstacles */
+        this._maxObstacles = options.maxObstacles || 64;
     }
 
     /**
@@ -220,6 +236,8 @@ export class Room {
         this.simLoop.onRender = null;
 
         // Phase 3: Free Rapier resources
+        this._obstacles.clear();
+        this._bodyToUnit.clear();
         if (this.terrainColliders) {
             this.terrainColliders.destroyAll();
             this.terrainColliders = null;
@@ -290,12 +308,18 @@ export class Room {
                 }
             }
 
+            // Pre-step: check slope triggers (may transition units to DYNAMIC)
+            this._checkSlopeTriggers();
+
             // Pre-step: sync KINEMATIC unit positions TO their rigid bodies
             for (const unit of this.units) {
                 unit.syncToRigidBody();
             }
 
             this.physics.step(dtSec);
+
+            // Post-step: handle collision events (may transition units to DYNAMIC)
+            this._handleCollisionEvents();
 
             // Post-step: sync DYNAMIC unit positions FROM their rigid bodies + settle check
             for (const unit of this.units) {
@@ -372,7 +396,125 @@ export class Room {
         if (!this.physics) return;
 
         const body = this.physics.createKinematicBody(unit.position);
-        this.physics.addBallCollider(body, 0.5);
+        this.physics.addBallCollider(body, 0.5, { activeEvents: true });
         unit.rigidBody = body;
+        this._bodyToUnit.set(body.handle, unit);
+    }
+
+    /**
+     * Add a static obstacle (rock) at a position on the terrain.
+     * Creates a fixed body with a ball collider. Collision events enabled.
+     * Returns the body handle for later removal, or null if at cap / no physics.
+     *
+     * @param {{ x: number, y: number, z: number }} position - World position
+     * @param {number} [radius=1.0] - Collider radius
+     * @returns {number|null} Body handle, or null
+     */
+    addObstacle(position, radius = 1.0) {
+        if (!this.physics) return null;
+        if (this._obstacles.size >= this._maxObstacles) return null;
+
+        const body = this.physics.createFixedBody(position);
+        this.physics.addBallCollider(body, radius, { activeEvents: true });
+        this._obstacles.set(body.handle, { body, position: { ...position } });
+        return body.handle;
+    }
+
+    /**
+     * Remove a static obstacle by body handle.
+     * @param {number} handle
+     */
+    removeObstacle(handle) {
+        const info = this._obstacles.get(handle);
+        if (!info || !this.physics) return;
+        this.physics.removeBody(info.body);
+        this._obstacles.delete(handle);
+    }
+
+    /**
+     * Check slope triggers for all KINEMATIC units. If slope exceeds threshold
+     * for enough consecutive ticks, transition to DYNAMIC with down-slope impulse.
+     *
+     * @private
+     */
+    _checkSlopeTriggers() {
+        for (const unit of this.units) {
+            const impulse = unit.checkSlopeTrigger();
+            if (impulse) {
+                unit.enterDynamic(this.physics, impulse);
+            }
+        }
+    }
+
+    /**
+     * Drain Rapier collision events and trigger DYNAMIC transitions for
+     * unit-unit and unit-obstacle collisions.
+     *
+     * @private
+     */
+    _handleCollisionEvents() {
+        this.physics.drainCollisionEvents((handle1, handle2, started) => {
+            if (!started) return; // Only handle collision start
+
+            const body1 = this.physics.getBodyByColliderHandle(handle1);
+            const body2 = this.physics.getBodyByColliderHandle(handle2);
+            if (!body1 || !body2) return;
+
+            const unitA = this._bodyToUnit.get(body1.handle);
+            const unitB = this._bodyToUnit.get(body2.handle);
+            const obsA = this._obstacles.get(body1.handle);
+            const obsB = this._obstacles.get(body2.handle);
+
+            if (unitA && unitB) {
+                // Unit-unit collision: mutual knockback
+                this._applyCollisionKnockback(unitA, unitB);
+            } else if (unitA && obsB) {
+                // Unit hits obstacle
+                this._applyObstacleKnockback(unitA, obsB.position);
+            } else if (unitB && obsA) {
+                // Unit hits obstacle (reversed order)
+                this._applyObstacleKnockback(unitB, obsA.position);
+            }
+        });
+    }
+
+    /**
+     * Apply mutual knockback impulse between two colliding units.
+     * @param {HeadlessUnit} unitA
+     * @param {HeadlessUnit} unitB
+     * @private
+     */
+    _applyCollisionKnockback(unitA, unitB) {
+        const sep = Vec3.sub(unitA.position, unitB.position);
+        const len = Vec3.length(sep);
+        if (len < 1e-6) return;
+
+        const dir = Vec3.scale(sep, 1 / len);
+        const strength = HeadlessUnit.COLLISION_IMPULSE_STRENGTH;
+
+        if (unitA.physicsMode === 'KINEMATIC' && unitA._reentryCooldown <= 0) {
+            unitA.enterDynamic(this.physics, Vec3.scale(dir, strength));
+        }
+        if (unitB.physicsMode === 'KINEMATIC' && unitB._reentryCooldown <= 0) {
+            unitB.enterDynamic(this.physics, Vec3.scale(dir, -strength));
+        }
+    }
+
+    /**
+     * Apply knockback impulse from an obstacle collision.
+     * @param {HeadlessUnit} unit
+     * @param {{ x: number, y: number, z: number }} obstaclePos
+     * @private
+     */
+    _applyObstacleKnockback(unit, obstaclePos) {
+        if (unit.physicsMode !== 'KINEMATIC') return;
+        if (unit._reentryCooldown > 0) return;
+
+        const sep = Vec3.sub(unit.position, obstaclePos);
+        const len = Vec3.length(sep);
+        if (len < 1e-6) return;
+
+        const dir = Vec3.scale(sep, 1 / len);
+        unit.enterDynamic(this.physics, Vec3.scale(dir, HeadlessUnit.COLLISION_IMPULSE_STRENGTH));
     }
 }

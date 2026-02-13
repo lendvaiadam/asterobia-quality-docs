@@ -256,6 +256,20 @@ export class PhysicsWorld {
     }
 
     /**
+     * Get the rigid body that owns a collider, by collider handle.
+     * Returns null if handle is invalid or world is destroyed.
+     *
+     * @param {number} colliderHandle - Rapier collider handle
+     * @returns {import('@dimforge/rapier3d-compat').RigidBody|null}
+     */
+    getBodyByColliderHandle(colliderHandle) {
+        if (this._destroyed) return null;
+        const collider = this._world.getCollider(colliderHandle);
+        if (!collider) return null;
+        return collider.parent();
+    }
+
+    /**
      * Get count of rigid bodies currently in the world.
      * @returns {number}
      */
