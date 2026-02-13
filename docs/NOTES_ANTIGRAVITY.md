@@ -404,3 +404,11 @@ Default output: MD files under /quality or /docs.
     - **New Doc**: docs/research/PHYSICS_EVENTS_AUDIT.md.
     - **Guidance**: Use PhysicsEventService, avoid Math.random, handle NaN, test zero-distance.
 - **Status**: **REFERENCE**.
+
+### 2026-02-13: Claude Output Contract (Binding)
+- **SHA**: HEAD (Merged work/r013-claude-output-contract)
+- **Tag**: savepoint/r013-claude-output-contract
+- **Scope**:
+    - **Docs-Only**: Added Section 10 to docs/NOTES_CLAUDE.md.
+    - **Rule**: strict output format (SHA/Diff/Test/HU/Risk only) + Forbidden list.
+- **Status**: **ACTIVE**.

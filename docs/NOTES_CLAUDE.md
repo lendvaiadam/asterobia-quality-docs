@@ -69,3 +69,24 @@
     *   **Risks / Open Questions** (only if real, max ~3)
 *   **Gating Info (Mandatory):** Always provide Branch, Commit SHAs, Test Result Summary, Diffstat, and Compliance Check (YES/NO).
 *   **Wait for Ask:** If more detail is needed, wait to be asked rather than preemptively dumping logs.
+
+## 10. Claude Output Contract (Prompt Budget / Minimal Reporting) (Binding)
+**Status: ENFORCED ALWAYS**
+
+For every implementation update / commit summary, you must output **ONLY**:
+
+### Required (Always)
+*   **Branch + Commit SHA** (Concrete SHAs only, NEVER "HEAD").
+*   **Diffstat + List of touched files**.
+*   **Tests:** Command(s) + PASS count (one line).
+*   **HU Verification Steps** (3–6 bullets max).
+*   **Risks / Open Questions** (1–3 bullets max).
+*   **Changes:** Explicit callout if any defaults/flags/caps changed.
+
+### Forbidden (Do NOT Output)
+*   Tool logs (Bash/Explore/Read/Write traces).
+*   Long narrative / redundant explanations.
+*   Speculative arithmetic or "I think" recounting.
+*   Multi-paragraph decision essays (unless explicitly requested).
+
+> **Reminder:** Concise answers preserve context; prioritize code quality, then brevity.
