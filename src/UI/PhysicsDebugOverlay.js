@@ -140,7 +140,13 @@ export class PhysicsDebugOverlay {
      * @private
      */
     _renderUnits(units, headerText) {
+        const game = this.game;
+        const sm = game.sessionManager;
+        const snapCount = sm?._debugCounters?.serverSnapshotRecvCount || 0;
+        const session = sm?._sessionChannel ? 'YES' : 'NO';
+        const mirror = game._mirrorMode ? 'YES' : 'NO';
         let html = `<div style="color:#888">${headerText}</div>`;
+        html += `<div style="color:#666">session:${session} mirror:${mirror} snaps:${snapCount}</div>`;
 
         for (const u of units) {
             const isDynamic = u.physicsMode === 'DYNAMIC';
