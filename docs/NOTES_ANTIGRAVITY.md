@@ -376,3 +376,13 @@ Default output: MD files under /quality or /docs.
     - **No Narratives**: Forbidden long filler.
     - **Format**: Decision, Changes, Verification, Risks.
     - **Gating**: Mandatory SHAs and Diffstats.
+
+### 2026-02-13: ChatGPT Prompt Budget Rules (Binding)
+- **SHA**: `HEAD`
+- **Tag**: `savepoint/r013-chatgpt-prompt-budget`
+- **Action**: Updated `docs/NOTES_CHATGPT.md` + `docs/SYSTEM_OVERVIEW.md`.
+- **Rules**:
+    - **No Narratives**: Concise prompts only.
+    - **Minimal Structure**: Anchor -> Mission -> Non-negotiables -> Deliverables -> Stop.
+    - **One Ask**: Don't bundle optional requests.
+    - **Pull Don't Push**: Wait for specific requests before expanding.

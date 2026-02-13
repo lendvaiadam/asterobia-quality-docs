@@ -24,6 +24,11 @@ The technical core is a **Fixed-Timestep, Host-Authoritative, Deterministic SimC
 3.  **Read Your Operating Rules**: `docs/NOTES_CLAUDE.md`.
 4.  **Follow Workflow**: `docs/AI_WORKFLOW.md`.
 
+### 🧠 If you are PLANNING (ChatGPT/Gemini)
+1.  **Read Your Rules**: `docs/NOTES_CHATGPT.md`.
+2.  **Check Roadmap**: `docs/MULTIPLAYER_ROADMAP_R013.md`.
+
+
 ### 🔍 If you are AUDITING (Antigravity)
 1.  **Check Quality Gates**: `docs/IMPLEMENTATION_GATES.md`.
 2.  **Review Logs**: `docs/BUGLIST.md`, `quality/NETCODE_READINESS_AUDIT.md`.

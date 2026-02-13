@@ -209,3 +209,15 @@ Purpose:
 - **Releases**: Check `docs/RELEASE_PLAN.md`. Prompt for Release Verification when milestone is near.
 - **Prompt Delivery**: Output generated prompts **directly in chat** (paste-ready). Do not require Ádám to open MAILBOX.
 
+
+## ChatGPT → Claude Prompt Budget (Binding)
+*   **Conciseness:** Claude prompts must be concise to preserve context budget.
+*   **No Narratives:** Never write long narrative prompts. No filler, no repeated restatement.
+*   **Minimal Structure:**
+    *   **Anchors:** Main HEAD SHA + Savepoint Tag.
+    *   **Mission:** 1–3 sentences.
+    *   **Non-negotiables:** Short bullets.
+    *   **Deliverables:** Commands / HU-Test logic.
+    *   **STOP Condition:** explicit.
+*   **One Ask:** Prefer one ask per message. Avoid bundling optional extras.
+*   **Pull, Don't Push:** If more detail is needed, request it explicitly rather than pre-emptively expanding the prompt.
