@@ -453,7 +453,16 @@ export class Room {
     _devTriggerExplosion(unitId, radius = 8, strength = 6) {
         const unit = this.units.find(u => u && u.id === unitId);
         if (!unit) return null;
-        return this.triggerExplosion(unit.position, radius, strength);
+        if (!this.physics) return null;
+
+        // Direct upward impulse on target unit (radial blast skips zero-distance)
+        const up = Vec3.normalize(unit.position);
+        const impulse = Vec3.scale(up, strength);
+        unit.enterDynamic(this.physics, impulse);
+
+        // Also blast nearby units (other units within radius)
+        const results = this.triggerExplosion(unit.position, radius, strength);
+        return results;
     }
 
     /**
