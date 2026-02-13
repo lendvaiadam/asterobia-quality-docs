@@ -1,25 +1,14 @@
 /**
- * MirrorTunerOverlay — Always-visible debug overlay for mirror mode interpolation tuning.
+ * MirrorTunerOverlay — Always-visible draggable debug overlay for mirror mode tuning.
  *
- * Renders directly on screen (bottom-left) without any menu toggle.
+ * Appears centered on screen. Draggable by its title bar.
  * Auto-shows when mirror mode activates in dev mode.
- *
- * Controls:
- *   - Smooth Lerp ON/OFF toggle
- *   - Interp Delay slider (0–300ms)
- *   - Max Extrap slider (0–200ms)
- *   - EMA Alpha slider (0.01–1.0)
- *
- * Live stats (updated every 100ms):
- *   - Buffer size, underflow count, highest tick
- *   - Current alpha, smoothed clock offset
- *   - Arrival interval mean [min–max]
  */
 
+import { makeDraggable } from './makeDraggable.js';
+
 export class MirrorTunerOverlay {
-    /**
-     * @param {Object} game - Game instance (needs _snapshotBuffer, _mirrorLerpEnabled)
-     */
+    /** @param {Object} game */
     constructor(game) {
         this.game = game;
         this._interval = null;
@@ -34,58 +23,73 @@ export class MirrorTunerOverlay {
         el.id = 'mirror-tuner-overlay';
         el.style.cssText = `
             position: fixed;
-            bottom: 12px;
-            left: 12px;
-            background: rgba(0,0,0,0.88);
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.92);
             color: #0f0;
             font-family: 'Consolas','Monaco',monospace;
             font-size: 12px;
-            padding: 10px 14px;
+            padding: 0;
             border: 1px solid #0ff;
             border-radius: 6px;
             z-index: 16000;
-            min-width: 260px;
-            box-shadow: 0 2px 12px rgba(0,255,255,0.15);
+            min-width: 270px;
+            box-shadow: 0 4px 20px rgba(0,255,255,0.25);
             user-select: none;
         `;
 
-        // Title
-        const title = document.createElement('div');
-        title.style.cssText = 'font-weight:bold; color:#0ff; margin-bottom:8px; font-size:13px;';
-        title.textContent = 'MIRROR TUNER';
-        el.appendChild(title);
+        // Title bar (drag handle)
+        const titleBar = document.createElement('div');
+        titleBar.style.cssText = `
+            background: rgba(0,255,255,0.15);
+            padding: 6px 12px;
+            border-radius: 5px 5px 0 0;
+            border-bottom: 1px solid #0aa;
+            font-weight: bold; color: #0ff; font-size: 13px;
+            display: flex; justify-content: space-between; align-items: center;
+        `;
+        titleBar.innerHTML = '<span>MIRROR TUNER</span><span style="color:#0aa;font-size:10px;">drag to move</span>';
+        el.appendChild(titleBar);
+
+        // Content area
+        const content = document.createElement('div');
+        content.style.cssText = 'padding: 10px 12px;';
 
         // Toggle: Smooth Lerp
-        this._lerpBtn = this._addToggle(el, 'Smooth Lerp', true, (val) => {
+        this._addToggle(content, 'Smooth Lerp', true, (val) => {
             this.game._mirrorLerpEnabled = val;
         });
 
         // Slider: interpDelayMs
-        this._addSlider(el, 'Interp Delay', 0, 300, 10, 100, 'ms', (val) => {
+        this._addSlider(content, 'Interp Delay', 0, 300, 10, 100, 'ms', (val) => {
             if (this.game._snapshotBuffer) this.game._snapshotBuffer.interpDelayMs = val;
         });
 
         // Slider: maxExtrapolateMs
-        this._addSlider(el, 'Max Extrap', 0, 200, 10, 0, 'ms', (val) => {
+        this._addSlider(content, 'Max Extrap', 0, 200, 10, 0, 'ms', (val) => {
             if (this.game._snapshotBuffer) this.game._snapshotBuffer._maxExtrapolateMs = val;
         });
 
         // Slider: emaAlpha
-        this._addSlider(el, 'EMA Alpha', 0.01, 1.0, 0.01, 0.1, '', (val) => {
+        this._addSlider(content, 'EMA Alpha', 0.01, 1.0, 0.01, 0.1, '', (val) => {
             if (this.game._snapshotBuffer) this.game._snapshotBuffer._emaAlpha = val;
         });
 
-        // Stats area
+        // Stats separator
         const sep = document.createElement('div');
         sep.style.cssText = 'border-top:1px dashed #555; margin:8px 0 6px 0;';
-        el.appendChild(sep);
+        content.appendChild(sep);
 
         this._statsEl = document.createElement('div');
         this._statsEl.style.cssText = 'font-size:11px; line-height:1.6; color:#0a0;';
-        el.appendChild(this._statsEl);
+        content.appendChild(this._statsEl);
 
+        el.appendChild(content);
         this._el = el;
         document.body.appendChild(el);
+
+        // Make draggable via title bar
+        makeDraggable(el, titleBar);
 
         // Start live update
         this._interval = setInterval(() => this._updateStats(), 100);
@@ -113,14 +117,9 @@ export class MirrorTunerOverlay {
             `;
         };
         applyStyle();
-        btn.addEventListener('click', () => {
-            state = !state;
-            applyStyle();
-            onChange(state);
-        });
+        btn.addEventListener('click', () => { state = !state; applyStyle(); onChange(state); });
         row.appendChild(btn);
         parent.appendChild(row);
-        return btn;
     }
 
     /** @private */
@@ -130,25 +129,19 @@ export class MirrorTunerOverlay {
 
         const header = document.createElement('div');
         header.style.cssText = 'display:flex; justify-content:space-between; font-size:11px;';
-
         const lbl = document.createElement('span');
         lbl.style.cssText = 'color:#aaa;';
         lbl.textContent = label;
         header.appendChild(lbl);
-
         const valSpan = document.createElement('span');
         valSpan.style.cssText = 'color:#ff0; min-width:55px; text-align:right;';
         valSpan.textContent = `${initial}${unit}`;
         header.appendChild(valSpan);
-
         row.appendChild(header);
 
         const slider = document.createElement('input');
         slider.type = 'range';
-        slider.min = min;
-        slider.max = max;
-        slider.step = step;
-        slider.value = initial;
+        slider.min = min; slider.max = max; slider.step = step; slider.value = initial;
         slider.style.cssText = 'width:100%; height:16px; margin:2px 0; accent-color:#0ff; cursor:pointer;';
         slider.addEventListener('input', () => {
             const val = parseFloat(slider.value);
@@ -166,22 +159,17 @@ export class MirrorTunerOverlay {
             this._statsEl.innerHTML = '<span style="color:#666;">Waiting for mirror mode...</span>';
             return;
         }
-
         const stats = buf.getArrivalStats();
         const pair = buf.getInterpolationPair();
         const a = pair.alpha;
         const uf = buf.underflowCount;
 
         let h = '';
-        h += `<div>`;
-        h += `<span style="color:#888;">Buf:</span> <span style="color:#ff0;">${buf.size}</span>`;
+        h += `<div><span style="color:#888;">Buf:</span> <span style="color:#ff0;">${buf.size}</span>`;
         h += `  <span style="color:#888;">UF:</span> <span style="color:${uf > 0 ? '#f55' : '#0a0'};">${uf}</span>`;
-        h += `  <span style="color:#888;">Tick:</span> ${buf.highestTick}`;
-        h += `</div>`;
-        h += `<div>`;
-        h += `<span style="color:#888;">α:</span> <span style="color:#0ff;">${a.toFixed(3)}</span>`;
-        h += `  <span style="color:#888;">Offset:</span> ${buf.smoothedOffset.toFixed(0)}ms`;
-        h += `</div>`;
+        h += `  <span style="color:#888;">Tick:</span> ${buf.highestTick}</div>`;
+        h += `<div><span style="color:#888;">α:</span> <span style="color:#0ff;">${a.toFixed(3)}</span>`;
+        h += `  <span style="color:#888;">Offset:</span> ${buf.smoothedOffset.toFixed(0)}ms</div>`;
         if (stats.count > 0) {
             h += `<div><span style="color:#888;">Arrival:</span> ${stats.mean.toFixed(0)}ms`;
             h += ` <span style="color:#666;">[${stats.min}–${stats.max}]</span></div>`;
@@ -189,14 +177,8 @@ export class MirrorTunerOverlay {
         this._statsEl.innerHTML = h;
     }
 
-    /** Remove overlay and stop updates. */
     destroy() {
-        if (this._interval) {
-            clearInterval(this._interval);
-            this._interval = null;
-        }
-        if (this._el && this._el.parentNode) {
-            this._el.parentNode.removeChild(this._el);
-        }
+        if (this._interval) { clearInterval(this._interval); this._interval = null; }
+        if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
     }
 }
