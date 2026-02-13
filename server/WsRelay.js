@@ -24,27 +24,48 @@
 
 import { WebSocketServer } from 'ws';
 
+/** @type {number} Default max WebSocket payload size (512 KB) */
+const DEFAULT_MAX_PAYLOAD = 512 * 1024;
+
+/** @type {number} Default max messages per second per client */
+const DEFAULT_RATE_LIMIT = 100;
+
+/** @type {number} Rate limit window in milliseconds */
+const RATE_WINDOW_MS = 1000;
+
 export class WsRelay {
+    /**
+     * @param {Object} [options]
+     * @param {number} [options.port=3000] - Port for standalone mode
+     * @param {number} [options.maxPayload=524288] - Max WebSocket frame size in bytes (default 512KB)
+     * @param {number} [options.rateLimit=100] - Max messages per second per client (0 = unlimited)
+     */
     constructor(options = {}) {
         this.port = options.port || 3000;
         this.wss = null;
 
-        // Track clients: ws -> { id, channels: Set<string> }
+        // Track clients: ws -> { id, channels: Set<string>, msgTimestamps: number[] }
         this.clients = new Map();
 
         // Track channels: channelName -> Set<ws>
         this.channels = new Map();
 
         this._nextClientId = 1;
+
+        /** @type {number} Max WebSocket frame size in bytes */
+        this._maxPayload = options.maxPayload ?? DEFAULT_MAX_PAYLOAD;
+
+        /** @type {number} Max messages per second per client (0 = unlimited) */
+        this._rateLimit = options.rateLimit ?? DEFAULT_RATE_LIMIT;
     }
 
     /**
      * Start the relay on a fixed port (standalone mode).
      */
     start() {
-        this.wss = new WebSocketServer({ port: this.port });
+        this.wss = new WebSocketServer({ port: this.port, maxPayload: this._maxPayload });
         this._attachConnectionHandler();
-        console.log(`[WsRelay] Listening on ws://localhost:${this.port}`);
+        console.log(`[WsRelay] Listening on ws://localhost:${this.port} (maxPayload=${this._maxPayload})`);
     }
 
     /**
@@ -52,7 +73,7 @@ export class WsRelay {
      * @param {import('http').Server} server
      */
     startOnServer(server) {
-        this.wss = new WebSocketServer({ server });
+        this.wss = new WebSocketServer({ server, maxPayload: this._maxPayload });
         this._attachConnectionHandler();
     }
 
@@ -90,7 +111,7 @@ export class WsRelay {
     _attachConnectionHandler() {
         this.wss.on('connection', (ws) => {
             const clientId = this._nextClientId++;
-            this.clients.set(ws, { id: clientId, channels: new Set() });
+            this.clients.set(ws, { id: clientId, channels: new Set(), msgTimestamps: [] });
             console.log(`[WsRelay] Client ${clientId} connected (${this.clients.size} total)`);
 
             ws.on('message', (data) => {
@@ -109,8 +130,27 @@ export class WsRelay {
 
     /**
      * Parse and dispatch an incoming message from a client.
+     * Enforces per-client rate limiting before processing.
      */
     _handleMessage(ws, rawData) {
+        const client = this.clients.get(ws);
+        if (!client) return;
+
+        // Rate limiting: drop messages that exceed the per-client cap
+        if (this._rateLimit > 0) {
+            const now = Date.now();
+            // Evict timestamps older than the window
+            const cutoff = now - RATE_WINDOW_MS;
+            while (client.msgTimestamps.length > 0 && client.msgTimestamps[0] < cutoff) {
+                client.msgTimestamps.shift();
+            }
+            if (client.msgTimestamps.length >= this._rateLimit) {
+                // Rate limit exceeded — drop silently (don't even parse)
+                return;
+            }
+            client.msgTimestamps.push(now);
+        }
+
         let msg;
         try {
             msg = JSON.parse(rawData.toString());
@@ -118,9 +158,6 @@ export class WsRelay {
             ws.send(JSON.stringify({ type: 'error', message: 'Invalid JSON' }));
             return;
         }
-
-        const client = this.clients.get(ws);
-        if (!client) return;
 
         switch (msg.type) {
             case 'subscribe':
@@ -176,6 +213,7 @@ export class WsRelay {
     /**
      * Broadcast a payload to all subscribers on a channel except the sender.
      * Sender must be subscribed to the channel.
+     * Enforces payload size limit to prevent broadcast amplification.
      */
     _broadcast(ws, client, channelName, payload) {
         if (!channelName || !payload) return;
@@ -197,6 +235,16 @@ export class WsRelay {
             channel: channelName,
             payload
         });
+
+        // Security: reject oversized broadcast (prevents amplification attack).
+        // A malicious client could send a large payload that gets copied to N subscribers.
+        if (outMsg.length > this._maxPayload) {
+            ws.send(JSON.stringify({
+                type: 'error',
+                message: `Broadcast payload too large (${outMsg.length} bytes, max ${this._maxPayload})`
+            }));
+            return;
+        }
 
         // Broadcast to ALL subscribers EXCEPT sender (Supabase semantics)
         for (const sub of subs) {

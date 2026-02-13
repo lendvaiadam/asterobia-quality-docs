@@ -14,10 +14,18 @@
 import { Room } from './Room.js';
 import { nextEntityId, resetEntityIdCounter } from '../src/SimCore/runtime/IdGenerator.js';
 
+/** @type {number} Maximum units allowed in a single SPAWN_MANIFEST */
+const MAX_MANIFEST_UNITS = 200;
+
+/** @type {number} Maximum valid player slot index */
+const MAX_SLOT = 10;
+
 export class GameServer {
     /**
      * @param {Object} [options]
      * @param {number} [options.tickRate=20] - Server tick rate in Hz (default 20 = 50ms per tick)
+     * @param {number} [options.maxManifestUnits=200] - Max units per manifest
+     * @param {number} [options.maxSlot=10] - Max valid player slot index
      */
     constructor(options = {}) {
         /** @type {number} Target tick rate in Hz */
@@ -39,6 +47,12 @@ export class GameServer {
 
         /** @type {import('./WsRelay.js').WsRelay|null} */
         this._relay = null;
+
+        /** @type {number} Max units per manifest (OOM prevention) */
+        this._maxManifestUnits = options.maxManifestUnits || MAX_MANIFEST_UNITS;
+
+        /** @type {number} Max valid slot index */
+        this._maxSlot = options.maxSlot || MAX_SLOT;
     }
 
     /**
@@ -211,8 +225,40 @@ export class GameServer {
             return;
         }
 
-        // Create HeadlessUnits from manifest (client-provided IDs)
-        room.createUnitsFromManifest(payload.units);
+        // Security: cap manifest size to prevent OOM from malicious host
+        if (payload.units.length > this._maxManifestUnits) {
+            console.warn(`[GameServer] SPAWN_MANIFEST rejected: ${payload.units.length} units exceeds limit of ${this._maxManifestUnits}`);
+            return;
+        }
+
+        // Security: validate and normalize each unit entry
+        const sanitized = [];
+        for (const mu of payload.units) {
+            // ownerSlot must be a number within valid range
+            const slot = typeof mu.ownerSlot === 'number' ? mu.ownerSlot : 0;
+            if (slot < 0 || slot > this._maxSlot) {
+                console.warn(`[GameServer] SPAWN_MANIFEST: skipping unit with invalid ownerSlot ${mu.ownerSlot}`);
+                continue;
+            }
+            // id must be a number
+            if (typeof mu.id !== 'number') continue;
+            sanitized.push({
+                id: mu.id,
+                ownerSlot: slot,
+                modelIndex: typeof mu.modelIndex === 'number' ? mu.modelIndex : 0,
+                px: typeof mu.px === 'number' ? mu.px : undefined,
+                py: typeof mu.py === 'number' ? mu.py : undefined,
+                pz: typeof mu.pz === 'number' ? mu.pz : undefined
+            });
+        }
+
+        if (sanitized.length === 0) {
+            console.warn('[GameServer] SPAWN_MANIFEST rejected: no valid units after sanitization');
+            return;
+        }
+
+        // Create HeadlessUnits from sanitized manifest (client-provided IDs)
+        room.createUnitsFromManifest(sanitized);
 
         // Start ticking
         room.start();
@@ -223,6 +269,9 @@ export class GameServer {
      * Handle JOIN_ACK (sent by host to guest): learn the guest's assigned slot.
      * This lets us map the guest's WebSocket to their slot when they send MOVE_INPUT.
      *
+     * Security: Only the host (slot 0) can trigger server-side unit creation via JOIN_ACK.
+     * A guest sending a fake JOIN_ACK is rejected.
+     *
      * We observe the JOIN_ACK broadcast to learn {guestId -> slot} without modifying
      * the Phase 1 join flow.
      * @private
@@ -230,17 +279,32 @@ export class GameServer {
     _onJoinAck(channelName, payload, client) {
         if (!payload.accepted || payload.assignedSlot == null) return;
 
+        // Security: Only accept JOIN_ACK from the authenticated host (slot 0).
+        // Without this gate, any client could send a fake JOIN_ACK to spawn
+        // phantom units at arbitrary slots.
+        const auth = this._clientSlots.get(client.id);
+        if (!auth || auth.slot !== 0) {
+            console.warn(`[GameServer] JOIN_ACK rejected: client ${client.id} is not host`);
+            return;
+        }
+
         const roomId = this._extractRoomId(channelName);
         if (!roomId) return;
 
         const room = this.rooms.get(roomId);
         if (!room) return;
 
+        // Validate assignedSlot is within bounds
+        const guestSlot = payload.assignedSlot;
+        if (typeof guestSlot !== 'number' || guestSlot < 1 || guestSlot > this._maxSlot) {
+            console.warn(`[GameServer] JOIN_ACK rejected: invalid slot ${guestSlot}`);
+            return;
+        }
+
         // Note: we can't map the GUEST's client.id here because this broadcast
         // comes from the HOST's WebSocket. We'll map the guest when they send
         // their first MOVE_INPUT (see _onMoveInput fallback).
         // For now, create a guest unit on the server so it appears in snapshots.
-        const guestSlot = payload.assignedSlot;
         const unitId = nextEntityId();
         const modelIndex = unitId % 5;
         room.createUnitForPlayer(guestSlot, unitId, { modelIndex });
