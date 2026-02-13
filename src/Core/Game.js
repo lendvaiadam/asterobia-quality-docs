@@ -372,7 +372,7 @@ export class Game {
         this._manifestSent = false; // Phase 2A: SPAWN_MANIFEST sent exactly once
         this._lastMirrorDiagMs = 0; // Dev-mode: last mirror diagnostics log timestamp
         this._mirrorLerpEnabled = true; // Dev tuner: lerp ON/OFF (false = snap to latest)
-        this._mirrorTunerOverlay = null; // Created on first mirror mode activation in dev mode
+        this._mirrorTunerOverlay = new MirrorTunerOverlay(this); // Always visible
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();
@@ -985,11 +985,6 @@ export class Game {
             this._snapshotBuffer.reset();
             console.log('[Game] Mirror mode ACTIVATED (first SERVER_SNAPSHOT received)');
             this._showScreenNotice('MIRROR MODE ACTIVE — Server Authority', '#00ff88');
-
-            // Dev mode: auto-show mirror tuner overlay (always visible, no menu)
-            if (this._isDevMode && !this._mirrorTunerOverlay) {
-                this._mirrorTunerOverlay = new MirrorTunerOverlay(this);
-            }
         }
 
         this._snapshotBuffer.push(msg);
