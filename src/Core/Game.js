@@ -370,6 +370,7 @@ export class Game {
         this._MOVE_INPUT_INTERVAL_MS = 50; // 20Hz send rate
         this._manifestSent = false; // Phase 2A: SPAWN_MANIFEST sent exactly once
         this._lastMirrorDiagMs = 0; // Dev-mode: last mirror diagnostics log timestamp
+        this._mirrorLerpEnabled = true; // Dev tuner: lerp ON/OFF (false = snap to latest)
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();
@@ -4150,13 +4151,9 @@ export class Game {
 
             const isTeleport = pair.teleports.has(unit.id);
 
-            if (isTeleport || !prevU) {
-                // Teleport or new unit: snap instantly
-                if (unit.mesh) {
-                    unit.mesh.position.set(nextU.px, nextU.py, nextU.pz);
-                }
-                unit.position.set(nextU.px, nextU.py, nextU.pz);
-            } else {
+            const doLerp = this._mirrorLerpEnabled && !isTeleport && prevU;
+
+            if (doLerp) {
                 // Lerp position between prev and next using SnapshotBuffer alpha
                 const x = prevU.px + (nextU.px - prevU.px) * alpha;
                 const y = prevU.py + (nextU.py - prevU.py) * alpha;
@@ -4164,18 +4161,23 @@ export class Game {
                 if (unit.mesh) {
                     unit.mesh.position.set(x, y, z);
                 }
-                unit.position.set(nextU.px, nextU.py, nextU.pz);
+            } else {
+                // Snap: teleport, new unit, or lerp disabled
+                if (unit.mesh) {
+                    unit.mesh.position.set(nextU.px, nextU.py, nextU.pz);
+                }
             }
+            unit.position.set(nextU.px, nextU.py, nextU.pz);
 
             // Quaternion interpolation
             if (nextU.qw !== undefined && unit.mesh) {
-                if (isTeleport || !prevU || prevU.qw === undefined) {
-                    unit.mesh.quaternion.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
-                } else {
+                if (doLerp && prevU.qw !== undefined) {
                     // Slerp between prev and next quaternions
                     unit.mesh.quaternion.set(prevU.qx, prevU.qy, prevU.qz, prevU.qw);
                     _mirrorSlerpTarget.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
                     unit.mesh.quaternion.slerp(_mirrorSlerpTarget, Math.min(alpha, 1));
+                } else {
+                    unit.mesh.quaternion.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
                 }
 
                 if (!unit.headingQuaternion) {

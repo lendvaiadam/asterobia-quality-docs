@@ -132,8 +132,137 @@ export class NetworkDebugPanel {
     this.dbStatusDiv.textContent = 'DB: ready';
     this.container.appendChild(this.dbStatusDiv);
 
+    // Mirror tuner section (hidden until mirror mode activates)
+    this._mirrorSection = document.createElement('div');
+    this._mirrorSection.style.cssText = `
+      border-top: 1px solid #0a0;
+      margin-top: 8px;
+      padding-top: 8px;
+      display: none;
+    `;
+
+    const mirrorTitle = document.createElement('div');
+    mirrorTitle.style.cssText = 'font-weight: bold; color: #0ff; margin-bottom: 6px;';
+    mirrorTitle.textContent = 'MIRROR TUNER';
+    this._mirrorSection.appendChild(mirrorTitle);
+
+    // Toggle: Lerp ON/OFF
+    this._lerpToggle = this._createToggle('Smooth Lerp', true, (val) => {
+      this.game._mirrorLerpEnabled = val;
+    });
+    this._mirrorSection.appendChild(this._lerpToggle.row);
+
+    // Slider: interpDelayMs
+    this._interpSlider = this._createSlider('Interp Delay', 0, 300, 10, 100, 'ms', (val) => {
+      if (this.game._snapshotBuffer) this.game._snapshotBuffer.interpDelayMs = val;
+    });
+    this._mirrorSection.appendChild(this._interpSlider.row);
+
+    // Slider: maxExtrapolateMs
+    this._extrapSlider = this._createSlider('Max Extrap', 0, 200, 10, 0, 'ms', (val) => {
+      if (this.game._snapshotBuffer) this.game._snapshotBuffer._maxExtrapolateMs = val;
+    });
+    this._mirrorSection.appendChild(this._extrapSlider.row);
+
+    // Slider: emaAlpha
+    this._emaSlider = this._createSlider('EMA Alpha', 0.01, 1.0, 0.01, 0.1, '', (val) => {
+      if (this.game._snapshotBuffer) this.game._snapshotBuffer._emaAlpha = val;
+    });
+    this._mirrorSection.appendChild(this._emaSlider.row);
+
+    // Live stats readout
+    this._mirrorStats = document.createElement('div');
+    this._mirrorStats.style.cssText = `
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px dashed #333;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #0a0;
+    `;
+    this._mirrorSection.appendChild(this._mirrorStats);
+
+    this.container.appendChild(this._mirrorSection);
+
     // Append to body
     document.body.appendChild(this.container);
+  }
+
+  /**
+   * Create a toggle row for the mirror tuner.
+   * @private
+   */
+  _createToggle(label, initial, onChange) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;';
+
+    const lbl = document.createElement('span');
+    lbl.style.cssText = 'color: #888; font-size: 11px;';
+    lbl.textContent = label;
+    row.appendChild(lbl);
+
+    const btn = document.createElement('button');
+    let state = initial;
+    btn.textContent = state ? 'ON' : 'OFF';
+    btn.style.cssText = `
+      background: ${state ? '#1a1' : '#a11'};
+      color: #fff; border: none; padding: 2px 10px; border-radius: 3px;
+      cursor: pointer; font-family: 'Consolas', monospace; font-size: 11px;
+      min-width: 40px;
+    `;
+    btn.addEventListener('click', () => {
+      state = !state;
+      btn.textContent = state ? 'ON' : 'OFF';
+      btn.style.background = state ? '#1a1' : '#a11';
+      onChange(state);
+    });
+    row.appendChild(btn);
+
+    return { row, getState: () => state };
+  }
+
+  /**
+   * Create a slider row for the mirror tuner.
+   * @private
+   */
+  _createSlider(label, min, max, step, initial, unit, onChange) {
+    const row = document.createElement('div');
+    row.style.cssText = 'margin-bottom: 4px;';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display: flex; justify-content: space-between; font-size: 11px;';
+
+    const lbl = document.createElement('span');
+    lbl.style.cssText = 'color: #888;';
+    lbl.textContent = label;
+    header.appendChild(lbl);
+
+    const valSpan = document.createElement('span');
+    valSpan.style.cssText = 'color: #ff0; min-width: 50px; text-align: right;';
+    valSpan.textContent = `${initial}${unit}`;
+    header.appendChild(valSpan);
+
+    row.appendChild(header);
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = min;
+    slider.max = max;
+    slider.step = step;
+    slider.value = initial;
+    slider.style.cssText = `
+      width: 100%; height: 14px; margin: 2px 0;
+      accent-color: #0f0; cursor: pointer;
+    `;
+    slider.addEventListener('input', () => {
+      const val = parseFloat(slider.value);
+      const display = step < 1 ? val.toFixed(2) : val;
+      valSpan.textContent = `${display}${unit}`;
+      onChange(val);
+    });
+    row.appendChild(slider);
+
+    return { row, slider, valSpan };
   }
 
   /**
@@ -277,6 +406,29 @@ export class NetworkDebugPanel {
     }
 
     this.contentDiv.innerHTML = html;
+
+    // Mirror tuner: show/hide based on mirror mode, update live stats
+    if (this.game._mirrorMode && this.game._snapshotBuffer) {
+      this._mirrorSection.style.display = 'block';
+      const buf = this.game._snapshotBuffer;
+      const stats = buf.getArrivalStats();
+      const pair = buf.getInterpolationPair();
+      const alpha = pair.alpha;
+
+      let statsHtml = '';
+      statsHtml += `<div><span style="color:#888;">Buf:</span> <span style="color:#ff0;">${buf.size}</span>`;
+      statsHtml += ` <span style="color:#888;margin-left:8px;">UF:</span> <span style="color:${buf.underflowCount > 0 ? '#f55' : '#0a0'};">${buf.underflowCount}</span>`;
+      statsHtml += ` <span style="color:#888;margin-left:8px;">Tick:</span> ${buf.highestTick}</div>`;
+      statsHtml += `<div><span style="color:#888;">Alpha:</span> <span style="color:#0ff;">${alpha.toFixed(3)}</span>`;
+      statsHtml += ` <span style="color:#888;margin-left:8px;">Offset:</span> ${buf.smoothedOffset.toFixed(0)}ms</div>`;
+      if (stats.count > 0) {
+        statsHtml += `<div><span style="color:#888;">Arrival dt:</span> ${stats.mean.toFixed(0)}ms`;
+        statsHtml += ` <span style="color:#666;">[${stats.min}-${stats.max}]</span></div>`;
+      }
+      this._mirrorStats.innerHTML = statsHtml;
+    } else {
+      this._mirrorSection.style.display = 'none';
+    }
   }
 
   /**
