@@ -56,4 +56,16 @@
 *   **External Auditor:** Use Antigravity as an external architect/auditor. Ask for review on significant design decisions (protocol, authority, determinism, security).
 *   **Skill Acquisition:** actively check for relevant "skills" (domains) and acquire/assign them to workers.
 *   **Multi-Worker Strategy:** Run multiple workers with complementary skills (netcode, physics, security, testing) to maintain AAAA+ quality.
-*   **Security Analysis:** Include security/vulnerability analysis (threat model, caps, dependencies) in plans where relevant.
+
+## 9. Context Budget & Response Format (Binding)
+*   **PRIORITY ORDER:**
+    1) **Production-ready quality & correctness.**
+    2) **Conciseness** (Preserve context budget).
+*   **No Narratives:** Avoid long filler, repeated restatements, or "play-by-play" diaries.
+*   **Default Response Structure:**
+    *   **Decision / Status** (1–2 lines)
+    *   **What changed** (bullets, max ~6)
+    *   **How to verify** (commands, short)
+    *   **Risks / Open Questions** (only if real, max ~3)
+*   **Gating Info (Mandatory):** Always provide Branch, Commit SHAs, Test Result Summary, Diffstat, and Compliance Check (YES/NO).
+*   **Wait for Ask:** If more detail is needed, wait to be asked rather than preemptively dumping logs.

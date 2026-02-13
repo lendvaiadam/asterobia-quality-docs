@@ -366,3 +366,13 @@ Default output: MD files under /quality or /docs.
     - **TerrainColliderManager.js**: JIT Trimesh generation, caching, eviction (max 16 patches).
     - **Room.js**: Wired TCM to simulation tick (ensure patches around units).
 - **Status**: **READY FOR STEP 3 (HYBRID LIFECYCLE)**.
+
+### 2026-02-13: Claude Context Budget Rules (Binding)
+- **SHA**: `HEAD`
+- **Tag**: `savepoint/r013-claude-context-budget`
+- **Action**: Added Section 9 to `docs/NOTES_CLAUDE.md`.
+- **Rules**:
+    - **Priority**: Quality > Conciseness.
+    - **No Narratives**: Forbidden long filler.
+    - **Format**: Decision, Changes, Verification, Risks.
+    - **Gating**: Mandatory SHAs and Diffstats.
