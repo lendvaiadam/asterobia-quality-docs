@@ -143,6 +143,10 @@ HOST_ANNOUNCE → Room created (WAITING)
 
 **Latency:** ~150-200ms input-to-visual (RTT + interpolation buffer). Intentionally "heavy/tank-like." Client-side prediction is Phase 2B scope.
 
+**Known Limitations (Phase 2A):**
+*   **Path planning (SET_PATH/CLOSE_PATH) is disabled in mirror mode.** Mirror mode skips `Unit.update()` entirely, and path-follow logic lives inside `Unit.update()`. The server has no path-follow handler. Path drawing UI is silently blocked (`startPathDrawing()` returns early). Only WASD keyboard input works. Server-authoritative path-follow is **Phase 2B scope**.
+*   **Offline mode is unaffected.** Path planning works normally without `?net=ws`.
+
 **Files:**
 | File | Role |
 |------|------|

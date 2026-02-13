@@ -3048,8 +3048,15 @@ export class Game {
     }
 
     startPathDrawing(unit) {
-        // Phase 2A: Path drawing disabled in mirror mode (server controls movement)
-        if (this._mirrorMode) return;
+        // Phase 2A: Path drawing disabled in mirror mode (server controls movement).
+        // Path-follow requires Unit.update() which mirror mode skips entirely.
+        // Server-authoritative path planning is Phase 2B scope.
+        if (this._mirrorMode) {
+            if (this._isDevMode) {
+                console.warn('[Game] Path drawing blocked — mirror mode active (Phase 2A: WASD only, path-follow is Phase 2B)');
+            }
+            return;
+        }
 
         // Direct Steering Start
         // Maybe show a line to cursor?
