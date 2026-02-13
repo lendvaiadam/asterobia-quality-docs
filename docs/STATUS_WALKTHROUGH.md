@@ -60,8 +60,21 @@
     - [x] **Commit 1 (Server Core)**: `GameServer` Manifest/Flight Fields. **MERGED** (SHA: `801b317`).
     - [x] **Commit 1.1 (Cleanup):** Protocol Test Migration. **MERGED** (SHA: `deba991`).
     - [x] **Commit 2 (Client Wiring):** Client gates spawn, mirrors snapshot. **MERGED** (SHA: `33e230d`).
-    - [ ] **Commit 3 (Integration)**: End-to-end test.
-- **Fallback Policy**: Phase 1 verification point LOCKED.
+    - [x] **Commit 3 (Integration)**: End-to-end test.
+- [x] **Phase 2A Hardening & Docs:** Security Fixes + Specs. **MERGED** (SHA: `40ea6ec`).
+- [x] **Phase 2B (Path-Follow):** Launch. **MERGED** (SHA: `86fb3fd`).
+    - **Scope:** Server Path Validation (32 cap), Client A*, WASD Interrupt.
+    - **Tests:** 789/789 PASS. HU-PASS Confirmed.
+    - **Tests:** 789/789 PASS. HU-PASS Confirmed.
+    - **Note:** "Commands" error is pre-existing legacy (Phase 1).
+- [x] **Phase 3 PREP:** Tooling + Smoke Tests. **MERGED** (SHA: `bb54e5b`).
+    - **Deps:** Rapier `0.19.3` + Simplex `4.0.3` (Pinned).
+    - **Tests:** +9 Smoke Tests (Physics). Total 798 PASS.
+    - **Docs:** Best Practices Added.
+- [x] **Phase 3 Step 1: Foundation (Rapier).** **MERGED** (SHA: `HEAD`).
+    - **Scope:** `PhysicsWorld.js` wrapper + `Room.js` integration (Flag-gated).
+    - **Flag:** `enablePhysics: false` (Default). No runtime impact yet.
+    - **Tests:** +36 Integration Tests. Total 834 PASS.
 - **CTO Ping #1**: APPROVED (2026-02-10)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
 - **Test State**: Vitest installed. 690 tests passed! (Clean).

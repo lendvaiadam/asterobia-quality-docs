@@ -49,3 +49,11 @@
 ## 7. Risks
 - Unit.js is a monolith. Avoid deep rewrites; prefer routing through shim entrypoints.
 
+## 8. Claude Code — Operating Principles (Binding)
+*   **Best Implementer:** Avoid micromanagement. Focus on outcomes, safety, and production-grade quality.
+*   **Proactive Proposal:** Everything the human writes is guidance; Claude may propose better approaches. If deviating materially, explain why and get explicit approval first.
+*   **State-of-the-Art:** Aim for "better and best" solutions, not just literal instructions.
+*   **External Auditor:** Use Antigravity as an external architect/auditor. Ask for review on significant design decisions (protocol, authority, determinism, security).
+*   **Skill Acquisition:** actively check for relevant "skills" (domains) and acquire/assign them to workers.
+*   **Multi-Worker Strategy:** Run multiple workers with complementary skills (netcode, physics, security, testing) to maintain AAAA+ quality.
+*   **Security Analysis:** Include security/vulnerability analysis (threat model, caps, dependencies) in plans where relevant.
