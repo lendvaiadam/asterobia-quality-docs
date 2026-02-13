@@ -583,6 +583,37 @@ export class SessionManager {
   }
 
   /**
+   * Phase 2B: Send PATH_DATA to server for server-authoritative path-follow.
+   * Client computes A* waypoints, server validates and executes kinematic movement.
+   *
+   * @param {number} unitId - Target unit ID (must be owned by sender)
+   * @param {Array<{x:number,y:number,z:number}>} waypoints - Path waypoints
+   * @param {boolean} [closed=false] - Whether path loops
+   * @returns {Promise<void>}
+   */
+  async sendPathData(unitId, waypoints, closed = false) {
+    if (this.state.isOffline()) return;
+    if (!this.transport || !this._sessionChannel) return;
+
+    const msg = {
+      type: 'PATH_DATA',
+      unitId,
+      waypoints: waypoints.map(wp => ({ x: wp.x, y: wp.y, z: wp.z })),
+      closed: !!closed,
+      timestamp: Date.now()
+    };
+
+    try {
+      await this.transport.broadcastToChannel(this._sessionChannel, msg);
+      this._debugCounters.pathDataSentCount = (this._debugCounters.pathDataSentCount || 0) + 1;
+    } catch (err) {
+      if (this.game._isDevMode) {
+        console.warn('[SessionManager] sendPathData failed:', err.message);
+      }
+    }
+  }
+
+  /**
    * M07: Add input command to buffer (Host-side)
    * Called when Host receives INPUT_CMD from guests or local input.
    * @param {Object} entry - { slot, seq, command }

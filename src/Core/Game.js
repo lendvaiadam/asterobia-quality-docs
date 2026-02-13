@@ -358,6 +358,8 @@ export class Game {
         // Activated when first SERVER_SNAPSHOT is received. Deactivated on disconnect.
         this._mirrorMode = false;
         this._snapshotBuffer = new SnapshotBuffer(); // Ring buffer for server snapshot interpolation
+        /** @type {Array<THREE.Vector3>|null} Phase 2B: Preview waypoints during path draw */
+        this._pathPreviewWaypoints = null;
 
         // Phase 2A: MOVE_INPUT latching (captures key presses between 20Hz sends)
         this._latchedKeys = { forward: false, backward: false, left: false, right: false };
@@ -3048,65 +3050,96 @@ export class Game {
     }
 
     startPathDrawing(unit) {
-        // Phase 2A: Path drawing disabled in mirror mode (server controls movement).
-        // Path-follow requires Unit.update() which mirror mode skips entirely.
-        // Server-authoritative path planning is Phase 2B scope.
+        // Phase 2B: Mirror mode — visual preview only (server controls movement)
         if (this._mirrorMode) {
+            if (this.pathLine) this.scene.add(this.pathLine);
+            this._pathPreviewWaypoints = [];
             if (this._isDevMode) {
-                console.warn('[Game] Path drawing blocked — mirror mode active (Phase 2A: WASD only, path-follow is Phase 2B)');
+                console.log('[Game] Path preview started (mirror mode — visual only, server executes)');
             }
             return;
         }
 
-        // Direct Steering Start
-        // Maybe show a line to cursor?
+        // Offline: Direct Steering Start
         if (this.pathLine) this.scene.add(this.pathLine);
 
-        // Start Moving Slowly (User requirement: "lassan induljon el")
         if (unit) {
-            unit.isFollowingPath = false; // Not following path yet (drawing)
-            // But maybe we want it to creep forward?
-            // "Ha a user vonalat kezd rajzolni, akkor a unit lassan induljon el rajta"
-            // Start moving on existing path or just idle?
-            // If dragging unit -> Path Draw. The unit shouldn't move while drawing?
-            // "unit lassan induljon el rajta" -> implies it starts following the path being drawn?
-            // Impossible if path isn't finished.
-            // Maybe they mean: When I click play?
-
-            // "Ha a user vonalat kezd rajzolni" -> Dragging from Unit?
-            // If dragging from unit, we are designing the path.
-            // Let's assume they mean: When path is valid, start moving.
-
-            // Actually, "unit lassan induljon el rajta" might mean "Start moving towards the first waypoint as soon as it is placed"?
-            // If I drag, I place waypoints.
-            // If I place Waypoint 1, 2, 3... Unit should start moving to WP1 immediately?
-            // Yes.
-
-            unit.setCommandPause(false); // Unpause
-            unit.isFollowingPath = true; // Try to follow whatever path exists
+            unit.isFollowingPath = false;
+            unit.setCommandPause(false);
+            unit.isFollowingPath = true;
         }
     }
 
     updatePathDrawing(unit, hitPoint) {
-        // DIRECT STEERING: Drive unit towards cursor
-        if (unit && hitPoint) {
-            unit.steerTowards(hitPoint);
+        if (!unit || !hitPoint) return;
 
-            // Visuals: Line from Unit to Cursor
-            const points = [unit.position.clone(), hitPoint.clone()];
-            if (this.pathLine) {
-                this.pathLine.geometry.setFromPoints(points);
+        // Phase 2B: Mirror mode — collect waypoints and draw preview (no local steering)
+        if (this._mirrorMode) {
+            const wp = hitPoint.clone();
+            // Distance-based sampling: only add if far enough from last waypoint
+            const arr = this._pathPreviewWaypoints;
+            if (arr && (arr.length === 0 || wp.distanceTo(arr[arr.length - 1]) > 1.0)) {
+                arr.push(wp);
             }
+            // Draw preview line: unit position → collected waypoints → cursor
+            if (this.pathLine && arr) {
+                const linePoints = [unit.position.clone(), ...arr, hitPoint.clone()];
+                this.pathLine.geometry.setFromPoints(linePoints);
+            }
+            return;
+        }
+
+        // Offline: DIRECT STEERING — Drive unit towards cursor
+        unit.steerTowards(hitPoint);
+        const points = [unit.position.clone(), hitPoint.clone()];
+        if (this.pathLine) {
+            this.pathLine.geometry.setFromPoints(points);
         }
     }
 
     finishPathDrawing(unit) {
-        // Stop Steering
+        // Phase 2B: Mirror mode — send collected waypoints as PATH_DATA
+        if (this._mirrorMode) {
+            const waypoints = this._pathPreviewWaypoints;
+            if (waypoints && waypoints.length > 0 && this.selectedUnit) {
+                // Downsample to max 32 waypoints if needed
+                const maxWp = 32;
+                let toSend = waypoints;
+                if (waypoints.length > maxWp) {
+                    toSend = [];
+                    for (let i = 0; i < maxWp; i++) {
+                        const idx = Math.round(i * (waypoints.length - 1) / (maxWp - 1));
+                        toSend.push(waypoints[idx]);
+                    }
+                }
+                const pathData = toSend.map(wp => ({ x: wp.x, y: wp.y, z: wp.z }));
+                this.sessionManager?.sendPathData(this.selectedUnit.id, pathData, false);
+                if (this._isDevMode) {
+                    console.log(`[Game] PATH_DATA sent (${pathData.length} waypoints) for unit ${this.selectedUnit.id}`);
+                }
+            }
+            this._clearPathPreview();
+            return;
+        }
+
+        // Offline: Stop Steering
         if (unit) {
             unit.stopSteering();
         }
 
         // Clear visuals
+        if (this.pathLine) {
+            this.pathLine.geometry.setFromPoints([]);
+        }
+    }
+
+    /**
+     * Phase 2B: Clear path preview visual and waypoint buffer.
+     * Called on WASD interrupt to prevent "stuck" preview lines.
+     * @private
+     */
+    _clearPathPreview() {
+        this._pathPreviewWaypoints = null;
         if (this.pathLine) {
             this.pathLine.geometry.setFromPoints([]);
         }
@@ -4105,6 +4138,10 @@ export class Game {
             if (keys.forward || keys.backward || keys.left || keys.right) {
                 if (this.sessionManager?.sendMoveInput) {
                     this.sessionManager.sendMoveInput(keys, this.selectedUnit?.id);
+                }
+                // Phase 2B: WASD interrupt clears path preview (server handles path cancel)
+                if (this._pathPreviewWaypoints) {
+                    this._clearPathPreview();
                 }
             }
         }

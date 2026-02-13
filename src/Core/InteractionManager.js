@@ -226,8 +226,9 @@ export class InteractionManager {
 
 
         if (this.state === 'DRAWING_PATH') {
-            // Update Path
-            this.game.updatePathDrawing(this.mouseNDC);
+            // Update Path: raycast terrain and pass unit + hit point to Game
+            const hitPoint = this.raycastTerrain();
+            this.game.updatePathDrawing(this.game.selectedUnit, hitPoint);
         }
 
         if (this.state === 'DRAGGING_TERRAIN') {
@@ -278,6 +279,10 @@ export class InteractionManager {
 
                                 if (this.game.pathPlanner && !this.game.pathPlanner.isValidDestination(terrainPoint, capabilities)) {
                                     console.warn('[InteractionManager] Cannot place waypoint in FORBIDDEN zone (obstacle/water)');
+                                } else if (this.game._mirrorMode) {
+                                    // Phase 2B: Mirror mode — send PATH_DATA to server
+                                    this.game.sessionManager?.sendPathData(unit.id,
+                                        [{ x: terrainPoint.x, y: terrainPoint.y, z: terrainPoint.z }], false);
                                 } else {
                                     // R006: Use InputFactory for deterministic command
                                     this.inputFactory.move(unit.id, terrainPoint);
@@ -313,6 +318,11 @@ export class InteractionManager {
 
                         if (this.game.pathPlanner && !this.game.pathPlanner.isValidDestination(this.mouseDownTerrain, capabilities)) {
                             console.warn('[InteractionManager] Cannot place waypoint in FORBIDDEN zone (obstacle/water)');
+                        } else if (this.game._mirrorMode) {
+                            // Phase 2B: Mirror mode — send PATH_DATA to server
+                            const pt = this.mouseDownTerrain;
+                            this.game.sessionManager?.sendPathData(unit.id,
+                                [{ x: pt.x, y: pt.y, z: pt.z }], false);
                         } else {
                             // R006: Use InputFactory for deterministic command
                             this.inputFactory.move(unit.id, this.mouseDownTerrain);
