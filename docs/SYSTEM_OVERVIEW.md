@@ -26,7 +26,7 @@ The technical core is a **Fixed-Timestep, Host-Authoritative, Deterministic SimC
 ### 🔍 If you are AUDITING (Antigravity)
 1.  **Check Quality Gates**: `docs/IMPLEMENTATION_GATES.md`.
 2.  **Review Logs**: `docs/BUGLIST.md`, `quality/NETCODE_READINESS_AUDIT.md`.
-3.  **Inspect Architecture**: `docs/master_plan/final_v2/MASTER_PLAN_FINAL_v2.md`.
+3.  **Inspect Architecture**: `docs/specs/ARCH_RENDER_SEPARATION.md`, `docs/research/RAPIER_INTEGRATION_AUDIT.md`.
 
 ---
 
