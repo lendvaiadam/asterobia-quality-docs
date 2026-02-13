@@ -326,11 +326,15 @@ export class Room {
             }
 
             // Pre-step: check slope triggers (may transition units to DYNAMIC)
-            this._checkSlopeTriggers();
+            // DISABLED for HU-test: auto-triggers cause chaos at spawn.
+            // TODO: Re-enable when spawn spacing and slope debounce are tuned.
+            // this._checkSlopeTriggers();
 
             // Pre-step: kinematic proximity collisions (unit↔unit, unit↔obstacle)
+            // Only check obstacle and mine contacts (CMD_ADMIN spawned).
+            // Unit↔unit auto-collision disabled for same reason as slope triggers.
             if (this.collisions) {
-                this.collisions.checkKinematicCollisions(this.units, this.physics);
+                // this.collisions.checkKinematicCollisions(this.units, this.physics);
                 this.collisions.checkObstacleCollisions(this.units, this._obstacles, this.physics);
                 this.collisions.checkMineContacts(this.units, this.physics, this.physicsEvents);
             }
