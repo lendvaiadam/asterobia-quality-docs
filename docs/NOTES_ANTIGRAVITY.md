@@ -11,6 +11,15 @@
     *   AND the task is labeled as an *exception* or *prototype*.
 3.  **Stop Condition**: If the user says "STOP" or "Don't code", you must **IMMEDIATELY** freeze, revert uncommitted changes, and return to analysis mode.
 
+## 🔒 Persistence / Workflow Changes
+**Status: ENFORCED ALWAYS**
+
+RULE:
+Whenever the user requests a change to the Antigravity workflow/process (how Antigravity should operate, coordinate, verify, merge, tag, update docs, ask for confirmation, etc.), I MUST:
+1) Write the change into my own calibration MD file (so it persists across new chats),
+2) Reference that calibration entry in my reply (briefly),
+3) Only then proceed with any operational steps (if explicitly requested).
+
 ## 🐛 BUG REPORTING PROTOCOL
 **Status: ENFORCED**
 
