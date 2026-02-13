@@ -2102,7 +2102,16 @@ export class SessionManager {
   _handleServerSnapshot(msg) {
     if (this.state.isOffline()) return;
 
-    // Delegate to Game.js which has SnapshotBuffer and Three.js
+    // HOST: do NOT enter mirror mode. Local simulation drives rendering.
+    // Mirror mode is for GUESTs only — HOST keeps its own Unit movement
+    // (relative controls, surface-normal tilt, terrain-height alignment).
+    // Server snapshots are still counted for diagnostics.
+    if (this.state.isHost()) {
+      this._debugCounters.serverSnapshotRecvCount = (this._debugCounters.serverSnapshotRecvCount || 0) + 1;
+      return;
+    }
+
+    // GUEST: delegate to Game.js for SnapshotBuffer push + mirror mode
     if (this.game?.applyServerSnapshot) {
       this.game.applyServerSnapshot(msg);
     }
