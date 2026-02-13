@@ -125,6 +125,7 @@ export class Room {
 
         unit.spawnOnSurface(direction, this.terrain);
         this.units.push(unit);
+        this._attachRigidBody(unit);
         return unit;
     }
 
@@ -153,6 +154,7 @@ export class Room {
             }
 
             this.units.push(unit);
+            this._attachRigidBody(unit);
             created.push(unit);
         }
         return created;
@@ -288,7 +290,22 @@ export class Room {
                 }
             }
 
+            // Pre-step: sync KINEMATIC unit positions TO their rigid bodies
+            for (const unit of this.units) {
+                unit.syncToRigidBody();
+            }
+
             this.physics.step(dtSec);
+
+            // Post-step: sync DYNAMIC unit positions FROM their rigid bodies + settle check
+            for (const unit of this.units) {
+                if (unit.physicsMode === 'DYNAMIC') {
+                    const settled = unit.syncFromRigidBody();
+                    if (settled) {
+                        unit.exitDynamic(this.physics);
+                    }
+                }
+            }
         }
 
         // 4. Broadcast SERVER_SNAPSHOT to all connected clients
@@ -341,5 +358,21 @@ export class Room {
         // Tag command with source slot for authority checks
         command.sourceSlot = slot;
         this.commandQueue.enqueue(command);
+    }
+
+    /**
+     * Attach a Rapier rigid body to a unit (kinematic by default).
+     * No-op if physics is not enabled. Body starts at unit's current position.
+     * Ball collider added for collision detection with terrain and other units.
+     *
+     * @param {HeadlessUnit} unit
+     * @private
+     */
+    _attachRigidBody(unit) {
+        if (!this.physics) return;
+
+        const body = this.physics.createKinematicBody(unit.position);
+        this.physics.addBallCollider(body, 0.5);
+        unit.rigidBody = body;
     }
 }

@@ -14,6 +14,14 @@
  *   - Diagonal normalization prevents √2 speed boost
  *   - MOVE_INPUT (WASD) cancels active path-follow immediately
  *
+ * Hybrid physics lifecycle (Phase 3):
+ *   - physicsMode: 'KINEMATIC' (default) or 'DYNAMIC'
+ *   - KINEMATIC: existing math-driven movement. If rigidBody exists, position synced TO body.
+ *   - DYNAMIC: Rapier drives position. Unit reads back from rigidBody. WASD/path ignored.
+ *   - enterDynamic(impulse): switch to DYNAMIC, apply optional impulse
+ *   - exitDynamic(): settle back to KINEMATIC, snap to terrain, derive heading
+ *   - Settle: auto-exit after linear velocity < threshold for N consecutive ticks
+ *
  * Coordinate system:
  *   - "Up" = terrain surface normal at unit position
  *   - "Reference forward" = projection of world {0,1,0} onto tangent plane (→ "north")
@@ -31,6 +39,12 @@ const GRAVITY = 9.81;
 export class HeadlessUnit {
     /** @type {number} Fixed movement speed (world units per second) — matches client Unit.speed */
     static MOVE_SPEED = 5.0;
+
+    /** @type {number} Linear velocity threshold for settle detection (m/s) */
+    static SETTLE_VELOCITY_THRESHOLD = 0.5;
+
+    /** @type {number} Consecutive ticks below threshold to trigger settle */
+    static SETTLE_TICK_COUNT = 10;
 
     /**
      * @param {number} id - Deterministic entity ID (from IdGenerator or manifest)
@@ -91,6 +105,16 @@ export class HeadlessUnit {
 
         /** @type {boolean} Whether path loops back to start */
         this.pathClosed = false;
+
+        // Phase 3: Hybrid physics lifecycle
+        /** @type {'KINEMATIC' | 'DYNAMIC'} Physics mode */
+        this.physicsMode = 'KINEMATIC';
+
+        /** @type {import('@dimforge/rapier3d-compat').RigidBody|null} Rapier rigid body (set by Room) */
+        this.rigidBody = null;
+
+        /** @type {number} Consecutive ticks with velocity below settle threshold */
+        this._settleCounter = 0;
     }
 
     /**
@@ -172,6 +196,9 @@ export class HeadlessUnit {
     applyInput(command) {
         if (command.type !== 'MOVE_INPUT') return;
 
+        // DYNAMIC mode: ignore WASD input (Rapier drives position)
+        if (this.physicsMode === 'DYNAMIC') return;
+
         // Interrupt rule: direct WASD input cancels active path-follow
         const hasInput = command.forward || command.backward || command.left || command.right;
         if (hasInput && this.waypoints) {
@@ -223,6 +250,9 @@ export class HeadlessUnit {
      * @param {number} dtSec - Timestep in seconds
      */
     updatePosition(dtSec) {
+        // DYNAMIC mode: Rapier drives position — skip kinematic movement
+        if (this.physicsMode === 'DYNAMIC') return;
+
         // Phase 2B: delegate to path-follow if active
         if (this.waypoints && this.waypoints.length > 0) {
             this._followPath(dtSec);
@@ -313,6 +343,121 @@ export class HeadlessUnit {
 
         this._reprojectToTerrain();
         this._updateOrientation();
+    }
+
+    // ========================================
+    // Hybrid physics lifecycle (Phase 3)
+    // ========================================
+
+    /**
+     * Transition to DYNAMIC mode. Rapier takes over position control.
+     * The rigid body type is switched to dynamic and an optional impulse is applied.
+     * WASD input and path-follow are ignored while DYNAMIC.
+     *
+     * @param {import('./PhysicsWorld.js').PhysicsWorld} physicsWorld - For body type descriptors
+     * @param {{ x: number, y: number, z: number }} [impulse] - Optional impulse to apply
+     */
+    enterDynamic(physicsWorld, impulse) {
+        if (this.physicsMode === 'DYNAMIC') return;
+        if (!this.rigidBody) return;
+
+        this.physicsMode = 'DYNAMIC';
+        this._settleCounter = 0;
+
+        // Cancel any active path or WASD movement
+        this.clearPath();
+        this.speed = 0;
+        this.velocity = { x: 0, y: 0, z: 0 };
+
+        // Switch body type to dynamic
+        const RAPIER = physicsWorld.RAPIER;
+        this.rigidBody.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+        this.rigidBody.setGravityScale(0, true); // We use manual spherical gravity
+
+        // Sync position TO body before physics takes over
+        this.rigidBody.setTranslation(this.position, true);
+        this.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+
+        // Apply impulse if provided
+        if (impulse) {
+            this.rigidBody.applyImpulse(impulse, true);
+        }
+    }
+
+    /**
+     * Transition back to KINEMATIC mode. Math-driven movement resumes.
+     * Reads final position from rigid body, snaps to terrain, derives heading.
+     *
+     * @param {import('./PhysicsWorld.js').PhysicsWorld} physicsWorld - For body type descriptors
+     */
+    exitDynamic(physicsWorld) {
+        if (this.physicsMode !== 'DYNAMIC') return;
+        if (!this.rigidBody) return;
+
+        // Read final position from Rapier
+        const pos = this.rigidBody.translation();
+        this.position = { x: pos.x, y: pos.y, z: pos.z };
+
+        // Switch body type back to kinematic
+        const RAPIER = physicsWorld.RAPIER;
+        this.rigidBody.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
+        this.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+
+        this.physicsMode = 'KINEMATIC';
+        this._settleCounter = 0;
+
+        // Snap to terrain surface, reset vertical state
+        this.mode = 'GROUNDED';
+        this.altitude = 0;
+        this.verticalVelocity = 0;
+        this.speed = 0;
+        this.velocity = { x: 0, y: 0, z: 0 };
+        this._reprojectToTerrain();
+
+        // Derive heading from position (face "north" in tangent plane)
+        this._updateOrientation();
+    }
+
+    /**
+     * Sync kinematic unit position TO rigid body.
+     * Called before physics step for KINEMATIC units so terrain colliders
+     * can interact with other dynamic bodies nearby.
+     */
+    syncToRigidBody() {
+        if (!this.rigidBody) return;
+        if (this.physicsMode !== 'KINEMATIC') return;
+        this.rigidBody.setNextKinematicTranslation(this.position);
+    }
+
+    /**
+     * Sync DYNAMIC unit position FROM rigid body.
+     * Called after physics step. Also checks settle condition.
+     *
+     * @returns {boolean} True if the unit has settled (ready to exit DYNAMIC)
+     */
+    syncFromRigidBody() {
+        if (!this.rigidBody) return false;
+        if (this.physicsMode !== 'DYNAMIC') return false;
+
+        // Read position back from Rapier
+        const pos = this.rigidBody.translation();
+        this.position = { x: pos.x, y: pos.y, z: pos.z };
+
+        // Update orientation from new position
+        this._updateOrientation();
+
+        // Settle detection: check linear velocity magnitude
+        const vel = this.rigidBody.linvel();
+        const speedSq = vel.x * vel.x + vel.y * vel.y + vel.z * vel.z;
+        const threshold = HeadlessUnit.SETTLE_VELOCITY_THRESHOLD;
+
+        if (speedSq < threshold * threshold) {
+            this._settleCounter++;
+        } else {
+            this._settleCounter = 0;
+        }
+
+        return this._settleCounter >= HeadlessUnit.SETTLE_TICK_COUNT;
     }
 
     /**
