@@ -367,6 +367,16 @@ Default output: MD files under /quality or /docs.
     - **Room.js**: Wired TCM to simulation tick (ensure patches around units).
 - **Status**: **READY FOR STEP 3 (HYBRID LIFECYCLE)**.
 
+### 2026-02-13: Phase 3 Step 3 Merged (Hybrid Lifecycle)
+- **SHA**: `HEAD` (Merged `work/r013-phase3-hybrid-lifecycle`)
+- **Tag**: `savepoint/r013-phase3-hybrid-lifecycle`
+- **Scope**:
+    - **HeadlessUnit.js**: `enterDynamic(impulse)`, `exitDynamic()`, `settle` logic.
+    - **Room.js**: Sync loops (Kinematic->Body, Body->Dynamic).
+    - **Trigger**: Manual/Test only. No gameplay regression.
+- **Tests**: 885 PASS (+29).
+- **Status**: **READY FOR STEP 4 (DEFORMATION) or PHASE 4**.
+
 ### 2026-02-13: Claude Context Budget Rules (Binding)
 - **SHA**: `HEAD`
 - **Tag**: `savepoint/r013-claude-context-budget`
@@ -376,3 +386,13 @@ Default output: MD files under /quality or /docs.
     - **No Narratives**: Forbidden long filler.
     - **Format**: Decision, Changes, Verification, Risks.
     - **Gating**: Mandatory SHAs and Diffstats.
+
+### 2026-02-13: ChatGPT Prompt Budget Rules (Binding)
+- **SHA**: `HEAD`
+- **Tag**: `savepoint/r013-chatgpt-prompt-budget`
+- **Action**: Updated `docs/NOTES_CHATGPT.md` + `docs/SYSTEM_OVERVIEW.md`.
+- **Rules**:
+    - **No Narratives**: Concise prompts only.
+    - **Minimal Structure**: Anchor -> Mission -> Non-negotiables -> Deliverables -> Stop.
+    - **One Ask**: Don't bundle optional requests.
+    - **Pull Don't Push**: Wait for specific requests before expanding.

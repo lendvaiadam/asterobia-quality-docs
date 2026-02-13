@@ -79,6 +79,10 @@
     - **Scope:** `TerrainColliderManager.js` (patches, cache, eviction).
     - **Caps:** `maxPatches: 16`. Eviction every 20 ticks.
     - **Tests:** +22 Integration Tests. Total 856 PASS.
+- [x] **Phase 3 Step 3: Hybrid Lifecycle.** **MERGED** (SHA: `HEAD`).
+    - **Scope:** `HeadlessUnit.js` (Kinematic <-> Dynamic).
+    - **Trigger:** API-only / Test-only (No gameplay trigger yet).
+    - **Tests:** +29 Integration Tests. Total 885 PASS.
 - **CTO Ping #1**: APPROVED (2026-02-10)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
 - **Test State**: Vitest installed. 690 tests passed! (Clean).
