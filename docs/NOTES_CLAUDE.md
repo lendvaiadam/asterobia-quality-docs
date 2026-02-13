@@ -75,11 +75,11 @@
 
 Code quality > everything. Never sacrifice correctness or safety for brevity.
 
-### Default: Concise, High-Signal
-Every implementation update / commit summary uses the **Required Report Template** below.
-No hard line limit — but default is compact. Expand only when justified.
+### Principle
+*   **Concise by default; expand only when it prevents mistakes.**
+*   **Focus:** Code and decisions, not the "journey".
 
-### Required Report Template
+### Required Report Template (Preserved)
 ```
 **Branch**: `<branch>` | **HEAD**: `<sha>`
 **Commits**: `<sha>` <title> [, ...]
@@ -88,22 +88,20 @@ No hard line limit — but default is compact. Expand only when justified.
 **HU-Verify**:
 - <step 1>
 - <step 2>
-- ...  (2–4 bullets)
+...
 **Risks**: <1–3 bullets, only if relevant>
 **Defaults changed**: <explicit callout, or "none">
 ```
 
-### Forbidden (never output unless explicitly requested)
-*   **Tool logs**: No Bash/Read/Write/Explore/Grep traces in the reply.
-*   **Narratives**: No step-by-step diary, no "first I did X, then Y" recounting.
-*   **Redundant restating**: Do not repeat plans/specs already written in docs.
-*   **Speculative commentary**: No "I think" / "probably" hedging paragraphs.
+### Forbidden by Default (Strict)
+*   **Tool Logs/Transcripts**: NEVER output Bash/Read/Write traces or internal tool chains.
+*   **Narratives**: No "First I checked X, then I saw Y" diaries.
+*   **Long Excerpts**: No code dumps > 30 lines.
+*   **Redundant Restating**: Do not repeat the prompt back to the user.
 
-### Expand Only When Justified
-*   You MAY add detail beyond the template when:
-    - The user explicitly asks for more, OR
-    - It is genuinely necessary for correctness, safety, or a non-obvious decision.
-*   **Rule**: Label expanded sections: `**Detail (reason: <why>)**`
-*   Keep expanded content structured and non-redundant.
+### Allowed Exceptions (When Necessary)
+*   **Small Excerpts**: You may include a code snippet (<= 30 lines) ONLY if critical for context.
+*   **Justification**: You must explicitly caption it: `**Detail (Reason: <why needed>)**`.
+*   **Complex Debugging**: If explaining a subtle bug, a structured root-cause analysis is permitted.
 
-> **Reminder:** Concise output preserves context budget. Quality first, then brevity.
+> **Reminder:** Your output is expensive context. Don't waste it on logs.

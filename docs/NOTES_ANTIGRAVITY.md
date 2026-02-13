@@ -437,3 +437,11 @@ Default output: MD files under /quality or /docs.
     - **Rule**: Principle-based conciseness.
     - **Verification**: Checked for '8 lines' text (None found).
 - **Status**: **ACTIVE**.
+
+### 2026-02-13: Contract Tightening + Fact Check Failure
+- **SHA**: HEAD (Merged doc/contract-tightening)
+- **Tag**: savepoint/r013-claude-contract-tightened
+- **Scope**:
+    - **Contract**: docs/NOTES_CLAUDE.md updated. Forbidden: Tool logs/Narratives. Allowed: Small excerpts w/ reason.
+    - **Fact Check**: Commit 7b1aacf (Claimed MP Snapshot Smoothing) **NOT FOUND**. Status: UNVERIFIED.
+- **Status**: **ACTIVE**.
