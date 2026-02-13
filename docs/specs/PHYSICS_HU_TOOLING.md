@@ -81,7 +81,7 @@ Add a **"Physics Tools"** folder to the existing Tweakpane/GUI.
 *   [ ] `server/Room.js` (Implement `enablePhysics` runtime toggle & spawn logic).
 *   [ ] `src/UI/DebugPanel.js` (Add buttons/checkbox).
 *   [ ] `server/PhysicsEventService.js` (Ensure explosion math handles "Admin Trigger").
-*   [ ] **CRITICAL:** Re-Implement Missing Smoothing Logic (Phantom `7b1aacf`).
+
 
 ### Acceptance Criteria (HU-PASS)
 1.  **Toggle:** Clicking "Enable Physics" changes server logs to "Physics: ON" and enables rollover logic.

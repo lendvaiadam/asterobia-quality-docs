@@ -456,3 +456,8 @@ Default output: MD files under /quality or /docs.
     - **SHA**: `HEAD` (Merged `doc/contract-tightening`)
     - **Scope**: Explicitly banned tool logs/transcripts. Removed 'Simulated' language.
 - **Status**: **ACTIVE**.
+
+### 2026-02-13: Smoothing Accepted (User Override)
+- **Context**: User confirmed Phase 2B Smoothing works via LAUNCH_HU_TEST_PHASE2B.bat.
+- **Action**: Stopped tracking 7b1aacf as missing. Accepted HEAD state.
+- **Impact**: Removed re-implementation task from Physics Tooling Spec.
