@@ -8,6 +8,8 @@
  * Reference: docs/specs/R013_M07_GAME_LOOP.md Section 5
  */
 
+import { makeDraggable } from './makeDraggable.js';
+
 export class NetworkDebugPanel {
   /**
    * @param {Object} game - Game instance with sessionManager
@@ -59,7 +61,7 @@ export class NetworkDebugPanel {
       user-select: none;
     `;
 
-    // Title
+    // Title (drag handle)
     const title = document.createElement('div');
     title.style.cssText = `
       font-weight: bold;
@@ -67,9 +69,15 @@ export class NetworkDebugPanel {
       padding-bottom: 5px;
       border-bottom: 1px solid #0a0;
       color: #0f0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     `;
-    title.textContent = '\u{1F4E1} Network & Session';
+    title.innerHTML = '<span>\u{1F4E1} Network & Session</span><span style="color:#0a0;font-size:9px;">drag</span>';
     this.container.appendChild(title);
+
+    // Make draggable via title bar
+    makeDraggable(this.container, title);
 
     // Content area (updated by _update)
     this.contentDiv = document.createElement('div');

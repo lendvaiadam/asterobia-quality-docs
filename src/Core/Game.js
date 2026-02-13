@@ -35,6 +35,10 @@ import { SeatKeypadOverlay } from '../UI/SeatKeypadOverlay.js';
 import { JoinOverlay } from '../UI/JoinOverlay.js';
 import { MultiplayerHUD } from '../UI/MultiplayerHUD.js';
 import { AdaptivePerformance } from './AdaptivePerformance.js';
+import { MirrorTunerOverlay } from '../UI/MirrorTunerOverlay.js';
+
+/** Reusable quaternion for mirror mode slerp (avoids per-frame allocation) */
+const _mirrorSlerpTarget = new THREE.Quaternion();
 
 export class Game {
     constructor() {
@@ -366,6 +370,11 @@ export class Game {
         this._lastMoveInputSendMs = 0;
         this._MOVE_INPUT_INTERVAL_MS = 50; // 20Hz send rate
         this._manifestSent = false; // Phase 2A: SPAWN_MANIFEST sent exactly once
+        this._lastMirrorDiagMs = 0; // Dev-mode: last mirror diagnostics log timestamp
+        this._mirrorLerpEnabled = true; // Dev tuner: lerp ON/OFF (false = snap to latest)
+        this._positionSyncLerpSpeed = 0.12; // Phase 1 smooth: base lerp factor (frame-rate independent)
+        this._lastRenderTimeMs = 0; // For frame-rate independent lerp
+        this._mirrorTunerOverlay = new MirrorTunerOverlay(this); // Always visible
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();
@@ -932,15 +941,32 @@ export class Game {
             // Don't override Guest's own controlled unit
             if (unit === mySelectedUnit && unit.selectedBySlot === mySlot) continue;
 
-            // Apply position
+            // Store target for per-frame lerp (instead of snapping)
+            if (!unit._syncTarget) {
+                unit._syncTarget = { px: uData.px, py: uData.py, pz: uData.pz,
+                                     qx: uData.qx, qy: uData.qy, qz: uData.qz, qw: uData.qw };
+            } else {
+                unit._syncTarget.px = uData.px; unit._syncTarget.py = uData.py; unit._syncTarget.pz = uData.pz;
+                unit._syncTarget.qx = uData.qx; unit._syncTarget.qy = uData.qy;
+                unit._syncTarget.qz = uData.qz; unit._syncTarget.qw = uData.qw;
+            }
+            unit._syncReceived = true;
+
+            // Authoritative position (for FOW, logic systems)
             unit.position.set(uData.px, uData.py, uData.pz);
 
-            // Apply rotation
-            if (unit.mesh?.quaternion) {
-                unit.mesh.quaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
-            }
-            if (unit.headingQuaternion) {
-                unit.headingQuaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
+            // Rotation — snap on first sync, then lerp handles the rest per-frame
+            if (!unit._syncInitialized) {
+                if (unit.mesh?.quaternion) {
+                    unit.mesh.quaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
+                }
+                if (unit.headingQuaternion) {
+                    unit.headingQuaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
+                }
+                if (unit.mesh) {
+                    unit.mesh.position.set(uData.px, uData.py, uData.pz);
+                }
+                unit._syncInitialized = true;
             }
 
             // Reconstruct path from flat array [x,y,z, x,y,z, ...]
@@ -4060,7 +4086,8 @@ export class Game {
 
     /**
      * Phase 2A: Mirror mode sim tick — replaces normal simTick when server-authoritative.
-     * Does NOT call Unit.update(). Instead reads from SnapshotBuffer and sets interpolation targets.
+     * Does NOT call Unit.update(). Interpolation is handled per-frame in _mirrorModeRender().
+     * This method handles only visual shell reconciliation and MOVE_INPUT sending.
      * @param {number} tickCount - Current tick number
      */
     _mirrorModeSimTick(tickCount) {
@@ -4069,6 +4096,7 @@ export class Game {
         if (pair.next) {
             const nextUnits = new Map();
             for (const u of pair.next.units) nextUnits.set(u.id, u);
+
             for (const [id, snapUnit] of nextUnits) {
                 if (!this.units.some(u => u && u.id === id)) {
                     this._createVisualShellFromSnapshot(snapUnit);
@@ -4106,15 +4134,15 @@ export class Game {
                 }
             }
         }
-
-        // 4. Suppress Phase 1 POSITION_SYNC (do NOT call sendPositionSync in mirror mode)
-        // This is already handled by the early return at the top of simTick()
     }
 
     /**
      * R008: Apply interpolated positions to all units for smooth rendering.
      * Called by SimLoop.onRender after sim ticks, at 60fps.
      * This is RENDER-ONLY and does NOT mutate authoritative sim state.
+     *
+     * In mirror mode, delegates to _mirrorModeRender() which queries the
+     * SnapshotBuffer per-frame for its own alpha (decoupled from SimLoop accumulator).
      *
      * @param {number} alpha - Interpolation factor [0, 1] from SimLoop accumulator
      */
@@ -4127,31 +4155,67 @@ export class Game {
             return;
         }
 
+        // Phase 1 POSITION_SYNC: smooth remote units toward their sync target
+        // Frame-rate independent: same visual result at 30fps and 144fps
+        const now = performance.now();
+        const dtMs = this._lastRenderTimeMs > 0 ? Math.min(now - this._lastRenderTimeMs, 100) : 16.67;
+        this._lastRenderTimeMs = now;
+        const dtNorm = dtMs / 16.67; // normalize to 60fps (1.0 at 60fps, 2.0 at 30fps)
+        const baseSpeed = this._positionSyncLerpSpeed;
+        const factor = 1 - Math.pow(1 - baseSpeed, dtNorm);
+
+        const mySlot = this.sessionManager?.state?.mySlot ?? -1;
+
         this.units.forEach(unit => {
             if (!unit) return;
-            unit.applyInterpolatedRender(alpha);
+
+            // Only sync-lerp REMOTE units — local player's units are driven by Unit.update()
+            const isRemote = mySlot < 0 || (unit.ownerSlot !== mySlot && unit.selectedBySlot !== mySlot);
+
+            if (isRemote && unit._syncReceived && unit._syncTarget && unit.mesh && this._mirrorLerpEnabled) {
+                const t = unit._syncTarget;
+                // Frame-rate independent exponential lerp toward target
+                unit.mesh.position.x += (t.px - unit.mesh.position.x) * factor;
+                unit.mesh.position.y += (t.py - unit.mesh.position.y) * factor;
+                unit.mesh.position.z += (t.pz - unit.mesh.position.z) * factor;
+
+                // Frame-rate independent slerp quaternion
+                if (t.qw !== undefined) {
+                    _mirrorSlerpTarget.set(t.qx, t.qy, t.qz, t.qw);
+                    unit.mesh.quaternion.slerp(_mirrorSlerpTarget, factor);
+                    if (unit.headingQuaternion) {
+                        unit.headingQuaternion.copy(unit.mesh.quaternion);
+                    }
+                }
+            } else {
+                unit.applyInterpolatedRender(alpha);
+            }
         });
     }
 
     /**
-     * Per-frame mirror mode interpolation. Called at 60fps.
-     * Queries SnapshotBuffer for the current interpolation pair and alpha,
-     * then directly lerps/slerps unit mesh positions/rotations.
+     * Mirror mode per-frame render: queries SnapshotBuffer for interpolation pair + alpha
+     * at 60fps, directly lerps/slerps mesh positions and quaternions.
+     *
+     * This eliminates the dual-clock problem where _mirrorModeSimTick set interp targets
+     * at 20Hz but _applyInterpolatedRender used the SimLoop accumulator alpha (independent
+     * 60fps clock), causing micro-stutter at tick boundaries.
+     *
      * @private
      */
     _mirrorModeRender() {
         const pair = this._snapshotBuffer.getInterpolationPair();
         if (!pair.prev || !pair.next) return;
 
+        const alpha = pair.alpha;
+
         const prevUnits = new Map();
         for (const u of pair.prev.units) prevUnits.set(u.id, u);
         const nextUnits = new Map();
         for (const u of pair.next.units) nextUnits.set(u.id, u);
 
-        const snapshotAlpha = Math.max(0, Math.min(2.0, pair.alpha));
-
         for (const unit of this.units) {
-            if (!unit || !unit.mesh) continue;
+            if (!unit) continue;
 
             const prevU = prevUnits.get(unit.id);
             const nextU = nextUnits.get(unit.id);
@@ -4159,41 +4223,57 @@ export class Game {
 
             const isTeleport = pair.teleports.has(unit.id);
 
-            if (isTeleport || !prevU) {
-                // Snap
-                unit.mesh.position.set(nextU.px, nextU.py, nextU.pz);
-                unit.position.set(nextU.px, nextU.py, nextU.pz);
-                if (nextU.qw !== undefined) {
-                    unit.mesh.quaternion.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+            const doLerp = this._mirrorLerpEnabled && !isTeleport && prevU;
+
+            if (doLerp) {
+                // Lerp position between prev and next using SnapshotBuffer alpha
+                const x = prevU.px + (nextU.px - prevU.px) * alpha;
+                const y = prevU.py + (nextU.py - prevU.py) * alpha;
+                const z = prevU.pz + (nextU.pz - prevU.pz) * alpha;
+                if (unit.mesh) {
+                    unit.mesh.position.set(x, y, z);
                 }
             } else {
-                // Lerp position using snapshot alpha (may exceed 1.0 during extrapolation)
-                const a = snapshotAlpha;
-                unit.mesh.position.set(
-                    prevU.px + (nextU.px - prevU.px) * a,
-                    prevU.py + (nextU.py - prevU.py) * a,
-                    prevU.pz + (nextU.pz - prevU.pz) * a
-                );
-                // Update authoritative position for FOW / camera
-                unit.position.copy(unit.mesh.position);
-
-                // Slerp quaternion
-                if (prevU.qw !== undefined && nextU.qw !== undefined) {
-                    unit._interpPrevQuat.set(prevU.qx, prevU.qy, prevU.qz, prevU.qw);
-                    unit._interpCurrQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
-                    unit.mesh.quaternion.copy(unit._interpPrevQuat);
-                    unit.mesh.quaternion.slerp(unit._interpCurrQuat, Math.min(a, 1.0));
+                // Snap: teleport, new unit, or lerp disabled
+                if (unit.mesh) {
+                    unit.mesh.position.set(nextU.px, nextU.py, nextU.pz);
                 }
             }
+            unit.position.set(nextU.px, nextU.py, nextU.pz);
 
-            // Keep headingQuaternion in sync
-            if (!unit.headingQuaternion) {
-                unit.headingQuaternion = unit.mesh.quaternion.clone();
-            } else {
+            // Quaternion interpolation
+            if (nextU.qw !== undefined && unit.mesh) {
+                if (doLerp && prevU.qw !== undefined) {
+                    // Slerp between prev and next quaternions
+                    unit.mesh.quaternion.set(prevU.qx, prevU.qy, prevU.qz, prevU.qw);
+                    _mirrorSlerpTarget.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+                    unit.mesh.quaternion.slerp(_mirrorSlerpTarget, Math.min(alpha, 1));
+                } else {
+                    unit.mesh.quaternion.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+                }
+
+                if (!unit.headingQuaternion) {
+                    unit.headingQuaternion = unit.mesh.quaternion.clone();
+                }
                 unit.headingQuaternion.copy(unit.mesh.quaternion);
+            } else if (!unit.headingQuaternion && unit.mesh) {
+                unit.headingQuaternion = unit.mesh.quaternion.clone();
             }
 
             unit._interpInitialized = true;
+        }
+
+        // Dev-mode diagnostics: log buffer health every 5 seconds
+        if (this._isDevMode) {
+            const now = performance.now();
+            if (now - this._lastMirrorDiagMs >= 5000) {
+                this._lastMirrorDiagMs = now;
+                const stats = this._snapshotBuffer.getArrivalStats();
+                console.log(
+                    `[Mirror] buf=${this._snapshotBuffer.size} uf=${this._snapshotBuffer.underflowCount}` +
+                    ` dt=${stats.mean.toFixed(1)}±[${stats.min},${stats.max}]ms α=${alpha.toFixed(3)}`
+                );
+            }
         }
     }
 

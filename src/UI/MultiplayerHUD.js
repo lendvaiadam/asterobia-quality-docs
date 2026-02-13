@@ -12,6 +12,8 @@
  * z-index: 10000 (below overlays at 25000, above game canvas)
  */
 
+import { makeDraggable } from './makeDraggable.js';
+
 export class MultiplayerHUD {
     /**
      * @param {Object} game - Game instance reference
@@ -256,7 +258,7 @@ export class MultiplayerHUD {
             z-index: 10000;
             font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
             user-select: none;
-            pointer-events: none;
+            pointer-events: auto;
             display: none;
             opacity: 0;
             transition: opacity 0.35s ease;
@@ -460,6 +462,9 @@ export class MultiplayerHUD {
 
         document.body.appendChild(panel);
         this._panel = panel;
+
+        // Make draggable (drag from anywhere on the panel)
+        makeDraggable(panel);
     }
 
     // ========================================

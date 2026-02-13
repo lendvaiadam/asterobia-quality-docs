@@ -10,6 +10,7 @@
  */
 
 import { globalCommandQueue } from '../SimCore/runtime/CommandQueue.js';
+import { makeDraggable } from './makeDraggable.js';
 
 export class CommandDebugOverlay {
     constructor() {
@@ -50,15 +51,34 @@ export class CommandDebugOverlay {
             color: #0f0;
             font-family: monospace;
             font-size: 11px;
-            padding: 10px;
+            padding: 0;
             border: 1px solid #0f0;
             border-radius: 4px;
             z-index: 15000;
             overflow-y: auto;
             display: none;
         `;
+
+        // Drag handle title bar
+        const titleBar = document.createElement('div');
+        titleBar.style.cssText = `
+            padding: 5px 10px;
+            border-bottom: 1px solid #0a0;
+            font-weight: bold; color: #0f0; font-size: 11px;
+            display: flex; justify-content: space-between;
+        `;
+        titleBar.innerHTML = '<span>CMD Debug</span><span style="color:#0a0;font-size:9px;">drag</span>';
+        el.appendChild(titleBar);
+
+        // Content wrapper (scrollable)
+        this._contentWrap = document.createElement('div');
+        this._contentWrap.style.cssText = 'padding: 10px; max-height: 350px; overflow-y: auto;';
+        el.appendChild(this._contentWrap);
+
         document.body.appendChild(el);
         this._element = el;
+
+        makeDraggable(el, titleBar);
 
         // R006-fix: Add visible toggle button (fallback for keyboard focus issues)
         this._createToggleButton();
@@ -187,7 +207,7 @@ export class CommandDebugOverlay {
             }
         }
 
-        this._element.innerHTML = html;
+        this._contentWrap.innerHTML = html;
     }
 
     _formatCommand(cmd, status) {
