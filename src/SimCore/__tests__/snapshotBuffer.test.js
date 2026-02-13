@@ -323,28 +323,34 @@ describe('SnapshotBuffer: getInterpolationPair', () => {
         expect(result.alpha).toBeCloseTo(0.98, 1);
     });
 
-    it('at exactly latest serverTimeMs, clamps to latest (no extrapolation)', () => {
+    it('at exactly latest serverTimeMs, extrapolates with alpha=1.0', () => {
         const buf = new SnapshotBuffer({ interpDelayMs: 0 });
         buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
         buf.push(makeSnapshot(2, 1050, [makeUnit(1)]), 1050);
 
-        // renderTime === latest serverTimeMs → hold at latest
+        // renderTime === latest serverTimeMs → bounded extrapolation alpha=1.0
         const result = buf.getInterpolationPair(1050);
-        expect(result.prev.tick).toBe(2);
+        expect(result.prev.tick).toBe(1);
         expect(result.next.tick).toBe(2);
-        expect(result.alpha).toBe(0);
+        expect(result.alpha).toBeCloseTo(1.0, 2);
     });
 
-    it('clamps to latest when renderTime is past all snapshots (no extrapolation)', () => {
-        const buf = new SnapshotBuffer({ interpDelayMs: 0 });
+    it('bounded extrapolation when renderTime is past all snapshots', () => {
+        const buf = new SnapshotBuffer({ interpDelayMs: 0, maxExtrapolateMs: 100 });
         buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
         buf.push(makeSnapshot(2, 1050, [makeUnit(1)]), 1050);
 
-        // renderTime = 9999 (way past latest)
-        const result = buf.getInterpolationPair(9999);
-        expect(result.prev.tick).toBe(2);
+        // renderTime = 1100 (50ms past latest, within 100ms extrapolation cap)
+        const result = buf.getInterpolationPair(1100);
+        expect(result.prev.tick).toBe(1);
         expect(result.next.tick).toBe(2);
-        expect(result.alpha).toBe(0);
+        expect(result.alpha).toBeCloseTo(2.0, 2); // 1.0 + 50/50
+
+        // renderTime = 9999 (way past latest, capped at maxExtrapolateMs=100)
+        const result2 = buf.getInterpolationPair(9999);
+        expect(result2.prev.tick).toBe(1);
+        expect(result2.next.tick).toBe(2);
+        expect(result2.alpha).toBe(2.0); // Capped at 1.0 + 100/50 = 3.0, but also min(2.0, ...) caps it
     });
 
     it('clamps to earliest pair when renderTime is before all snapshots', () => {
@@ -556,5 +562,108 @@ describe('SnapshotBuffer: realistic 20Hz scenario', () => {
         // Oldest retained should be tick 6
         const result = buf.getInterpolationPair(1000 + 7 * 50);
         expect(result.prev.tick).toBeGreaterThanOrEqual(6);
+    });
+});
+
+// ============================================================
+// Underflow / extrapolation / diagnostics
+// ============================================================
+
+describe('SnapshotBuffer: underflow and extrapolation', () => {
+    it('underflow counter increments when render time is past all snapshots', () => {
+        const buf = new SnapshotBuffer({ interpDelayMs: 0 });
+        buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
+        buf.push(makeSnapshot(2, 1050, [makeUnit(1)]), 1050);
+
+        expect(buf.underflowCount).toBe(0);
+
+        buf.getInterpolationPair(1100); // Past latest
+        expect(buf.underflowCount).toBe(1);
+
+        buf.getInterpolationPair(1200); // Still past
+        expect(buf.underflowCount).toBe(2);
+    });
+
+    it('no underflow when render time is within buffer range', () => {
+        const buf = new SnapshotBuffer({ interpDelayMs: 0 });
+        buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
+        buf.push(makeSnapshot(2, 1050, [makeUnit(1)]), 1050);
+        buf.push(makeSnapshot(3, 1100, [makeUnit(1)]), 1100);
+
+        buf.getInterpolationPair(1025); // Between snap 1 and 2
+        expect(buf.underflowCount).toBe(0);
+    });
+
+    it('extrapolation alpha exceeds 1.0 but is bounded by cap', () => {
+        const buf = new SnapshotBuffer({ interpDelayMs: 0, maxExtrapolateMs: 50 });
+        buf.push(makeSnapshot(1, 1000, [makeUnit(1, 0, 0, 0)]), 1000);
+        buf.push(makeSnapshot(2, 1050, [makeUnit(1, 1, 0, 0)]), 1050);
+
+        // 25ms past latest → alpha = 1.0 + 25/50 = 1.5
+        const r1 = buf.getInterpolationPair(1075);
+        expect(r1.alpha).toBeCloseTo(1.5, 2);
+
+        // Way past → capped at 1.0 + min(overshoot, 50ms)/50ms = 2.0
+        const r2 = buf.getInterpolationPair(9999);
+        expect(r2.alpha).toBe(2.0);
+    });
+
+    it('extrapolation with single snapshot falls back to hold', () => {
+        const buf = new SnapshotBuffer({ interpDelayMs: 0 });
+        buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
+
+        // Only 1 snapshot → can't extrapolate, hold at latest
+        const result = buf.getInterpolationPair(2000);
+        expect(result.prev.tick).toBe(1);
+        expect(result.next.tick).toBe(1);
+        expect(result.alpha).toBe(0);
+    });
+
+    it('extrapolation still detects teleports', () => {
+        const buf = new SnapshotBuffer({ interpDelayMs: 0, teleportThreshold: 5 });
+        buf.push(makeSnapshot(1, 1000, [makeUnit(1, 0, 0, 0)]), 1000);
+        buf.push(makeSnapshot(2, 1050, [makeUnit(1, 100, 0, 0)]), 1050); // Big jump
+
+        const result = buf.getInterpolationPair(1100); // Extrapolation
+        expect(result.teleports.has(1)).toBe(true);
+    });
+});
+
+describe('SnapshotBuffer: diagnostics', () => {
+    it('getArrivalStats returns correct min/avg/max', () => {
+        const buf = new SnapshotBuffer({ interpDelayMs: 0 });
+
+        buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
+        buf.push(makeSnapshot(2, 1050, [makeUnit(1)]), 1040); // interval 40ms
+        buf.push(makeSnapshot(3, 1100, [makeUnit(1)]), 1100); // interval 60ms
+        buf.push(makeSnapshot(4, 1150, [makeUnit(1)]), 1150); // interval 50ms
+
+        const stats = buf.getArrivalStats();
+        expect(stats.count).toBe(3); // 3 intervals from 4 pushes
+        expect(stats.min).toBe(40);
+        expect(stats.max).toBe(60);
+        expect(stats.avg).toBe(50);
+    });
+
+    it('getArrivalStats returns zeros on empty/single push', () => {
+        const buf = new SnapshotBuffer();
+        expect(buf.getArrivalStats().count).toBe(0);
+
+        buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
+        expect(buf.getArrivalStats().count).toBe(0); // Need 2 pushes for 1 interval
+    });
+
+    it('reset clears all diagnostic counters', () => {
+        const buf = new SnapshotBuffer({ interpDelayMs: 0 });
+        buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
+        buf.push(makeSnapshot(2, 1050, [makeUnit(1)]), 1050);
+        buf.getInterpolationPair(2000); // Trigger underflow
+
+        expect(buf.underflowCount).toBe(1);
+        expect(buf.getArrivalStats().count).toBe(1);
+
+        buf.reset();
+        expect(buf.underflowCount).toBe(0);
+        expect(buf.getArrivalStats().count).toBe(0);
     });
 });

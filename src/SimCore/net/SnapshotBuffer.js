@@ -30,10 +30,11 @@
 export class SnapshotBuffer {
     /**
      * @param {Object} [options]
-     * @param {number} [options.capacity=60]         - Ring buffer size (snapshots)
-     * @param {number} [options.interpDelayMs=100]    - Render delay behind server time (ms)
-     * @param {number} [options.teleportThreshold=10] - Distance for snap-instead-of-lerp
-     * @param {number} [options.emaAlpha=0.1]         - EMA smoothing factor for clock offset
+     * @param {number} [options.capacity=60]           - Ring buffer size (snapshots)
+     * @param {number} [options.interpDelayMs=100]      - Render delay behind server time (ms)
+     * @param {number} [options.teleportThreshold=10]   - Distance for snap-instead-of-lerp
+     * @param {number} [options.emaAlpha=0.1]           - EMA smoothing factor for clock offset
+     * @param {number} [options.maxExtrapolateMs=100]   - Max ms to extrapolate past latest snapshot
      */
     constructor(options = {}) {
         /** @type {number} Maximum snapshots to retain */
@@ -47,6 +48,9 @@ export class SnapshotBuffer {
 
         /** @type {number} EMA smoothing factor (0 < α ≤ 1) */
         this._emaAlpha = options.emaAlpha ?? 0.1;
+
+        /** @type {number} Maximum extrapolation beyond latest snapshot (ms) */
+        this._maxExtrapolateMs = options.maxExtrapolateMs ?? 100;
 
         /** @type {ServerSnapshot[]} Ring buffer storage */
         this._buffer = [];
@@ -65,6 +69,19 @@ export class SnapshotBuffer {
 
         /** @type {number} Rejected snapshot count (out-of-order / duplicate) */
         this._rejectedCount = 0;
+
+        // Diagnostics
+        /** @type {number} Underflow count (render time past all snapshots) */
+        this._underflowCount = 0;
+
+        /** @type {number[]} Recent snapshot arrival intervals (ms), last N */
+        this._arrivalIntervals = [];
+
+        /** @type {number} Local time of last push (for interval tracking) */
+        this._lastPushLocalMs = 0;
+
+        /** @type {number} Max arrival intervals to track */
+        this._maxIntervalSamples = 60;
     }
 
     /**
@@ -100,6 +117,16 @@ export class SnapshotBuffer {
             // EMA smoothing: smoothedOffset += α * (rawOffset - smoothedOffset)
             this._smoothedOffset += this._emaAlpha * (rawOffset - this._smoothedOffset);
         }
+
+        // Track arrival intervals for diagnostics
+        if (this._lastPushLocalMs > 0) {
+            const interval = now - this._lastPushLocalMs;
+            this._arrivalIntervals.push(interval);
+            if (this._arrivalIntervals.length > this._maxIntervalSamples) {
+                this._arrivalIntervals.shift();
+            }
+        }
+        this._lastPushLocalMs = now;
 
         // Insert into ring buffer (sorted by tick, newest at end)
         this._buffer.push(snapshot);
@@ -171,7 +198,25 @@ export class SnapshotBuffer {
 
         // Clamp indices
         if (nextIdx >= this._buffer.length) {
-            // renderTime is past all snapshots — hold at latest (no extrapolation)
+            // renderTime is past all snapshots — bounded extrapolation
+            this._underflowCount++;
+
+            if (this._buffer.length >= 2) {
+                // Extrapolate using the last two snapshots, bounded by maxExtrapolateMs
+                const prev = this._buffer[this._buffer.length - 2];
+                const next = this._buffer[this._buffer.length - 1];
+                const span = next.serverTimeMs - prev.serverTimeMs;
+
+                if (span > 0) {
+                    const overshoot = renderTime - next.serverTimeMs;
+                    const clampedOvershoot = Math.min(overshoot, this._maxExtrapolateMs);
+                    const alpha = Math.min(2.0, 1.0 + clampedOvershoot / span);
+                    const teleports = this._detectTeleports(prev, next);
+                    return { prev, next, alpha, teleports };
+                }
+            }
+
+            // Fallback: hold at latest
             const latest = this._buffer[this._buffer.length - 1];
             return { prev: latest, next: latest, alpha: 0, teleports: new Set() };
         }
@@ -266,6 +311,34 @@ export class SnapshotBuffer {
         return this._buffer.length > 0 ? this._buffer[this._buffer.length - 1] : null;
     }
 
+    /** @returns {number} Underflow count (render time past all snapshots) */
+    get underflowCount() {
+        return this._underflowCount;
+    }
+
+    /**
+     * Get snapshot arrival interval statistics.
+     * @returns {{ min: number, avg: number, max: number, count: number }}
+     */
+    getArrivalStats() {
+        const intervals = this._arrivalIntervals;
+        if (intervals.length === 0) {
+            return { min: 0, avg: 0, max: 0, count: 0 };
+        }
+        let min = Infinity, max = -Infinity, sum = 0;
+        for (const v of intervals) {
+            if (v < min) min = v;
+            if (v > max) max = v;
+            sum += v;
+        }
+        return {
+            min: Math.round(min),
+            avg: Math.round(sum / intervals.length),
+            max: Math.round(max),
+            count: intervals.length
+        };
+    }
+
     /**
      * Reset the buffer to initial state. Used for reconnect or mode change.
      */
@@ -276,5 +349,8 @@ export class SnapshotBuffer {
         this._firstSnapshot = true;
         this._pushCount = 0;
         this._rejectedCount = 0;
+        this._underflowCount = 0;
+        this._arrivalIntervals = [];
+        this._lastPushLocalMs = 0;
     }
 }

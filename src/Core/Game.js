@@ -981,6 +981,21 @@ export class Game {
         }
 
         this._snapshotBuffer.push(msg);
+
+        // Debug-only: periodic snapshot buffer stats (every 5 seconds)
+        if (this._isDevMode) {
+            const now = performance.now();
+            if (!this._lastSnapDiagMs || now - this._lastSnapDiagMs > 5000) {
+                this._lastSnapDiagMs = now;
+                const stats = this._snapshotBuffer.getArrivalStats();
+                console.log(
+                    `[SnapshotBuffer] depth=${this._snapshotBuffer.size}` +
+                    ` underflows=${this._snapshotBuffer.underflowCount}` +
+                    ` dt: min=${stats.min} avg=${stats.avg} max=${stats.max}ms` +
+                    ` (${stats.count} samples)`
+                );
+            }
+        }
     }
 
     // R012: Update DB status in unified NetworkDebugPanel (called by save/load)
@@ -4049,73 +4064,19 @@ export class Game {
      * @param {number} tickCount - Current tick number
      */
     _mirrorModeSimTick(tickCount) {
-        // 1. Get interpolation pair from SnapshotBuffer
+        // 1. Reconcile: create visual shells for server units missing locally
         const pair = this._snapshotBuffer.getInterpolationPair();
-        if (!pair.prev || !pair.next) return; // No snapshots yet
-
-        // 2. Apply snapshot positions to unit interpolation targets
-        const prevUnits = new Map();
-        for (const u of pair.prev.units) prevUnits.set(u.id, u);
-        const nextUnits = new Map();
-        for (const u of pair.next.units) nextUnits.set(u.id, u);
-
-        for (const unit of this.units) {
-            if (!unit) continue;
-
-            const prevU = prevUnits.get(unit.id);
-            const nextU = nextUnits.get(unit.id);
-            if (!nextU) continue; // Unit not in server snapshot
-
-            const isTeleport = pair.teleports.has(unit.id);
-
-            if (isTeleport || !prevU) {
-                // Teleport or new unit: snap instantly
-                unit._interpPrevPos.set(nextU.px, nextU.py, nextU.pz);
-                unit._interpCurrPos.set(nextU.px, nextU.py, nextU.pz);
-                unit.position.set(nextU.px, nextU.py, nextU.pz);
-            } else {
-                // Normal interpolation targets
-                unit._interpPrevPos.set(prevU.px, prevU.py, prevU.pz);
-                unit._interpCurrPos.set(nextU.px, nextU.py, nextU.pz);
-                // Update authoritative position to latest for other systems (FOW, etc.)
-                unit.position.set(nextU.px, nextU.py, nextU.pz);
-            }
-
-            // Phase 2A: Apply orientation quaternion from server snapshot
-            // Server sends qx/qy/qz/qw aligned to terrain normal + heading direction.
-            // Client applies directly — no local terrain fixup (prevents vibration).
-            if (nextU.qw !== undefined && unit.mesh) {
-                if (isTeleport || !prevU || prevU.qw === undefined) {
-                    // Snap quaternion (teleport or first frame)
-                    unit._interpPrevQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
-                    unit._interpCurrQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
-                } else {
-                    // Smooth interpolation between prev and next quaternions
-                    unit._interpPrevQuat.set(prevU.qx, prevU.qy, prevU.qz, prevU.qw);
-                    unit._interpCurrQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+        if (pair.next) {
+            const nextUnits = new Map();
+            for (const u of pair.next.units) nextUnits.set(u.id, u);
+            for (const [id, snapUnit] of nextUnits) {
+                if (!this.units.some(u => u && u.id === id)) {
+                    this._createVisualShellFromSnapshot(snapUnit);
                 }
-
-                // Keep headingQuaternion in sync (used by camera, tire tracks, etc.)
-                if (!unit.headingQuaternion) {
-                    unit.headingQuaternion = unit.mesh.quaternion.clone();
-                }
-                unit.headingQuaternion.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
-            } else if (!unit.headingQuaternion && unit.mesh) {
-                // Fallback for snapshots without quaternion data
-                unit.headingQuaternion = unit.mesh.quaternion.clone();
-            }
-
-            unit._interpInitialized = true;
-        }
-
-        // 2b. Reconcile: create visual shells for server units missing locally
-        for (const [id, snapUnit] of nextUnits) {
-            if (!this.units.some(u => u && u.id === id)) {
-                this._createVisualShellFromSnapshot(snapUnit);
             }
         }
 
-        // 3. Send MOVE_INPUT at ~20Hz with latching
+        // 2. Send MOVE_INPUT at ~20Hz with latching
         const now = performance.now();
         if (now - this._lastMoveInputSendMs >= this._MOVE_INPUT_INTERVAL_MS) {
             this._lastMoveInputSendMs = now;
@@ -4158,10 +4119,82 @@ export class Game {
      * @param {number} alpha - Interpolation factor [0, 1] from SimLoop accumulator
      */
     _applyInterpolatedRender(alpha) {
+        // Mirror mode: interpolate directly from SnapshotBuffer per render frame.
+        // This decouples visual smoothing from the 20Hz sim tick boundary,
+        // eliminating micro-stutter caused by alpha discontinuities.
+        if (this._mirrorMode) {
+            this._mirrorModeRender();
+            return;
+        }
+
         this.units.forEach(unit => {
             if (!unit) return;
             unit.applyInterpolatedRender(alpha);
         });
+    }
+
+    /**
+     * Per-frame mirror mode interpolation. Called at 60fps.
+     * Queries SnapshotBuffer for the current interpolation pair and alpha,
+     * then directly lerps/slerps unit mesh positions/rotations.
+     * @private
+     */
+    _mirrorModeRender() {
+        const pair = this._snapshotBuffer.getInterpolationPair();
+        if (!pair.prev || !pair.next) return;
+
+        const prevUnits = new Map();
+        for (const u of pair.prev.units) prevUnits.set(u.id, u);
+        const nextUnits = new Map();
+        for (const u of pair.next.units) nextUnits.set(u.id, u);
+
+        const snapshotAlpha = Math.max(0, Math.min(2.0, pair.alpha));
+
+        for (const unit of this.units) {
+            if (!unit || !unit.mesh) continue;
+
+            const prevU = prevUnits.get(unit.id);
+            const nextU = nextUnits.get(unit.id);
+            if (!nextU) continue;
+
+            const isTeleport = pair.teleports.has(unit.id);
+
+            if (isTeleport || !prevU) {
+                // Snap
+                unit.mesh.position.set(nextU.px, nextU.py, nextU.pz);
+                unit.position.set(nextU.px, nextU.py, nextU.pz);
+                if (nextU.qw !== undefined) {
+                    unit.mesh.quaternion.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+                }
+            } else {
+                // Lerp position using snapshot alpha (may exceed 1.0 during extrapolation)
+                const a = snapshotAlpha;
+                unit.mesh.position.set(
+                    prevU.px + (nextU.px - prevU.px) * a,
+                    prevU.py + (nextU.py - prevU.py) * a,
+                    prevU.pz + (nextU.pz - prevU.pz) * a
+                );
+                // Update authoritative position for FOW / camera
+                unit.position.copy(unit.mesh.position);
+
+                // Slerp quaternion
+                if (prevU.qw !== undefined && nextU.qw !== undefined) {
+                    unit._interpPrevQuat.set(prevU.qx, prevU.qy, prevU.qz, prevU.qw);
+                    unit._interpCurrQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+                    unit.mesh.quaternion.copy(unit._interpPrevQuat);
+                    unit.mesh.quaternion.slerp(unit._interpCurrQuat, Math.min(a, 1.0));
+                }
+            }
+
+            // Keep headingQuaternion in sync
+            if (!unit.headingQuaternion) {
+                unit.headingQuaternion = unit.mesh.quaternion.clone();
+            } else {
+                unit.headingQuaternion.copy(unit.mesh.quaternion);
+            }
+
+            unit._interpInitialized = true;
+        }
     }
 
     /**
