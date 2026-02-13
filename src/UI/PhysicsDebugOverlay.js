@@ -2,8 +2,11 @@
  * PhysicsDebugOverlay — On-screen HUD showing physics state of units.
  *
  * Shows per-unit physicsMode (KINEMATIC/DYNAMIC), mode, altitude.
- * Provides dev buttons: Trigger Explosion, Place Mine.
+ * Provides dev buttons: Trigger Explosion, Place Mine, Spawn Rock.
  * Only visible in dev mode (?dev=1).
+ *
+ * Reads from SERVER_SNAPSHOT buffer when available (mirror/guest mode),
+ * otherwise falls back to local game.units (host mode).
  */
 
 import { makeDraggable } from './makeDraggable.js';
@@ -14,7 +17,9 @@ export class PhysicsDebugOverlay {
         this.game = game;
         this._el = null;
         this._statsEl = null;
+        this._statusEl = null;
         this._interval = null;
+        this._statusTimer = null;
         this._build();
     }
 
@@ -66,10 +71,15 @@ export class PhysicsDebugOverlay {
         btnRow.appendChild(btnRock);
         content.appendChild(btnRow);
 
+        // Status area (persistent feedback for button clicks)
+        this._statusEl = document.createElement('div');
+        this._statusEl.style.cssText = 'min-height: 16px;';
+        content.appendChild(this._statusEl);
+
         // Stats area
         this._statsEl = document.createElement('div');
         this._statsEl.style.cssText = 'line-height: 1.5;';
-        this._statsEl.textContent = 'Waiting for snapshot...';
+        this._statsEl.textContent = 'Waiting...';
         content.appendChild(this._statsEl);
 
         el.appendChild(content);
@@ -98,19 +108,39 @@ export class PhysicsDebugOverlay {
     /** @private */
     _update() {
         const game = this.game;
-        if (!game._snapshotBuffer) {
-            this._statsEl.textContent = 'No snapshot buffer';
+
+        // Try snapshot buffer first (mirror/guest mode)
+        if (game._snapshotBuffer) {
+            const pair = game._snapshotBuffer.getInterpolationPair();
+            if (pair.next) {
+                this._renderUnits(pair.next.units, `tick ${pair.next.tick} | buf ${game._snapshotBuffer.size} | mirror`);
+                return;
+            }
+        }
+
+        // Fallback: read from local game.units (host mode)
+        const localUnits = game.units?.filter(u => u);
+        if (localUnits && localUnits.length > 0) {
+            const unitData = localUnits.map(u => ({
+                id: u.id,
+                physicsMode: u.physicsMode || 'N/A',
+                mode: u.mode || u.state || '?',
+                altitude: u.altitude || 0,
+                speed: u.speed || 0
+            }));
+            this._renderUnits(unitData, `local | ${localUnits.length} units`);
             return;
         }
 
-        const pair = game._snapshotBuffer.getInterpolationPair();
-        if (!pair.next) {
-            this._statsEl.textContent = 'No snapshots yet';
-            return;
-        }
+        this._statsEl.textContent = 'No units yet (HOST + START first)';
+    }
 
-        const units = pair.next.units;
-        let html = `<div style="color:#888">tick ${pair.next.tick} | buf ${game._snapshotBuffer.size} | α ${pair.alpha.toFixed(2)}</div>`;
+    /**
+     * Render unit list to stats area.
+     * @private
+     */
+    _renderUnits(units, headerText) {
+        let html = `<div style="color:#888">${headerText}</div>`;
 
         for (const u of units) {
             const isDynamic = u.physicsMode === 'DYNAMIC';
@@ -123,9 +153,6 @@ export class PhysicsDebugOverlay {
                 `spd:${(u.speed || 0).toFixed(1)}` +
                 `</div>`;
         }
-
-        // Show mine count if available
-        html += `<div style="color:#888; margin-top:4px">teleports: ${pair.teleports.size}</div>`;
 
         this._statsEl.innerHTML = html;
     }
@@ -166,19 +193,25 @@ export class PhysicsDebugOverlay {
         this._showStatus(`ROCK spawned near U${unit.id}`);
     }
 
-    /** @private */
+    /**
+     * Show a status message that persists for 3 seconds (not overwritten by _update).
+     * @private
+     */
     _showStatus(msg, isError = false) {
-        if (!this._statsEl) return;
+        if (!this._statusEl) return;
         const color = isError ? '#f44' : '#0ff';
-        const statusDiv = `<div style="color:${color};font-weight:bold;margin-bottom:4px">${msg}</div>`;
-        this._statsEl.innerHTML = statusDiv + this._statsEl.innerHTML;
+        this._statusEl.innerHTML = `<div style="color:${color};font-weight:bold">${msg}</div>`;
+        if (this._statusTimer) clearTimeout(this._statusTimer);
+        this._statusTimer = setTimeout(() => {
+            this._statusEl.innerHTML = '';
+        }, 3000);
     }
 
     /** @private */
     async _sendDevCommand(action, payload) {
         const sm = this.game.sessionManager;
         if (!sm || !sm.transport || !sm._sessionChannel) {
-            this._showStatus('No active session!', true);
+            this._showStatus('No active session! (HOST GAME first)', true);
             return;
         }
         try {
@@ -190,6 +223,7 @@ export class PhysicsDebugOverlay {
 
     destroy() {
         if (this._interval) clearInterval(this._interval);
+        if (this._statusTimer) clearTimeout(this._statusTimer);
         if (this._el) this._el.remove();
     }
 }
