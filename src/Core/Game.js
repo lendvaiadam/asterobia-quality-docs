@@ -1028,6 +1028,34 @@ export class Game {
         }
     }
 
+    /**
+     * HOST-only: apply server snapshot data for DYNAMIC/SETTLED units only.
+     * Normal KINEMATIC units keep local simulation (relative controls, tilt, terrain).
+     * @param {Object} msg - SERVER_SNAPSHOT message
+     */
+    applyDynamicUnitsFromSnapshot(msg) {
+        if (!msg.units) return;
+        for (const snapUnit of msg.units) {
+            const localUnit = this.units.find(u => u && u.id === snapUnit.id);
+            if (!localUnit) continue;
+
+            if (snapUnit.physicsMode === 'DYNAMIC' || snapUnit.physicsMode === 'SETTLED') {
+                // Server-driven: apply position + quaternion directly
+                localUnit._serverDynamic = true;
+                localUnit._serverPhysicsMode = snapUnit.physicsMode;
+                localUnit.position.set(snapUnit.px, snapUnit.py, snapUnit.pz);
+                localUnit.mesh.position.set(snapUnit.px, snapUnit.py, snapUnit.pz);
+                localUnit.mesh.quaternion.set(snapUnit.qx, snapUnit.qy, snapUnit.qz, snapUnit.qw);
+            } else if (localUnit._serverDynamic) {
+                // Unit returned to KINEMATIC on server — release back to local simulation
+                localUnit._serverDynamic = false;
+                localUnit._serverPhysicsMode = null;
+                localUnit.position.set(snapUnit.px, snapUnit.py, snapUnit.pz);
+                localUnit.snapToSurface();
+            }
+        }
+    }
+
     // R012: Update DB status in unified NetworkDebugPanel (called by save/load)
     _updateDBStatus(msg, isError = false) {
         if (!this.networkDebugPanel) return;

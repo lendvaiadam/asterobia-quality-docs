@@ -1039,6 +1039,16 @@ export class Unit {
     }
 
     update(input, dt, pathPlanner = null) {
+        // Server-driven DYNAMIC/SETTLED: skip local simulation entirely
+        // Position and rotation are set directly by Game.applyDynamicUnitsFromSnapshot()
+        if (this._serverDynamic) {
+            this.updateDustParticles(dt, false);
+            if (this.isSelected || this.selectionIntensity > 0.01) {
+                this.updateSelectionVisuals(dt);
+            }
+            return;
+        }
+
         const startPos = this.position.clone();
 
         // === DYNAMIC REPLANNING (User Request) ===

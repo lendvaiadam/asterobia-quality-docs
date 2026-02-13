@@ -149,12 +149,14 @@ export class PhysicsDebugOverlay {
         html += `<div style="color:#666">session:${session} mirror:${mirror} snaps:${snapCount}</div>`;
 
         for (const u of units) {
-            const isDynamic = u.physicsMode === 'DYNAMIC';
-            const color = isDynamic ? '#f44' : '#0f0';
-            const modeLabel = u.physicsMode || 'N/A';
+            const mode = u._serverPhysicsMode || u.physicsMode || 'N/A';
+            const isDynamic = mode === 'DYNAMIC';
+            const isSettled = mode === 'SETTLED';
+            const color = isDynamic ? '#f44' : isSettled ? '#ff0' : '#0f0';
             const stateLabel = u.mode || u.state || '?';
+            const serverTag = u._serverDynamic ? ' (srv)' : '';
             html += `<div style="color:${color}">` +
-                `U${u.id} [${modeLabel}] ${stateLabel} ` +
+                `U${u.id} [${mode}]${serverTag} ${stateLabel} ` +
                 `alt:${(u.altitude || 0).toFixed(1)} ` +
                 `spd:${(u.speed || 0).toFixed(1)}` +
                 `</div>`;

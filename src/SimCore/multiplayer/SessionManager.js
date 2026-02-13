@@ -2108,6 +2108,10 @@ export class SessionManager {
     // Server snapshots are still counted for diagnostics.
     if (this.state.isHost()) {
       this._debugCounters.serverSnapshotRecvCount = (this._debugCounters.serverSnapshotRecvCount || 0) + 1;
+      // HOST: apply DYNAMIC/SETTLED unit poses from server (physics-driven only)
+      if (this.game?.applyDynamicUnitsFromSnapshot) {
+        this.game.applyDynamicUnitsFromSnapshot(msg);
+      }
       return;
     }
 
