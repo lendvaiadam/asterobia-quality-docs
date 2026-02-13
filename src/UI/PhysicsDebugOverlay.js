@@ -60,8 +60,10 @@ export class PhysicsDebugOverlay {
 
         const btnExplode = this._makeButton('EXPLODE', '#f44', () => this._triggerExplosion());
         const btnMine = this._makeButton('MINE', '#ff0', () => this._placeMine());
+        const btnRock = this._makeButton('ROCK', '#88f', () => this._spawnRock());
         btnRow.appendChild(btnExplode);
         btnRow.appendChild(btnMine);
+        btnRow.appendChild(btnRock);
         content.appendChild(btnRow);
 
         // Stats area
@@ -136,7 +138,7 @@ export class PhysicsDebugOverlay {
             this._showStatus('Select a unit first! (double-click)', true);
             return;
         }
-        this._sendDevCommand('DEV_EXPLOSION', { unitId: unit.id, radius: 8, strength: 6 });
+        this._sendDevCommand('TRIGGER_EXPLOSION', { unitId: unit.id, radius: 8, strength: 6 });
         this._showStatus(`EXPLODE sent → U${unit.id}`);
     }
 
@@ -148,8 +150,20 @@ export class PhysicsDebugOverlay {
             this._showStatus('Select a unit first! (double-click)', true);
             return;
         }
-        this._sendDevCommand('DEV_PLACE_MINE', { unitId: unit.id });
+        this._sendDevCommand('PLACE_MINE', { unitId: unit.id });
         this._showStatus(`MINE placed at U${unit.id}`);
+    }
+
+    /** @private */
+    _spawnRock() {
+        const game = this.game;
+        const unit = game.selectedUnit;
+        if (!unit) {
+            this._showStatus('Select a unit first! (double-click)', true);
+            return;
+        }
+        this._sendDevCommand('SPAWN_ROCK', { unitId: unit.id });
+        this._showStatus(`ROCK spawned near U${unit.id}`);
     }
 
     /** @private */
@@ -161,14 +175,14 @@ export class PhysicsDebugOverlay {
     }
 
     /** @private */
-    async _sendDevCommand(type, payload) {
+    async _sendDevCommand(action, payload) {
         const sm = this.game.sessionManager;
         if (!sm || !sm.transport || !sm._sessionChannel) {
             this._showStatus('No active session!', true);
             return;
         }
         try {
-            await sm.transport.broadcastToChannel(sm._sessionChannel, { type, ...payload });
+            await sm.transport.broadcastToChannel(sm._sessionChannel, { type: 'CMD_ADMIN', action, ...payload });
         } catch (err) {
             this._showStatus(`Send failed: ${err.message}`, true);
         }

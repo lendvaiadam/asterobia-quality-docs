@@ -167,11 +167,8 @@ export class GameServer {
                 case 'PATH_DATA':
                     this._onPathData(channelName, payload, client);
                     break;
-                case 'DEV_EXPLOSION':
-                    this._onDevExplosion(channelName, payload, client);
-                    break;
-                case 'DEV_PLACE_MINE':
-                    this._onDevPlaceMine(channelName, payload, client);
+                case 'CMD_ADMIN':
+                    this._onAdminCommand(channelName, payload, client);
                     break;
             }
         };
@@ -479,44 +476,76 @@ export class GameServer {
     }
 
     /**
+     * Check if client is allowed to use dev/admin commands.
+     * Requires enablePhysics flag AND host-only (slot 0).
+     * @private
+     * @param {Object} client
+     * @returns {boolean}
+     */
+    _assertDevAllowed(client) {
+        if (!this._enablePhysics) return false;
+        const auth = this._clientSlots.get(client.id);
+        return auth && auth.slot === 0;
+    }
+
+    /**
+     * Unified handler for CMD_ADMIN messages (ADR-003).
+     * Dispatches to action-specific logic after dev gate check.
+     * @private
+     */
+    _onAdminCommand(channelName, payload, client) {
+        if (!this._assertDevAllowed(client)) return;
+        const roomId = this._extractRoomId(channelName);
+        if (!roomId) return;
+        const room = this.rooms.get(roomId);
+        if (!room || room.state !== 'RUNNING') return;
+
+        try {
+            switch (payload.action) {
+                case 'TRIGGER_EXPLOSION': {
+                    const unitId = payload.unitId;
+                    if (typeof unitId !== 'number') return;
+                    const radius = typeof payload.radius === 'number' && isFinite(payload.radius) ? payload.radius : 8;
+                    const strength = typeof payload.strength === 'number' && isFinite(payload.strength) ? payload.strength : 6;
+                    room._devTriggerExplosion(unitId, radius, strength);
+                    break;
+                }
+                case 'PLACE_MINE': {
+                    const unitId = payload.unitId;
+                    if (typeof unitId !== 'number') return;
+                    const unit = room.units.find(u => u && u.id === unitId);
+                    if (!unit) return;
+                    room.addMine({ x: unit.position.x, y: unit.position.y, z: unit.position.z });
+                    break;
+                }
+                case 'SPAWN_ROCK': {
+                    const unitId = payload.unitId;
+                    if (typeof unitId !== 'number') return;
+                    const unit = room.units.find(u => u && u.id === unitId);
+                    if (!unit) return;
+                    const heading = unit.heading || 0;
+                    const offset = 2.0;
+                    const pos = {
+                        x: unit.position.x + Math.sin(heading) * offset,
+                        y: unit.position.y,
+                        z: unit.position.z + Math.cos(heading) * offset
+                    };
+                    room.addObstacle(pos, 0.8);
+                    break;
+                }
+                default:
+                    break;
+            }
+        } catch (err) {
+            console.error(`[GameServer] CMD_ADMIN error:`, err.message);
+        }
+    }
+
+    /**
      * Inject a message into a relay channel (server -> all subscribers).
      * Used for broadcasting SERVER_SNAPSHOT to clients.
      * @private
      */
-    /**
-     * Handle DEV_EXPLOSION: trigger explosion on a unit (dev mode only).
-     * @private
-     */
-    _onDevExplosion(channelName, payload, client) {
-        const roomId = this._extractRoomId(channelName);
-        if (!roomId) return;
-        const room = this.rooms.get(roomId);
-        if (!room || room.state !== 'RUNNING') return;
-        const unitId = payload.unitId;
-        if (typeof unitId !== 'number') return;
-        const radius = typeof payload.radius === 'number' && isFinite(payload.radius) ? payload.radius : 8;
-        const strength = typeof payload.strength === 'number' && isFinite(payload.strength) ? payload.strength : 6;
-        room._devTriggerExplosion(unitId, radius, strength);
-    }
-
-    /**
-     * Handle DEV_PLACE_MINE: place a mine near a unit (dev mode only).
-     * Places the mine slightly ahead of the unit (in heading direction).
-     * @private
-     */
-    _onDevPlaceMine(channelName, payload, client) {
-        const roomId = this._extractRoomId(channelName);
-        if (!roomId) return;
-        const room = this.rooms.get(roomId);
-        if (!room || room.state !== 'RUNNING') return;
-        const unitId = payload.unitId;
-        if (typeof unitId !== 'number') return;
-        const unit = room.units.find(u => u && u.id === unitId);
-        if (!unit) return;
-        // Place mine at unit's current position (on surface)
-        room.addMine({ x: unit.position.x, y: unit.position.y, z: unit.position.z });
-    }
-
     _injectToChannel(channelName, payload) {
         if (!this._relay) return;
 
