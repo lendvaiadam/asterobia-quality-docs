@@ -287,7 +287,8 @@ export class HeadlessUnit {
                     return;
                 }
             }
-            // Continue toward next waypoint next tick
+            // Continue toward next waypoint next tick (keep moving)
+            this.speed = HeadlessUnit.MOVE_SPEED;
             this._reprojectToTerrain();
             this._updateOrientation();
             return;
