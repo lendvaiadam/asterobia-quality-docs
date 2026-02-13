@@ -221,6 +221,14 @@ export class Room {
                 if (unit) {
                     unit.applyInput(cmd);
                 }
+            } else if (cmd.type === 'PATH_DATA') {
+                // Phase 2B: Set path on target unit (ownership validated by GameServer)
+                const unit = cmd.unitId != null
+                    ? this.units.find(u => u.id === cmd.unitId)
+                    : null;
+                if (unit && cmd.sourceSlot != null && unit.ownerSlot === cmd.sourceSlot) {
+                    unit.setPath(cmd.waypoints, cmd.closed);
+                }
             }
         }
 

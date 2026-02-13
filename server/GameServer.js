@@ -12,6 +12,7 @@
  */
 
 import { Room } from './Room.js';
+import { Vec3 } from './SphereMath.js';
 import { nextEntityId, resetEntityIdCounter } from '../src/SimCore/runtime/IdGenerator.js';
 
 /** @type {number} Maximum units allowed in a single SPAWN_MANIFEST */
@@ -19,6 +20,12 @@ const MAX_MANIFEST_UNITS = 200;
 
 /** @type {number} Maximum valid player slot index */
 const MAX_SLOT = 10;
+
+/** @type {number} Maximum waypoints in a PATH_DATA message (Phase 2B) */
+const MAX_WAYPOINTS = 32;
+
+/** @type {number} Maximum distance between consecutive waypoints in world units (Phase 2B) */
+const MAX_SEGMENT_LENGTH = 200;
 
 export class GameServer {
     /**
@@ -154,6 +161,9 @@ export class GameServer {
                 case 'JOIN_ACK':
                     this._onJoinAck(channelName, payload, client);
                     break;
+                case 'PATH_DATA':
+                    this._onPathData(channelName, payload, client);
+                    break;
             }
         };
 
@@ -169,7 +179,7 @@ export class GameServer {
             };
         }
 
-        console.log('[GameServer] Wired to WsRelay (Phase 2A authority mode)');
+        console.log('[GameServer] Wired to WsRelay (Phase 2B: MOVE_INPUT + PATH_DATA authority)');
     }
 
     /**
@@ -362,6 +372,74 @@ export class GameServer {
         }
 
         room.receiveInput(auth.slot, command);
+    }
+
+    /**
+     * Handle PATH_DATA: validate waypoints and route to room for server-side path-follow.
+     * Phase 2B: Client sends A* waypoints, server validates and executes kinematic movement.
+     *
+     * Validation:
+     *   - unitId must be a number
+     *   - waypoints must be array, 1..MAX_WAYPOINTS entries
+     *   - Each waypoint must have finite numeric x, y, z
+     *   - Consecutive segment distance must be <= MAX_SEGMENT_LENGTH
+     *   - If closed, last→first segment also checked
+     *   - Ownership: unit.ownerSlot must match sender's slot
+     *
+     * @private
+     */
+    _onPathData(channelName, payload, client) {
+        const roomId = this._extractRoomId(channelName);
+        if (!roomId) return;
+
+        const room = this.rooms.get(roomId);
+        if (!room || room.state !== 'RUNNING') return;
+
+        // Auth: transport-authenticated identity
+        let auth = this._clientSlots.get(client.id);
+        if (!auth) return;
+
+        // Validate unitId
+        const unitId = payload.unitId;
+        if (typeof unitId !== 'number') return;
+
+        // Validate waypoints array
+        const waypoints = payload.waypoints;
+        if (!Array.isArray(waypoints)) return;
+        if (waypoints.length === 0 || waypoints.length > MAX_WAYPOINTS) return;
+
+        // Validate each waypoint + segment distances
+        const validated = [];
+        let prevWp = null;
+        for (const wp of waypoints) {
+            if (typeof wp.x !== 'number' || typeof wp.y !== 'number' || typeof wp.z !== 'number') return;
+            if (!isFinite(wp.x) || !isFinite(wp.y) || !isFinite(wp.z)) return;
+
+            const point = { x: wp.x, y: wp.y, z: wp.z };
+
+            if (prevWp) {
+                const segDist = Vec3.length(Vec3.sub(point, prevWp));
+                if (segDist > MAX_SEGMENT_LENGTH) return;
+            }
+
+            validated.push(point);
+            prevWp = point;
+        }
+
+        // Closed loop: check last→first segment
+        const closed = !!payload.closed;
+        if (closed && validated.length > 1) {
+            const segDist = Vec3.length(Vec3.sub(validated[0], validated[validated.length - 1]));
+            if (segDist > MAX_SEGMENT_LENGTH) return;
+        }
+
+        // Route to room as command (ownership check happens in Room._onSimTick)
+        room.receiveInput(auth.slot, {
+            type: 'PATH_DATA',
+            unitId,
+            waypoints: validated,
+            closed
+        });
     }
 
     /**
