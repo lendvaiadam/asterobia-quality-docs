@@ -51,7 +51,14 @@ The following modules will require direct modification to support Rapier.
         1.  Generate/Cache Terrain Collider patch (r=50m).
         2.  Wake up units.
         3.  Simulate.
+    *   Simulate.
         4.  Sleep/Destroy collider when units stabilize.
+
+### E. Deformable Terrain (Phase 3+ Requirement)
+*   **Spec:** [TERRAIN_DEFORMATION.md](../specs/TERRAIN_DEFORMATION.md)
+*   **Implication:** We MUST support **Dynamic Regeneration** of Static Terrain Colliders.
+*   **Strategy:** When `TERRAIN_EDIT` occurs, invalidate the local Chunk's collider. Regenerate it (asynchronously if possible) and swap it in for the next physics tick.
+*   **Constraint:** Do NOT act on deformation instantly in the same tick if it causes a lag spike. Queue the update.
 
 ### D. The Hybrid Switch (State Machine)
 *   **Kinematic (Default):**
