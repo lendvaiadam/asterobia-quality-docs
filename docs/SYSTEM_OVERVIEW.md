@@ -47,7 +47,12 @@ The technical core is a **Fixed-Timestep, Host-Authoritative, Deterministic SimC
 - We do not break replayability (determinism).
 - We do not merge untested code.
 
-## 5. System Hierarchy Pointer
+## 5. Architectural Principles (Mandatory)
+- **Separation of Concerns:** The Core Sim is platform-neutral. The Renderer is platform-specific.
+- **Authority:** The Renderer is NEVER Authoritative.
+- **Reference:** [docs/specs/ARCH_RENDER_SEPARATION.md](specs/ARCH_RENDER_SEPARATION.md)
+
+## 6. System Hierarchy Pointer
 This project uses a **Hierarchical AI Development System**:
 1.  **Human Owner (Ádám)**: Strategies & Decisions.
 2.  **Antigravity (CTO)**: Architecture & Audit.
