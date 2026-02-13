@@ -93,6 +93,14 @@ Code quality > everything. Never sacrifice correctness or safety for brevity.
 **Defaults changed**: <explicit callout, or "none">
 ```
 
+### Session Start Checklist (Binding)
+- No tool logs, step-by-step narration, or essays in chat output
+- Default = concise, high-signal; use Required Report Template above
+- Expand ONLY when Ádám explicitly requests it; label expansion as `**Optional Details:**`
+- Do NOT modify governance docs (ADRs, STATUS_WALKTHROUGH, task.md) unless explicitly requested
+- Do NOT write "reports", "what happened" narratives, or memos — Antigravity owns those
+- Role: Implementer only (code + tests). Antigravity owns audits, doc governance, writeups
+
 ### Forbidden by Default (Strict)
 *   **Tool Logs/Transcripts**: NEVER output Bash/Read/Write traces or internal tool chains.
 *   **Narratives**: No "First I checked X, then I saw Y" diaries.
