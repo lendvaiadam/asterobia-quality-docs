@@ -35,18 +35,15 @@ The goal is to enable strategic unit movement (click-to-move) while maintaining 
 <!-- These are open decisions to resolve when starting Phase 2B. -->
 
 ### Decision 1: Naming — `SET_PATH` vs `PATH_DATA`
-The spec says `PATH_DATA`, but the codebase already has `CommandType.SET_PATH` wired into
-`InputFactory.setPath()` and `CommandQueue`. Two options:
-- **(A) Keep `SET_PATH`** — no rename, less churn, InputFactory already uses it.
-- **(B) Rename to `PATH_DATA`** — spec-compatible, cleaner semantics.
-**Leaning:** (A). Decide when we start.
+**DECISION: (B) Rename to `PATH_DATA`.**
+The Master Spec mandates `PATH_DATA`. We must deprecate `SET_PATH` and implement `PATH_DATA`.
 
 ### Decision 2: Waypoint Validation — what is "valid"?
-Spec says: "validates (not through wall, not cheating)". Concrete options:
-- **(a)** Max distance check between consecutive waypoints (fast, simple)
-- **(b)** Line-of-sight raycast on ServerTerrain (accurate, expensive)
-- **(c)** Sanity check only: point is on surface (±tolerance), max N waypoints, max total distance (MVP)
-**Leaning:** (c) for MVP. LoS raycast deferred to Phase 3 when Rapier colliders exist.
+**DECISION: (c) Sanity check only (MVP).**
+- MaxWaypoints: **32**.
+- MaxSegmentLength: **200m**.
+- **NO Raycast** in Phase 2B (deferred to Phase 3).
+
 
 ### Decision 3: Spherical path-follow — tangent-plane vs great-circle arc
 Current `HeadlessUnit.updatePosition()` uses tangent-plane approximation (displace + reproject).

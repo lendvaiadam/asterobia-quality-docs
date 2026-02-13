@@ -158,7 +158,7 @@ Kommunikációs Eszközök és Protokoll
 • Üzenettípusok:
     ◦ SERVER_SNAPSHOT: A szerver küldi (kb. 20 Hz), tartalmazza az egységek ID-ját, pozícióját, rotációját (quaternion) és állapotát.
     ◦ MOVE_INPUT: A kliens küldi (WASD lenyomások), ha közvetlen irányítás van (Phase 2A).
-    ◦ PATH_DATA: A kliens küldi az útvonal pontjait (Phase 2B).
+    ◦ PATH_DATA: A kliens küldi az útvonal pontjait (Phase 2B). (Max 32 pont, Max 200m szegmens).
     ◦ SPAWN_MANIFEST: A host küldi a játék kezdetekor az egységek listájáról.
 3. Mozgásvezérlés és Útvonalkeresés (Phase 2B)
 A hálózati stabilitás érdekében az útvonalkeresés (Pathfinding) és az útvonalkövetés (Path Following) feladatait szétválasztottuk.
@@ -167,10 +167,16 @@ A hálózati stabilitás érdekében az útvonalkeresés (Pathfinding) és az ú
     ◦ A kliens kiszámolja az utat, és elküldi a szervernek az útvonal sarokpontjait (waypoints) a PATH_DATA üzenetben.
     ◦ Ez csak "javaslat" a szerver felé.
 • Szerver szerepe (Path Following & Validation):
-    ◦ A szerver megkapja a pontokat.
-    ◦ Validálja őket (pl. nem mennek át falon, nem csalás).
-    ◦ A szerver vezérli az egységet pontról pontra (Waypoint Following). Ez sokkal kisebb számítási igényű, mint az útvonalkeresés.
-    ◦ Az eredményt (az egység tényleges mozgását) a snapshotokon keresztül küldi vissza.
+    ◦ A szerver megkapja a pontokat (PATH_DATA).
+    ◦ Validálás (Szigorú):
+        - MaxWaypoints: 32 pont (ezen felül eldobja/vágja).
+        - MaxSegmentLength: 200m (sanity check; ha nagyobb, a path érvénytelen).
+        - Owner check: Csak a saját egységnek küldhető parancs.
+        - Raycast (Line-of-Sight): Phase 2B-ben MÉG NINCS, csak távolság alapú "sanity check".
+    ◦ Vezérlés és Megszakítás:
+        - A szerver vezérli az egységet pontról pontra (Waypoint Following).
+        - MEGSZAKÍTÁS (INTERRUPT): Bármilyen direkt irányítás (WASD / Joystick / MOVE_INPUT) azonnal törli az aktív útvonalat és átveszi az irányítást.
+    ◦ Az eredményt (az egység tényleges mozgását) a snapshotokon keresztül küldi vissza. A snapshot NEM tartalmaz pathIndex-et, csak a pozíciót/orientációt interpolálja a kliens.
 4. Fizikai Megvalósítás (Phase 3 - Rapier)
 Amikor esemény történik (ütközés, borulás), a rendszer átvált a fizikai motorra.
 Technológia: Rapier.js (WASM)
