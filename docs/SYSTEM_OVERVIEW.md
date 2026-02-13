@@ -30,9 +30,10 @@ The technical core is a **Fixed-Timestep, Host-Authoritative, Deterministic SimC
 
 
 ### 🔍 If you are AUDITING (Antigravity)
-1.  **Check Quality Gates**: `docs/IMPLEMENTATION_GATES.md`.
-2.  **Review Logs**: `docs/BUGLIST.md`, `quality/NETCODE_READINESS_AUDIT.md`.
-3.  **Inspect Architecture**: `docs/specs/ARCH_RENDER_SEPARATION.md`, `docs/specs/TERRAIN_DEFORMATION.md`, `docs/research/RAPIER_INTEGRATION_AUDIT.md`.
+1.  **Read Your Rules**: `docs/NOTES_ANTIGRAVITY.md` (Binding Auditor Memory).
+2.  **Check Quality Gates**: `docs/IMPLEMENTATION_GATES.md`.
+3.  **Review Logs**: `docs/BUGLIST.md`, `quality/NETCODE_READINESS_AUDIT.md`.
+4.  **Inspect Architecture**: `docs/specs/ARCH_RENDER_SEPARATION.md`, `docs/specs/TERRAIN_DEFORMATION.md`, `docs/research/RAPIER_INTEGRATION_AUDIT.md`.
 
 ---
 
