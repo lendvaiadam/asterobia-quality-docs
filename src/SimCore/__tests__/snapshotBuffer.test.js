@@ -335,7 +335,19 @@ describe('SnapshotBuffer: getInterpolationPair', () => {
         expect(result.alpha).toBeCloseTo(1.0, 5);
     });
 
-    it('past all snapshots uses bounded extrapolation (capped alpha)', () => {
+    it('past all snapshots holds at latest by default (alpha=1, no extrapolation)', () => {
+        const buf = new SnapshotBuffer({ interpDelayMs: 0 });
+        buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
+        buf.push(makeSnapshot(2, 1050, [makeUnit(1)]), 1050);
+
+        // renderTime = 9999 (way past latest) → default maxExtrapolateMs=0 → alpha capped at 1.0
+        const result = buf.getInterpolationPair(9999);
+        expect(result.prev.tick).toBe(1);
+        expect(result.next.tick).toBe(2);
+        expect(result.alpha).toBeCloseTo(1.0, 5);
+    });
+
+    it('explicit maxExtrapolateMs allows bounded extrapolation', () => {
         const buf = new SnapshotBuffer({ interpDelayMs: 0, maxExtrapolateMs: 100 });
         buf.push(makeSnapshot(1, 1000, [makeUnit(1)]), 1000);
         buf.push(makeSnapshot(2, 1050, [makeUnit(1)]), 1050);

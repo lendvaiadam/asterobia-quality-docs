@@ -51,8 +51,8 @@ export class SnapshotBuffer {
         /** @type {number} EMA smoothing factor (0 < α ≤ 1) */
         this._emaAlpha = options.emaAlpha ?? 0.1;
 
-        /** @type {number} Max extrapolation beyond latest snapshot (ms) */
-        this._maxExtrapolateMs = options.maxExtrapolateMs ?? 100;
+        /** @type {number} Max extrapolation beyond latest snapshot (ms). 0 = hold at latest. */
+        this._maxExtrapolateMs = options.maxExtrapolateMs ?? 0;
 
         /** @type {ServerSnapshot[]} Ring buffer storage */
         this._buffer = [];
