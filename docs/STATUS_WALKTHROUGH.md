@@ -75,6 +75,10 @@
     - **Scope:** `PhysicsWorld.js` wrapper + `Room.js` integration (Flag-gated).
     - **Flag:** `enablePhysics: false` (Default). No runtime impact yet.
     - **Tests:** +36 Integration Tests. Total 834 PASS.
+- [x] **Phase 3 Step 2: Terrain Colliders (JIT).** **MERGED** (SHA: `HEAD`).
+    - **Scope:** `TerrainColliderManager.js` (patches, cache, eviction).
+    - **Caps:** `maxPatches: 16`. Eviction every 20 ticks.
+    - **Tests:** +22 Integration Tests. Total 856 PASS.
 - **CTO Ping #1**: APPROVED (2026-02-10)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
 - **Test State**: Vitest installed. 690 tests passed! (Clean).

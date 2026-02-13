@@ -358,3 +358,11 @@ Default output: MD files under /quality or /docs.
     - **PhysicsWorld.js**: Async init, sub-stepping, manual spherical gravity.
     - **Room.js**: Flag-gated async start (`enablePhysics`).
 - **Status**: **READY FOR STEP 2 (TERRAIN COLLIDERS)**.
+
+### 2026-02-13: Phase 3 Step 2 Merged (Terrain Colliders)
+- **SHA**: `HEAD` (Merged `work/r013-phase3-rapier-terrain-colliders`)
+- **Tag**: `savepoint/r013-phase3-rapier-terrain-colliders`)
+- **Scope**:
+    - **TerrainColliderManager.js**: JIT Trimesh generation, caching, eviction (max 16 patches).
+    - **Room.js**: Wired TCM to simulation tick (ensure patches around units).
+- **Status**: **READY FOR STEP 3 (HYBRID LIFECYCLE)**.

@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { PhysicsWorld, initRapier, isRapierReady, getRapier } from '../../../server/PhysicsWorld.js';
 import { Room } from '../../../server/Room.js';
+import { TerrainColliderManager } from '../../../server/TerrainColliderManager.js';
 
 /** @type {PhysicsWorld[]} Track worlds for cleanup */
 const cleanup = [];
@@ -512,5 +513,65 @@ describe('Room + PhysicsWorld integration', () => {
         );
         expect(dist).toBeGreaterThan(0);
         expect(room.physics).toBeNull(); // No physics
+    });
+
+    it('Room with enablePhysics creates TerrainColliderManager', async () => {
+        const room = new Room('test-tcm', { enablePhysics: true });
+        roomCleanup.push(room);
+
+        await room.start();
+        expect(room.terrainColliders).toBeInstanceOf(TerrainColliderManager);
+    });
+
+    it('Room without enablePhysics has null terrainColliders', () => {
+        const room = new Room('test-no-tcm');
+        roomCleanup.push(room);
+        expect(room.terrainColliders).toBeNull();
+    });
+
+    it('Room.stop() cleans up terrainColliders', async () => {
+        const room = new Room('test-tcm-stop', { enablePhysics: true });
+        roomCleanup.push(room);
+
+        await room.start();
+        expect(room.terrainColliders).not.toBeNull();
+
+        room.stop();
+        expect(room.terrainColliders).toBeNull();
+    });
+
+    it('_onSimTick generates terrain patches around units', async () => {
+        const room = new Room('test-tcm-tick', { enablePhysics: true });
+        roomCleanup.push(room);
+
+        // Create a unit before start
+        room.createUnitForPlayer(0, 1);
+
+        await room.start();
+        expect(room.terrainColliders.patchCount).toBe(0);
+
+        // Tick once — should generate patches around the unit
+        const dt = room.simLoop.fixedDtSec;
+        room._onSimTick(dt, 1);
+
+        expect(room.terrainColliders.patchCount).toBeGreaterThan(0);
+    });
+
+    it('terrain patches stay bounded after many ticks', async () => {
+        const room = new Room('test-tcm-bounded', {
+            enablePhysics: true,
+            physicsOptions: { terrain: { maxPatches: 8 } }
+        });
+        roomCleanup.push(room);
+
+        room.createUnitForPlayer(0, 1);
+        await room.start();
+
+        const dt = room.simLoop.fixedDtSec;
+        for (let i = 0; i < 50; i++) {
+            room._onSimTick(dt, i + 1);
+        }
+
+        expect(room.terrainColliders.patchCount).toBeLessThanOrEqual(8);
     });
 });

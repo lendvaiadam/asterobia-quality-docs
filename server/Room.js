@@ -23,6 +23,7 @@ import { CommandQueue, CommandType } from '../src/SimCore/runtime/CommandQueue.j
 import { HeadlessUnit } from './HeadlessUnit.js';
 import { ServerTerrain } from './ServerTerrain.js';
 import { PhysicsWorld } from './PhysicsWorld.js';
+import { TerrainColliderManager } from './TerrainColliderManager.js';
 
 /** @typedef {'WAITING' | 'RUNNING' | 'ENDED'} RoomState */
 
@@ -79,6 +80,9 @@ export class Room {
 
         /** @type {PhysicsWorld|null} Rapier physics world (null until initialized) */
         this.physics = null;
+
+        /** @type {TerrainColliderManager|null} Terrain collider patch manager (null until initialized) */
+        this.terrainColliders = null;
     }
 
     /**
@@ -178,6 +182,9 @@ export class Room {
         // Phase 3: Initialize Rapier physics if enabled
         if (this._enablePhysics) {
             this.physics = await PhysicsWorld.create(this._physicsOptions);
+            this.terrainColliders = new TerrainColliderManager(
+                this.physics, this.terrain, this._physicsOptions.terrain
+            );
         }
 
         this.state = 'RUNNING';
@@ -211,6 +218,10 @@ export class Room {
         this.simLoop.onRender = null;
 
         // Phase 3: Free Rapier resources
+        if (this.terrainColliders) {
+            this.terrainColliders.destroyAll();
+            this.terrainColliders = null;
+        }
         if (this.physics) {
             this.physics.shutdown();
             this.physics = null;
@@ -263,8 +274,20 @@ export class Room {
             unit.updatePosition(dtSec);
         }
 
-        // 3b. Step physics world (Phase 3: no unit binding yet — runs in isolation)
+        // 3b. Step physics world (Phase 3)
         if (this.physics) {
+            // Ensure terrain collider patches around unit positions
+            if (this.terrainColliders) {
+                const positions = this.units.map(u => u.position);
+                for (const pos of positions) {
+                    this.terrainColliders.ensurePatchesAround(pos);
+                }
+                // Evict distant patches every 20 ticks (~1 second)
+                if (tickCount % 20 === 0 && positions.length > 0) {
+                    this.terrainColliders.evictDistant(positions);
+                }
+            }
+
             this.physics.step(dtSec);
         }
 
