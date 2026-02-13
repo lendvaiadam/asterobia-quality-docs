@@ -396,3 +396,11 @@ Default output: MD files under /quality or /docs.
     - **Minimal Structure**: Anchor -> Mission -> Non-negotiables -> Deliverables -> Stop.
     - **One Ask**: Don't bundle optional requests.
     - **Pull Don't Push**: Wait for specific requests before expanding.
+
+### 2026-02-13: Physics Events Audit (Doc-Only)
+- **SHA**: HEAD (Merged work/r013-physics-events-audit)
+- **Tag**: savepoint/r013-physics-events-audit
+- **Scope**:
+    - **New Doc**: docs/research/PHYSICS_EVENTS_AUDIT.md.
+    - **Guidance**: Use PhysicsEventService, avoid Math.random, handle NaN, test zero-distance.
+- **Status**: **REFERENCE**.
