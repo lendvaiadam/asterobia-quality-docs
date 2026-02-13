@@ -231,6 +231,21 @@ export class PhysicsWorld {
     }
 
     /**
+     * Add a trimesh collider to a rigid body.
+     * Used for static terrain patches. MUST only be attached to fixed bodies.
+     *
+     * @param {import('@dimforge/rapier3d-compat').RigidBody} body - Must be a fixed body
+     * @param {Float32Array} vertices - Flat [x,y,z, x,y,z, ...] vertex positions
+     * @param {Uint32Array} indices - Triangle indices [i0,i1,i2, ...]
+     * @returns {import('@dimforge/rapier3d-compat').Collider}
+     */
+    addTrimeshCollider(body, vertices, indices) {
+        this._assertAlive();
+        const desc = this._RAPIER.ColliderDesc.trimesh(vertices, indices);
+        return this._world.createCollider(desc, body);
+    }
+
+    /**
      * Remove a rigid body and all its colliders from the world.
      *
      * @param {import('@dimforge/rapier3d-compat').RigidBody} body
