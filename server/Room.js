@@ -213,6 +213,13 @@ export class Room {
             );
             this.physicsEvents = new PhysicsEventService(this._physicsOptions.events);
             this.collisions = new CollisionService(this._physicsOptions.collisions);
+
+            // Attach rigid bodies to units created before physics init (SPAWN_MANIFEST flow)
+            for (const unit of this.units) {
+                if (!unit.rigidBody) {
+                    this._attachRigidBody(unit);
+                }
+            }
         }
 
         this.state = 'RUNNING';

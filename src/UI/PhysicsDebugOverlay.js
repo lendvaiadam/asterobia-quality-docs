@@ -133,10 +133,11 @@ export class PhysicsDebugOverlay {
         const game = this.game;
         const unit = game.selectedUnit;
         if (!unit) {
-            console.warn('[PhysicsDebug] No unit selected');
+            this._showStatus('Select a unit first! (double-click)', true);
             return;
         }
         this._sendDevCommand('DEV_EXPLOSION', { unitId: unit.id, radius: 8, strength: 6 });
+        this._showStatus(`EXPLODE sent → U${unit.id}`);
     }
 
     /** @private */
@@ -144,23 +145,32 @@ export class PhysicsDebugOverlay {
         const game = this.game;
         const unit = game.selectedUnit;
         if (!unit) {
-            console.warn('[PhysicsDebug] No unit selected');
+            this._showStatus('Select a unit first! (double-click)', true);
             return;
         }
         this._sendDevCommand('DEV_PLACE_MINE', { unitId: unit.id });
+        this._showStatus(`MINE placed at U${unit.id}`);
+    }
+
+    /** @private */
+    _showStatus(msg, isError = false) {
+        if (!this._statsEl) return;
+        const color = isError ? '#f44' : '#0ff';
+        const statusDiv = `<div style="color:${color};font-weight:bold;margin-bottom:4px">${msg}</div>`;
+        this._statsEl.innerHTML = statusDiv + this._statsEl.innerHTML;
     }
 
     /** @private */
     async _sendDevCommand(type, payload) {
         const sm = this.game.sessionManager;
         if (!sm || !sm.transport || !sm._sessionChannel) {
-            console.warn('[PhysicsDebug] No active session');
+            this._showStatus('No active session!', true);
             return;
         }
         try {
             await sm.transport.broadcastToChannel(sm._sessionChannel, { type, ...payload });
         } catch (err) {
-            console.warn('[PhysicsDebug] Send failed:', err.message);
+            this._showStatus(`Send failed: ${err.message}`, true);
         }
     }
 

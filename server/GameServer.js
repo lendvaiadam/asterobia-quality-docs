@@ -279,9 +279,15 @@ export class GameServer {
         // Create HeadlessUnits from sanitized manifest (client-provided IDs)
         room.createUnitsFromManifest(sanitized);
 
-        // Start ticking
-        room.start();
-        console.log(`[GameServer] Room ${auth.roomId} received manifest (${payload.units.length} units) — RUNNING`);
+        // Start ticking (async: physics WASM init needs await)
+        room.start().then(() => {
+            console.log(`[GameServer] Room ${auth.roomId} received manifest (${payload.units.length} units) — RUNNING`);
+            if (room.physics) {
+                console.log(`[GameServer] Room ${auth.roomId} physics initialized (Rapier)`);
+            }
+        }).catch(err => {
+            console.error(`[GameServer] Room ${auth.roomId} failed to start:`, err);
+        });
     }
 
     /**
