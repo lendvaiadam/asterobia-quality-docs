@@ -368,7 +368,7 @@ Default output: MD files under /quality or /docs.
 - **Status**: **READY FOR STEP 3 (HYBRID LIFECYCLE)**.
 
 ### 2026-02-13: Phase 3 Step 3 Merged (Hybrid Lifecycle)
-- **SHA**: `HEAD` (Merged `work/r013-phase3-hybrid-lifecycle`)
+- **SHA**: `2215c32` (Merged `work/r013-phase3-hybrid-lifecycle`)
 - **Tag**: `savepoint/r013-phase3-hybrid-lifecycle`
 - **Scope**:
     - **HeadlessUnit.js**: `enterDynamic(impulse)`, `exitDynamic()`, `settle` logic.
