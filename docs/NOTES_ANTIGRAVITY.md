@@ -428,3 +428,12 @@ Default output: MD files under /quality or /docs.
     - **Research**: Slope Rollover (Manual Kin->Dyn), Collisions (Sensors vs Events), Explosions (Safe Impulse Math), Determinism (No Math.random).
     - **New Doc**: docs/research/PHYSICS_GAMEPLAY_SLICE_BEST_PRACTICES.md.
 - **Status**: **REFERENCE**.
+
+### 2026-02-13: Claude Output Contract v2 (Binding)
+- **SHA**: HEAD (Merged docs/output-contract-v2)
+- **Tag**: savepoint/r013-claude-output-contract-v2
+- **Scope**:
+    - **Update**: docs/NOTES_CLAUDE.md to v2 (No hard line caps).
+    - **Rule**: Principle-based conciseness.
+    - **Verification**: Checked for '8 lines' text (None found).
+- **Status**: **ACTIVE**.
