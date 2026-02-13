@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { PhysicsWorld, initRapier, isRapierReady, getRapier } from '../../../server/PhysicsWorld.js';
+import { Room } from '../../../server/Room.js';
 
 /** @type {PhysicsWorld[]} Track worlds for cleanup */
 const cleanup = [];
@@ -404,5 +405,112 @@ describe('determinism', () => {
         expect(run1.x).toBe(run2.x);
         expect(run1.y).toBe(run2.y);
         expect(run1.z).toBe(run2.z);
+    });
+});
+
+// ============================================================
+// Room integration (enablePhysics flag)
+// ============================================================
+
+describe('Room + PhysicsWorld integration', () => {
+    /** @type {Room[]} Track rooms for cleanup */
+    const roomCleanup = [];
+
+    afterEach(() => {
+        for (const r of roomCleanup) {
+            if (r.state !== 'ENDED') r.stop();
+        }
+        roomCleanup.length = 0;
+    });
+
+    it('Room without enablePhysics has no physics world', () => {
+        const room = new Room('test-no-physics');
+        roomCleanup.push(room);
+        expect(room.physics).toBeNull();
+    });
+
+    it('Room with enablePhysics initializes PhysicsWorld on start()', async () => {
+        const room = new Room('test-physics', { enablePhysics: true });
+        roomCleanup.push(room);
+
+        expect(room.physics).toBeNull(); // Not yet started
+
+        await room.start();
+        expect(room.physics).toBeInstanceOf(PhysicsWorld);
+        expect(room.physics.destroyed).toBe(false);
+    });
+
+    it('Room passes physicsOptions to PhysicsWorld', async () => {
+        const room = new Room('test-opts', {
+            enablePhysics: true,
+            physicsOptions: { subSteps: 2, gravity: 4.0 }
+        });
+        roomCleanup.push(room);
+
+        await room.start();
+        expect(room.physics.subSteps).toBe(2);
+        expect(room.physics.gravityMagnitude).toBe(4.0);
+    });
+
+    it('Room.stop() shuts down physics and nulls the reference', async () => {
+        const room = new Room('test-stop', { enablePhysics: true });
+        roomCleanup.push(room);
+
+        await room.start();
+        const pw = room.physics;
+        expect(pw.destroyed).toBe(false);
+
+        room.stop();
+        expect(pw.destroyed).toBe(true);
+        expect(room.physics).toBeNull();
+    });
+
+    it('physics steps alongside kinematic units in _onSimTick', async () => {
+        const room = new Room('test-tick', { enablePhysics: true });
+        roomCleanup.push(room);
+
+        await room.start();
+
+        // Add a dynamic body directly to physics world
+        const body = room.physics.createDynamicBody({ x: 0, y: 60, z: 0 });
+        room.physics.addBallCollider(body, 0.5);
+
+        const startY = body.translation().y;
+
+        // Drive ticks manually (same pattern as server-authority tests)
+        const dt = room.simLoop.fixedDtSec;
+        for (let i = 0; i < 20; i++) {
+            room._onSimTick(dt, i + 1);
+        }
+
+        // Physics body should have moved (spherical gravity)
+        expect(body.translation().y).toBeLessThan(startY);
+        // Counters should reflect 20 step() calls
+        expect(room.physics.totalSteps).toBe(20);
+    });
+
+    it('Room without physics still ticks units normally', async () => {
+        const room = new Room('test-no-phys-tick');
+        roomCleanup.push(room);
+
+        // Create a unit manually
+        const unit = room.createUnitForPlayer(0, 1, { modelIndex: 0 });
+        const startPos = { ...unit.position };
+
+        await room.start();
+
+        // Feed WASD input and tick
+        room.receiveInput(0, { type: 'MOVE_INPUT', forward: true, backward: false, left: false, right: false });
+        const dt = room.simLoop.fixedDtSec;
+        room._onSimTick(dt, 1);
+
+        // Unit should have moved
+        const dist = Math.sqrt(
+            (unit.position.x - startPos.x) ** 2 +
+            (unit.position.y - startPos.y) ** 2 +
+            (unit.position.z - startPos.z) ** 2
+        );
+        expect(dist).toBeGreaterThan(0);
+        expect(room.physics).toBeNull(); // No physics
     });
 });

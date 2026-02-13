@@ -22,6 +22,7 @@ import { SimLoop } from '../src/SimCore/runtime/SimLoop.js';
 import { CommandQueue, CommandType } from '../src/SimCore/runtime/CommandQueue.js';
 import { HeadlessUnit } from './HeadlessUnit.js';
 import { ServerTerrain } from './ServerTerrain.js';
+import { PhysicsWorld } from './PhysicsWorld.js';
 
 /** @typedef {'WAITING' | 'RUNNING' | 'ENDED'} RoomState */
 
@@ -33,6 +34,8 @@ export class Room {
      * @param {number} [options.maxPlayers=10] - Maximum player slots
      * @param {Object} [options.terrainParams] - Terrain parameters (passed to ServerTerrain)
      * @param {Function} [options.broadcast] - Callback for broadcasting snapshots
+     * @param {boolean} [options.enablePhysics=false] - Initialize Rapier PhysicsWorld (Phase 3)
+     * @param {Object} [options.physicsOptions] - Options for PhysicsWorld (subSteps, physicsHz, gravity)
      */
     constructor(roomId, options = {}) {
         /** @type {string} */
@@ -67,6 +70,15 @@ export class Room {
 
         /** @type {ServerTerrain} Authoritative terrain (same math as client) */
         this.terrain = new ServerTerrain(options.terrainParams);
+
+        /** @type {boolean} Whether Rapier physics is enabled for this room */
+        this._enablePhysics = !!options.enablePhysics;
+
+        /** @type {Object} Physics configuration (passed to PhysicsWorld.create) */
+        this._physicsOptions = options.physicsOptions || {};
+
+        /** @type {PhysicsWorld|null} Rapier physics world (null until initialized) */
+        this.physics = null;
     }
 
     /**
@@ -154,10 +166,18 @@ export class Room {
     /**
      * Transition room to RUNNING state.
      * Wires up the SimLoop onSimTick callback.
+     * If enablePhysics was set, initializes the Rapier PhysicsWorld first.
+     *
+     * @returns {Promise<void>} Resolves when room is running (async for physics init)
      */
-    start() {
+    async start() {
         if (this.state !== 'WAITING') {
             throw new Error(`Cannot start room ${this.roomId} in state ${this.state}`);
+        }
+
+        // Phase 3: Initialize Rapier physics if enabled
+        if (this._enablePhysics) {
+            this.physics = await PhysicsWorld.create(this._physicsOptions);
         }
 
         this.state = 'RUNNING';
@@ -189,6 +209,12 @@ export class Room {
 
         this.simLoop.onSimTick = null;
         this.simLoop.onRender = null;
+
+        // Phase 3: Free Rapier resources
+        if (this.physics) {
+            this.physics.shutdown();
+            this.physics = null;
+        }
     }
 
     /**
@@ -235,6 +261,11 @@ export class Room {
         // 3. Update unit positions (spherical terrain movement)
         for (const unit of this.units) {
             unit.updatePosition(dtSec);
+        }
+
+        // 3b. Step physics world (Phase 3: no unit binding yet — runs in isolation)
+        if (this.physics) {
+            this.physics.step(dtSec);
         }
 
         // 4. Broadcast SERVER_SNAPSHOT to all connected clients
