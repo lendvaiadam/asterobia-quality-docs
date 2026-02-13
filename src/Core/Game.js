@@ -372,6 +372,7 @@ export class Game {
         this._manifestSent = false; // Phase 2A: SPAWN_MANIFEST sent exactly once
         this._lastMirrorDiagMs = 0; // Dev-mode: last mirror diagnostics log timestamp
         this._mirrorLerpEnabled = true; // Dev tuner: lerp ON/OFF (false = snap to latest)
+        this._positionSyncLerpSpeed = 0.25; // Phase 1 smooth: exponential lerp factor per frame
         this._mirrorTunerOverlay = new MirrorTunerOverlay(this); // Always visible
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
@@ -939,15 +940,32 @@ export class Game {
             // Don't override Guest's own controlled unit
             if (unit === mySelectedUnit && unit.selectedBySlot === mySlot) continue;
 
-            // Apply position
+            // Store target for per-frame lerp (instead of snapping)
+            if (!unit._syncTarget) {
+                unit._syncTarget = { px: uData.px, py: uData.py, pz: uData.pz,
+                                     qx: uData.qx, qy: uData.qy, qz: uData.qz, qw: uData.qw };
+            } else {
+                unit._syncTarget.px = uData.px; unit._syncTarget.py = uData.py; unit._syncTarget.pz = uData.pz;
+                unit._syncTarget.qx = uData.qx; unit._syncTarget.qy = uData.qy;
+                unit._syncTarget.qz = uData.qz; unit._syncTarget.qw = uData.qw;
+            }
+            unit._syncReceived = true;
+
+            // Authoritative position (for FOW, logic systems)
             unit.position.set(uData.px, uData.py, uData.pz);
 
-            // Apply rotation
-            if (unit.mesh?.quaternion) {
-                unit.mesh.quaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
-            }
-            if (unit.headingQuaternion) {
-                unit.headingQuaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
+            // Rotation — snap on first sync, then lerp handles the rest per-frame
+            if (!unit._syncInitialized) {
+                if (unit.mesh?.quaternion) {
+                    unit.mesh.quaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
+                }
+                if (unit.headingQuaternion) {
+                    unit.headingQuaternion.set(uData.qx, uData.qy, uData.qz, uData.qw);
+                }
+                if (unit.mesh) {
+                    unit.mesh.position.set(uData.px, uData.py, uData.pz);
+                }
+                unit._syncInitialized = true;
             }
 
             // Reconstruct path from flat array [x,y,z, x,y,z, ...]
@@ -4117,9 +4135,30 @@ export class Game {
             this._mirrorModeRender();
             return;
         }
+
+        // Phase 1 POSITION_SYNC: smooth remote units toward their sync target
+        const lerpSpeed = this._positionSyncLerpSpeed;
         this.units.forEach(unit => {
             if (!unit) return;
-            unit.applyInterpolatedRender(alpha);
+
+            if (unit._syncReceived && unit._syncTarget && unit.mesh && this._mirrorLerpEnabled) {
+                const t = unit._syncTarget;
+                // Exponential lerp toward target (frame-rate independent)
+                unit.mesh.position.x += (t.px - unit.mesh.position.x) * lerpSpeed;
+                unit.mesh.position.y += (t.py - unit.mesh.position.y) * lerpSpeed;
+                unit.mesh.position.z += (t.pz - unit.mesh.position.z) * lerpSpeed;
+
+                // Slerp quaternion
+                if (t.qw !== undefined) {
+                    _mirrorSlerpTarget.set(t.qx, t.qy, t.qz, t.qw);
+                    unit.mesh.quaternion.slerp(_mirrorSlerpTarget, lerpSpeed);
+                    if (unit.headingQuaternion) {
+                        unit.headingQuaternion.copy(unit.mesh.quaternion);
+                    }
+                }
+            } else {
+                unit.applyInterpolatedRender(alpha);
+            }
         });
     }
 

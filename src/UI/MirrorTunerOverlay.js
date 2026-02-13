@@ -55,22 +55,30 @@ export class MirrorTunerOverlay {
         const content = document.createElement('div');
         content.style.cssText = 'padding: 10px 12px;';
 
-        // Toggle: Smooth Lerp
+        // Toggle: Smooth Lerp ON/OFF
         this._addToggle(content, 'Smooth Lerp', true, (val) => {
             this.game._mirrorLerpEnabled = val;
         });
 
-        // Slider: interpDelayMs
+        // Slider: Lerp Speed (exponential approach factor, 0.01=sluggish, 1.0=instant snap)
+        this._addSlider(content, 'Lerp Speed', 0.01, 1.0, 0.01, 0.25, '', (val) => {
+            this.game._positionSyncLerpSpeed = val;
+        });
+
+        // --- Mirror mode controls (only useful if SERVER_SNAPSHOT active) ---
+        const mirrorLabel = document.createElement('div');
+        mirrorLabel.style.cssText = 'color:#666; font-size:10px; margin:6px 0 4px; border-top:1px dashed #333; padding-top:4px;';
+        mirrorLabel.textContent = 'Mirror mode (if active):';
+        content.appendChild(mirrorLabel);
+
         this._addSlider(content, 'Interp Delay', 0, 300, 10, 100, 'ms', (val) => {
             if (this.game._snapshotBuffer) this.game._snapshotBuffer.interpDelayMs = val;
         });
 
-        // Slider: maxExtrapolateMs
         this._addSlider(content, 'Max Extrap', 0, 200, 10, 0, 'ms', (val) => {
             if (this.game._snapshotBuffer) this.game._snapshotBuffer._maxExtrapolateMs = val;
         });
 
-        // Slider: emaAlpha
         this._addSlider(content, 'EMA Alpha', 0.01, 1.0, 0.01, 0.1, '', (val) => {
             if (this.game._snapshotBuffer) this.game._snapshotBuffer._emaAlpha = val;
         });
@@ -154,26 +162,42 @@ export class MirrorTunerOverlay {
 
     /** @private */
     _updateStats() {
-        const buf = this.game._snapshotBuffer;
-        if (!buf || !this.game._mirrorMode) {
-            this._statsEl.innerHTML = '<span style="color:#666;">Waiting for mirror mode...</span>';
-            return;
-        }
-        const stats = buf.getArrivalStats();
-        const pair = buf.getInterpolationPair();
-        const a = pair.alpha;
-        const uf = buf.underflowCount;
-
+        const g = this.game;
         let h = '';
-        h += `<div><span style="color:#888;">Buf:</span> <span style="color:#ff0;">${buf.size}</span>`;
-        h += `  <span style="color:#888;">UF:</span> <span style="color:${uf > 0 ? '#f55' : '#0a0'};">${uf}</span>`;
-        h += `  <span style="color:#888;">Tick:</span> ${buf.highestTick}</div>`;
-        h += `<div><span style="color:#888;">α:</span> <span style="color:#0ff;">${a.toFixed(3)}</span>`;
-        h += `  <span style="color:#888;">Offset:</span> ${buf.smoothedOffset.toFixed(0)}ms</div>`;
-        if (stats.count > 0) {
-            h += `<div><span style="color:#888;">Arrival:</span> ${stats.mean.toFixed(0)}ms`;
-            h += ` <span style="color:#666;">[${stats.min}–${stats.max}]</span></div>`;
+
+        // Mode indicator
+        const mode = g._mirrorMode ? 'MIRROR (Phase 2A)' : 'POSITION_SYNC (Phase 1)';
+        const modeColor = g._mirrorMode ? '#0f0' : '#fa0';
+        h += `<div><span style="color:#888;">Mode:</span> <span style="color:${modeColor};font-weight:bold;">${mode}</span></div>`;
+
+        // Lerp state
+        h += `<div><span style="color:#888;">Lerp:</span> <span style="color:${g._mirrorLerpEnabled ? '#0f0' : '#f55'};">${g._mirrorLerpEnabled ? 'ON' : 'OFF (snap)'}</span>`;
+        h += `  <span style="color:#888;">Speed:</span> ${g._positionSyncLerpSpeed.toFixed(2)}</div>`;
+
+        // Count synced remote units
+        let syncCount = 0;
+        if (g.units) {
+            for (const u of g.units) {
+                if (u && u._syncReceived) syncCount++;
+            }
         }
+        h += `<div><span style="color:#888;">Synced units:</span> <span style="color:#ff0;">${syncCount}</span>`;
+        h += `  <span style="color:#888;">Total:</span> ${g.units ? g.units.filter(Boolean).length : 0}</div>`;
+
+        // Mirror mode buffer stats (if active)
+        const buf = g._snapshotBuffer;
+        if (g._mirrorMode && buf) {
+            const stats = buf.getArrivalStats();
+            const pair = buf.getInterpolationPair();
+            h += `<div><span style="color:#888;">Buf:</span> <span style="color:#ff0;">${buf.size}</span>`;
+            h += `  <span style="color:#888;">UF:</span> <span style="color:${buf.underflowCount > 0 ? '#f55' : '#0a0'};">${buf.underflowCount}</span>`;
+            h += `  <span style="color:#888;">α:</span> <span style="color:#0ff;">${pair.alpha.toFixed(3)}</span></div>`;
+            if (stats.count > 0) {
+                h += `<div><span style="color:#888;">Arrival:</span> ${stats.mean.toFixed(0)}ms`;
+                h += ` <span style="color:#666;">[${stats.min}–${stats.max}]</span></div>`;
+            }
+        }
+
         this._statsEl.innerHTML = h;
     }
 
