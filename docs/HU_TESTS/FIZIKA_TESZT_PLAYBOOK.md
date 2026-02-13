@@ -12,13 +12,13 @@
 1. Kattints a **HOST GAME** gombra
 2. Megjelenik egy kód — **ne törődj vele**
 3. Kattints a **START GAME** gombra
-4. Most a bolygón látnod kell kis figurákat (unit-okat)
+4. Most a bolygón látnod kell 10 kis figurát (unit-okat)
 
 ---
 
-## Ülj be egy unitba
+## Válassz ki egy unitot
 
-1. **Dupla klikk** egy unitra (kis figurára a bolygón)
+1. **Kattints** egy unitra (kis figurára a bolygón)
 2. Ha sikerült, megjelenik egy világító gyűrű körülötte
 3. Most WASD-vel tudod mozgatni
 
@@ -44,7 +44,7 @@ Ezen 3 gomb van:
 
 **Mi fog történni:** A unitod közelében lévő másik unit felrepül a levegőbe, majd visszaesik.
 
-1. Ülj be egy unitba (dupla klikk) — kellenek legalább 2 unitok egymás közelében
+1. Válassz ki egy unitot (klikk) — kellenek legalább 2 unitok egymás közelében
 2. WASD-vel menj egy másik unit KÖZELÉBE (de ne rá)
 3. Kattints az **EXPLODE** gombra a narancssárga panelen
 4. **Figyeld:** a közeli unit felrepül!
@@ -62,7 +62,7 @@ Ezen 3 gomb van:
 
 **Mi fog történni:** Egy akna jelenik meg a unitod helyén. Ha rásétálsz → robbantás.
 
-1. Ülj be egy unitba (dupla klikk)
+1. Válassz ki egy unitot (klikk)
 2. Kattints a **MINE** gombra
 3. A panelen megjelenik: "MINE placed at U..."
 4. Most **sétálj el** a unittól (WASD-vel menjél el messzire)
@@ -81,7 +81,7 @@ Ezen 3 gomb van:
 
 **Mi fog történni:** Egy láthatatlan akadály jelenik meg a unit előtt. Ha nekimész → megpattansz.
 
-1. Ülj be egy unitba (dupla klikk)
+1. Válassz ki egy unitot (klikk)
 2. **Jegyezd meg merre néz** a unit (ez fontos!)
 3. Kattints a **ROCK** gombra
 4. A panelen megjelenik: "ROCK spawned near U..."
