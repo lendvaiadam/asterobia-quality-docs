@@ -420,3 +420,11 @@ Default output: MD files under /quality or /docs.
     - **Refinement**: Switched from 'Minimal' to 'Principle-based'.
     - **Exception**: Added 'Extended detail because: [Reason]' clause.
 - **Status**: **ACTIVE**.
+
+### 2026-02-13: Physics Gameplay Slice Best Practices
+- **SHA**: HEAD (Merged work/r013-physics-slice-best-practices)
+- **Tag**: savepoint/r013-physics-slice-best-practices
+- **Scope**:
+    - **Research**: Slope Rollover (Manual Kin->Dyn), Collisions (Sensors vs Events), Explosions (Safe Impulse Math), Determinism (No Math.random).
+    - **New Doc**: docs/research/PHYSICS_GAMEPLAY_SLICE_BEST_PRACTICES.md.
+- **Status**: **REFERENCE**.
