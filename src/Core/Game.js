@@ -372,7 +372,8 @@ export class Game {
         this._manifestSent = false; // Phase 2A: SPAWN_MANIFEST sent exactly once
         this._lastMirrorDiagMs = 0; // Dev-mode: last mirror diagnostics log timestamp
         this._mirrorLerpEnabled = true; // Dev tuner: lerp ON/OFF (false = snap to latest)
-        this._positionSyncLerpSpeed = 0.25; // Phase 1 smooth: exponential lerp factor per frame
+        this._positionSyncLerpSpeed = 0.12; // Phase 1 smooth: base lerp factor (frame-rate independent)
+        this._lastRenderTimeMs = 0; // For frame-rate independent lerp
         this._mirrorTunerOverlay = new MirrorTunerOverlay(this); // Always visible
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
@@ -4137,21 +4138,28 @@ export class Game {
         }
 
         // Phase 1 POSITION_SYNC: smooth remote units toward their sync target
-        const lerpSpeed = this._positionSyncLerpSpeed;
+        // Frame-rate independent: same visual result at 30fps and 144fps
+        const now = performance.now();
+        const dtMs = this._lastRenderTimeMs > 0 ? Math.min(now - this._lastRenderTimeMs, 100) : 16.67;
+        this._lastRenderTimeMs = now;
+        const dtNorm = dtMs / 16.67; // normalize to 60fps (1.0 at 60fps, 2.0 at 30fps)
+        const baseSpeed = this._positionSyncLerpSpeed;
+        const factor = 1 - Math.pow(1 - baseSpeed, dtNorm);
+
         this.units.forEach(unit => {
             if (!unit) return;
 
             if (unit._syncReceived && unit._syncTarget && unit.mesh && this._mirrorLerpEnabled) {
                 const t = unit._syncTarget;
-                // Exponential lerp toward target (frame-rate independent)
-                unit.mesh.position.x += (t.px - unit.mesh.position.x) * lerpSpeed;
-                unit.mesh.position.y += (t.py - unit.mesh.position.y) * lerpSpeed;
-                unit.mesh.position.z += (t.pz - unit.mesh.position.z) * lerpSpeed;
+                // Frame-rate independent exponential lerp toward target
+                unit.mesh.position.x += (t.px - unit.mesh.position.x) * factor;
+                unit.mesh.position.y += (t.py - unit.mesh.position.y) * factor;
+                unit.mesh.position.z += (t.pz - unit.mesh.position.z) * factor;
 
-                // Slerp quaternion
+                // Frame-rate independent slerp quaternion
                 if (t.qw !== undefined) {
                     _mirrorSlerpTarget.set(t.qx, t.qy, t.qz, t.qw);
-                    unit.mesh.quaternion.slerp(_mirrorSlerpTarget, lerpSpeed);
+                    unit.mesh.quaternion.slerp(_mirrorSlerpTarget, factor);
                     if (unit.headingQuaternion) {
                         unit.headingQuaternion.copy(unit.mesh.quaternion);
                     }

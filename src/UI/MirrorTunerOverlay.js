@@ -61,7 +61,7 @@ export class MirrorTunerOverlay {
         });
 
         // Slider: Lerp Speed (exponential approach factor, 0.01=sluggish, 1.0=instant snap)
-        this._addSlider(content, 'Lerp Speed', 0.01, 1.0, 0.01, 0.25, '', (val) => {
+        this._addSlider(content, 'Lerp Speed', 0.01, 0.5, 0.01, 0.12, '', (val) => {
             this.game._positionSyncLerpSpeed = val;
         });
 
