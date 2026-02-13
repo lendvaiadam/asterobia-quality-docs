@@ -73,9 +73,13 @@
 ## 10. Claude Output Contract (Prompt Budget / Minimal Reporting) (Binding)
 **Status: ENFORCED ALWAYS**
 
-For every implementation update / commit summary, you must output **ONLY**:
+For every implementation update / commit summary, follow these reporting rules:
 
-### Required (Always)
+### Principle
+*   **Default:** Concise, complete, high-signal summaries.
+*   **Rule:** Never omit critical info for brevity, but do not expand unless necessary.
+
+### Required (Always Included)
 *   **Branch + Commit SHA** (Concrete SHAs only, NEVER "HEAD").
 *   **Diffstat + List of touched files**.
 *   **Tests:** Command(s) + PASS count (one line).
@@ -83,10 +87,15 @@ For every implementation update / commit summary, you must output **ONLY**:
 *   **Risks / Open Questions** (1–3 bullets max).
 *   **Changes:** Explicit callout if any defaults/flags/caps changed.
 
-### Forbidden (Do NOT Output)
+### Forbidden (Do NOT Output unless requested)
 *   Tool logs (Bash/Explore/Read/Write traces).
 *   Long narrative / redundant explanations.
 *   Speculative arithmetic or "I think" recounting.
-*   Multi-paragraph decision essays (unless explicitly requested).
+*   Multi-paragraph decision essays.
+
+### Exception Clause
+*   If a change is risky/complex or introduces non-obvious behavior, you MAY exceed the minimal format.
+*   **Condition:** You must label the section: `**Extended detail because: [Reason]**`.
+*   **Constraint:** Keep it structured and non-redundant.
 
 > **Reminder:** Concise answers preserve context; prioritize code quality, then brevity.

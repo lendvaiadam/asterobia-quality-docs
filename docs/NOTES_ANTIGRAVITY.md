@@ -412,3 +412,11 @@ Default output: MD files under /quality or /docs.
     - **Docs-Only**: Added Section 10 to docs/NOTES_CLAUDE.md.
     - **Rule**: strict output format (SHA/Diff/Test/HU/Risk only) + Forbidden list.
 - **Status**: **ACTIVE**.
+
+### 2026-02-13: Claude Output Contract (Tuned)
+- **SHA**: HEAD (Merged work/r013-claude-output-contract-tuned)
+- **Tag**: savepoint/r013-claude-output-contract-tuned
+- **Scope**:
+    - **Refinement**: Switched from 'Minimal' to 'Principle-based'.
+    - **Exception**: Added 'Extended detail because: [Reason]' clause.
+- **Status**: **ACTIVE**.
