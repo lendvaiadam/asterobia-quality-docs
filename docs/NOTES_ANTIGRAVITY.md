@@ -445,3 +445,14 @@ Default output: MD files under /quality or /docs.
     - **Contract**: docs/NOTES_CLAUDE.md updated. Forbidden: Tool logs/Narratives. Allowed: Small excerpts w/ reason.
     - **Fact Check**: Commit 7b1aacf (Claimed MP Snapshot Smoothing) **NOT FOUND**. Status: UNVERIFIED.
 - **Status**: **ACTIVE**.
+
+### 2026-02-13: Re-Verification & Contract Tuning
+- **Fact Check**: **RECONFIRMED MISSING**.
+    - Target: `7b1aacf` (Snapshot Smoothing).
+    - Checks: `git rev-parse`, `git remote -v`, `git fetch --all`, `git log --all`.
+    - Result: `fatal: bad object 7b1aacf` (even after fetching `code` remote).
+    - Conclusion: Commit does not exist. Feature is MISSING.
+- **Contract Update**:
+    - **SHA**: `HEAD` (Merged `doc/contract-tightening`)
+    - **Scope**: Explicitly banned tool logs/transcripts. Removed 'Simulated' language.
+- **Status**: **ACTIVE**.
