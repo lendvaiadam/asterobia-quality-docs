@@ -74,7 +74,7 @@ describe('slope trigger', () => {
         cleanup.push(pw);
 
         // Create a terrain with high heightMultiplier for steep slopes
-        const terrain = new ServerTerrain({ heightMultiplier: 12.0 });
+        const terrain = new ServerTerrain(ServerTerrain.STEEP_TEST_PRESET);
         const unit = new HeadlessUnit(1, 0);
 
         // Find a direction where terrain is steep
@@ -149,7 +149,7 @@ describe('anti-thrash', () => {
         const pw = await PhysicsWorld.create({ subSteps: 1, gravity: 0 });
         cleanup.push(pw);
 
-        const terrain = new ServerTerrain({ heightMultiplier: 12.0 });
+        const terrain = new ServerTerrain(ServerTerrain.STEEP_TEST_PRESET);
         const unit = new HeadlessUnit(1, 0);
 
         // Find a steep direction
@@ -191,7 +191,7 @@ describe('anti-thrash', () => {
         const pw = await PhysicsWorld.create({ subSteps: 1 });
         cleanup.push(pw);
 
-        const terrain = new ServerTerrain({ heightMultiplier: 12.0 });
+        const terrain = new ServerTerrain(ServerTerrain.STEEP_TEST_PRESET);
         const flatTerrain = new ServerTerrain({ heightMultiplier: 0 });
 
         const unit = new HeadlessUnit(1, 0);

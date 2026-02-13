@@ -46,14 +46,14 @@ export class HeadlessUnit {
     /** @type {number} Consecutive ticks below threshold to trigger settle */
     static SETTLE_TICK_COUNT = 10;
 
-    /** @type {number} Slope angle threshold for rollover trigger (radians). Default ~1° */
-    static SLOPE_THRESHOLD_RAD = (1 * Math.PI) / 180;
+    /** @type {number} Slope angle threshold for rollover trigger (radians). 45° */
+    static SLOPE_THRESHOLD_RAD = (45 * Math.PI) / 180;
 
     /** @type {number} Consecutive ticks on steep slope before entering DYNAMIC */
     static SLOPE_DEBOUNCE_TICKS = 3;
 
     /** @type {number} Impulse magnitude for slope-triggered rollover (m/s) */
-    static SLOPE_IMPULSE_STRENGTH = 2.0;
+    static SLOPE_IMPULSE_STRENGTH = 5.0;
 
     /** @type {number} Impulse magnitude for collision-triggered knockback (m/s) */
     static COLLISION_IMPULSE_STRENGTH = 5.0;

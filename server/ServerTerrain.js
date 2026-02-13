@@ -19,6 +19,28 @@ import { Vec3 } from './SphereMath.js';
 
 export class ServerTerrain {
     /**
+     * Terrain preset with exaggerated slopes (>45° in many areas).
+     * For physics testing / dev verification of rollover mechanics.
+     * Deterministic (same seed, no randomness).
+     */
+    static STEEP_TEST_PRESET = {
+        radius: 60,
+        heightMultiplier: 15.0,
+        noiseType: 'ridged',
+        domainWarpStrength: 0.3,
+        domainWarpOctaves: 4,
+        domainWarpScale: 0.4,
+        continentScale: 0.6,
+        continentStrength: 0.0,
+        mountainScale: 3.0,
+        mountainStrength: 0.8,
+        detailScale: 2.5,
+        detailStrength: 0.6,
+        ridgePower: 2.5,
+        erosionStrength: 0.01
+    };
+
+    /**
      * @param {Object} [params] - Terrain parameters (same defaults as client Terrain.js)
      */
     constructor(params = {}) {
