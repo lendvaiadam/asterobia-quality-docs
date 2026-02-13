@@ -60,6 +60,9 @@ export class GameServer {
 
         /** @type {number} Max valid slot index */
         this._maxSlot = options.maxSlot || MAX_SLOT;
+
+        /** @type {boolean} Pass enablePhysics to new rooms */
+        this._enablePhysics = !!options.enablePhysics;
     }
 
     /**
@@ -76,7 +79,7 @@ export class GameServer {
         }
 
         const tickMs = Math.round(1000 / this.tickRate);
-        const room = new Room(roomId, { tickMs, ...options });
+        const room = new Room(roomId, { tickMs, enablePhysics: this._enablePhysics, ...options });
         this.rooms.set(roomId, room);
         return room;
     }
@@ -163,6 +166,12 @@ export class GameServer {
                     break;
                 case 'PATH_DATA':
                     this._onPathData(channelName, payload, client);
+                    break;
+                case 'DEV_EXPLOSION':
+                    this._onDevExplosion(channelName, payload, client);
+                    break;
+                case 'DEV_PLACE_MINE':
+                    this._onDevPlaceMine(channelName, payload, client);
                     break;
             }
         };
@@ -468,6 +477,40 @@ export class GameServer {
      * Used for broadcasting SERVER_SNAPSHOT to clients.
      * @private
      */
+    /**
+     * Handle DEV_EXPLOSION: trigger explosion on a unit (dev mode only).
+     * @private
+     */
+    _onDevExplosion(channelName, payload, client) {
+        const roomId = this._extractRoomId(channelName);
+        if (!roomId) return;
+        const room = this.rooms.get(roomId);
+        if (!room || room.state !== 'RUNNING') return;
+        const unitId = payload.unitId;
+        if (typeof unitId !== 'number') return;
+        const radius = typeof payload.radius === 'number' && isFinite(payload.radius) ? payload.radius : 8;
+        const strength = typeof payload.strength === 'number' && isFinite(payload.strength) ? payload.strength : 6;
+        room._devTriggerExplosion(unitId, radius, strength);
+    }
+
+    /**
+     * Handle DEV_PLACE_MINE: place a mine near a unit (dev mode only).
+     * Places the mine slightly ahead of the unit (in heading direction).
+     * @private
+     */
+    _onDevPlaceMine(channelName, payload, client) {
+        const roomId = this._extractRoomId(channelName);
+        if (!roomId) return;
+        const room = this.rooms.get(roomId);
+        if (!room || room.state !== 'RUNNING') return;
+        const unitId = payload.unitId;
+        if (typeof unitId !== 'number') return;
+        const unit = room.units.find(u => u && u.id === unitId);
+        if (!unit) return;
+        // Place mine at unit's current position (on surface)
+        room.addMine({ x: unit.position.x, y: unit.position.y, z: unit.position.z });
+    }
+
     _injectToChannel(channelName, payload) {
         if (!this._relay) return;
 

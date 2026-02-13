@@ -179,6 +179,7 @@ export class HeadlessUnit {
             state: this.speed > 0 ? 'MOVING' : 'IDLE',
             hp: this.hp,
             mode: this.mode,
+            physicsMode: this.physicsMode,
             altitude: this.altitude
         };
     }

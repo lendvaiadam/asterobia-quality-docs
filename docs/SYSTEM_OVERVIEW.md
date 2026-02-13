@@ -45,6 +45,7 @@ The technical core is a **Fixed-Timestep, Host-Authoritative, Deterministic SimC
 | `src/World/` | **Visualization** | Read-Only from SimCore. No gameplay logic. |
 | `src/UI/` | **Presentation** | Sends Commands only. Never mutates state. |
 | `docs/` | **Documentation** | Single Source of Truth. |
+| `docs/HU_TESTS/` | **Manual QA Playbooks** | Visual Verification Steps (CLI-Free). |
 | `spec_sources/` | **Canonical Specs** | Immutable Game Design constraints. |
 | `quality/` | **Audit Reports** | Evidence of verification. |
 

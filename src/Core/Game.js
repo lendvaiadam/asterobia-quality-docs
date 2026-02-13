@@ -36,6 +36,7 @@ import { JoinOverlay } from '../UI/JoinOverlay.js';
 import { MultiplayerHUD } from '../UI/MultiplayerHUD.js';
 import { AdaptivePerformance } from './AdaptivePerformance.js';
 import { MirrorTunerOverlay } from '../UI/MirrorTunerOverlay.js';
+import { PhysicsDebugOverlay } from '../UI/PhysicsDebugOverlay.js';
 
 /** Reusable quaternion for mirror mode slerp (avoids per-frame allocation) */
 const _mirrorSlerpTarget = new THREE.Quaternion();
@@ -375,6 +376,9 @@ export class Game {
         this._positionSyncLerpSpeed = 0.12; // Phase 1 smooth: base lerp factor (frame-rate independent)
         this._lastRenderTimeMs = 0; // For frame-rate independent lerp
         this._mirrorTunerOverlay = new MirrorTunerOverlay(this); // Always visible
+        if (this._isDevMode) {
+            this._physicsDebugOverlay = new PhysicsDebugOverlay(this);
+        }
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();

@@ -83,6 +83,9 @@
     - **Scope:** `HeadlessUnit.js` (Kinematic <-> Dynamic).
     - **Trigger:** API-only / Test-only (No gameplay trigger yet).
     - **Tests:** +29 Integration Tests. Total 885 PASS.
+- [x] **Phase 3 Step 4: Physics Triggers.** **MERGED** (SHA: `7b1aacf` -> MISSING -> Re-Verify).
+    - **Status:** **Features Missing from Main**. (See `NOTES_ANTIGRAVITY.md`).
+    - **Verification:** [HU-TEST Playbook](file:///d:/___AI_PROJECTEK___/AI_GAME/_GAME_3_/docs/HU_TESTS/HU_TEST_R013_PHASE3_PHYSICS.md) (**BLOCKED**).
 - **CTO Ping #1**: APPROVED (2026-02-10)
 - **Skills Infrastructure**: 15 skill files + 4 worker loadouts installed (49fb8ee)
 - **Test State**: Vitest installed. 690 tests passed! (Clean).

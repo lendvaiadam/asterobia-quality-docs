@@ -25,6 +25,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 const PORT = parseInt(process.env.PORT || '8081', 10);
 const PHASE2A = process.env.PHASE2A === '1';
+const ENABLE_PHYSICS = process.env.ENABLE_PHYSICS === '1';
 
 // ── Minimal static file server ─────────────────────────────────
 const MIME = {
@@ -105,9 +106,12 @@ httpServer.listen(PORT, () => {
 
 // ── Phase 2A: wire authoritative GameServer ────────────────────
 if (PHASE2A) {
-    const gameServer = new GameServer({ tickRate: 20 });
+    const gameServer = new GameServer({ tickRate: 20, enablePhysics: ENABLE_PHYSICS });
     gameServer.wireToRelay(relay);
     gameServer.start();
+    if (ENABLE_PHYSICS) {
+        console.log('[Asterobia Server] Physics ENABLED (Rapier)');
+    }
 }
 
 // ── Graceful shutdown ──────────────────────────────────────────
