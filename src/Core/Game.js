@@ -36,6 +36,9 @@ import { JoinOverlay } from '../UI/JoinOverlay.js';
 import { MultiplayerHUD } from '../UI/MultiplayerHUD.js';
 import { AdaptivePerformance } from './AdaptivePerformance.js';
 
+/** Reusable quaternion for mirror mode slerp (avoids per-frame allocation) */
+const _mirrorSlerpTarget = new THREE.Quaternion();
+
 export class Game {
     constructor() {
         // R012: Check dev mode early for HUD
@@ -366,6 +369,7 @@ export class Game {
         this._lastMoveInputSendMs = 0;
         this._MOVE_INPUT_INTERVAL_MS = 50; // 20Hz send rate
         this._manifestSent = false; // Phase 2A: SPAWN_MANIFEST sent exactly once
+        this._lastMirrorDiagMs = 0; // Dev-mode: last mirror diagnostics log timestamp
 
         // R011: Dev-only save/load hotkeys (Ctrl+Alt+S / Ctrl+Alt+L)
         this._setupDevSaveLoad();
@@ -4045,77 +4049,25 @@ export class Game {
 
     /**
      * Phase 2A: Mirror mode sim tick — replaces normal simTick when server-authoritative.
-     * Does NOT call Unit.update(). Instead reads from SnapshotBuffer and sets interpolation targets.
+     * Does NOT call Unit.update(). Interpolation is handled per-frame in _mirrorModeRender().
+     * This method handles only visual shell reconciliation and MOVE_INPUT sending.
      * @param {number} tickCount - Current tick number
      */
     _mirrorModeSimTick(tickCount) {
-        // 1. Get interpolation pair from SnapshotBuffer
+        // 1. Reconcile: create visual shells for server units missing locally
         const pair = this._snapshotBuffer.getInterpolationPair();
-        if (!pair.prev || !pair.next) return; // No snapshots yet
+        if (pair.next) {
+            const nextUnits = new Map();
+            for (const u of pair.next.units) nextUnits.set(u.id, u);
 
-        // 2. Apply snapshot positions to unit interpolation targets
-        const prevUnits = new Map();
-        for (const u of pair.prev.units) prevUnits.set(u.id, u);
-        const nextUnits = new Map();
-        for (const u of pair.next.units) nextUnits.set(u.id, u);
-
-        for (const unit of this.units) {
-            if (!unit) continue;
-
-            const prevU = prevUnits.get(unit.id);
-            const nextU = nextUnits.get(unit.id);
-            if (!nextU) continue; // Unit not in server snapshot
-
-            const isTeleport = pair.teleports.has(unit.id);
-
-            if (isTeleport || !prevU) {
-                // Teleport or new unit: snap instantly
-                unit._interpPrevPos.set(nextU.px, nextU.py, nextU.pz);
-                unit._interpCurrPos.set(nextU.px, nextU.py, nextU.pz);
-                unit.position.set(nextU.px, nextU.py, nextU.pz);
-            } else {
-                // Normal interpolation targets
-                unit._interpPrevPos.set(prevU.px, prevU.py, prevU.pz);
-                unit._interpCurrPos.set(nextU.px, nextU.py, nextU.pz);
-                // Update authoritative position to latest for other systems (FOW, etc.)
-                unit.position.set(nextU.px, nextU.py, nextU.pz);
-            }
-
-            // Phase 2A: Apply orientation quaternion from server snapshot
-            // Server sends qx/qy/qz/qw aligned to terrain normal + heading direction.
-            // Client applies directly — no local terrain fixup (prevents vibration).
-            if (nextU.qw !== undefined && unit.mesh) {
-                if (isTeleport || !prevU || prevU.qw === undefined) {
-                    // Snap quaternion (teleport or first frame)
-                    unit._interpPrevQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
-                    unit._interpCurrQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
-                } else {
-                    // Smooth interpolation between prev and next quaternions
-                    unit._interpPrevQuat.set(prevU.qx, prevU.qy, prevU.qz, prevU.qw);
-                    unit._interpCurrQuat.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+            for (const [id, snapUnit] of nextUnits) {
+                if (!this.units.some(u => u && u.id === id)) {
+                    this._createVisualShellFromSnapshot(snapUnit);
                 }
-
-                // Keep headingQuaternion in sync (used by camera, tire tracks, etc.)
-                if (!unit.headingQuaternion) {
-                    unit.headingQuaternion = unit.mesh.quaternion.clone();
-                }
-                unit.headingQuaternion.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
-            } else if (!unit.headingQuaternion && unit.mesh) {
-                // Fallback for snapshots without quaternion data
-                unit.headingQuaternion = unit.mesh.quaternion.clone();
-            }
-
-            unit._interpInitialized = true;
-        }
-
-        // 2b. Reconcile: create visual shells for server units missing locally
-        for (const [id, snapUnit] of nextUnits) {
-            if (!this.units.some(u => u && u.id === id)) {
-                this._createVisualShellFromSnapshot(snapUnit);
             }
         }
 
-        // 3. Send MOVE_INPUT at ~20Hz with latching
+        // 2. Send MOVE_INPUT at ~20Hz with latching
         const now = performance.now();
         if (now - this._lastMoveInputSendMs >= this._MOVE_INPUT_INTERVAL_MS) {
             this._lastMoveInputSendMs = now;
@@ -4145,9 +4097,6 @@ export class Game {
                 }
             }
         }
-
-        // 4. Suppress Phase 1 POSITION_SYNC (do NOT call sendPositionSync in mirror mode)
-        // This is already handled by the early return at the top of simTick()
     }
 
     /**
@@ -4155,13 +4104,103 @@ export class Game {
      * Called by SimLoop.onRender after sim ticks, at 60fps.
      * This is RENDER-ONLY and does NOT mutate authoritative sim state.
      *
+     * In mirror mode, delegates to _mirrorModeRender() which queries the
+     * SnapshotBuffer per-frame for its own alpha (decoupled from SimLoop accumulator).
+     *
      * @param {number} alpha - Interpolation factor [0, 1] from SimLoop accumulator
      */
     _applyInterpolatedRender(alpha) {
+        if (this._mirrorMode) {
+            this._mirrorModeRender();
+            return;
+        }
         this.units.forEach(unit => {
             if (!unit) return;
             unit.applyInterpolatedRender(alpha);
         });
+    }
+
+    /**
+     * Mirror mode per-frame render: queries SnapshotBuffer for interpolation pair + alpha
+     * at 60fps, directly lerps/slerps mesh positions and quaternions.
+     *
+     * This eliminates the dual-clock problem where _mirrorModeSimTick set interp targets
+     * at 20Hz but _applyInterpolatedRender used the SimLoop accumulator alpha (independent
+     * 60fps clock), causing micro-stutter at tick boundaries.
+     *
+     * @private
+     */
+    _mirrorModeRender() {
+        const pair = this._snapshotBuffer.getInterpolationPair();
+        if (!pair.prev || !pair.next) return;
+
+        const alpha = pair.alpha;
+
+        const prevUnits = new Map();
+        for (const u of pair.prev.units) prevUnits.set(u.id, u);
+        const nextUnits = new Map();
+        for (const u of pair.next.units) nextUnits.set(u.id, u);
+
+        for (const unit of this.units) {
+            if (!unit) continue;
+
+            const prevU = prevUnits.get(unit.id);
+            const nextU = nextUnits.get(unit.id);
+            if (!nextU) continue;
+
+            const isTeleport = pair.teleports.has(unit.id);
+
+            if (isTeleport || !prevU) {
+                // Teleport or new unit: snap instantly
+                if (unit.mesh) {
+                    unit.mesh.position.set(nextU.px, nextU.py, nextU.pz);
+                }
+                unit.position.set(nextU.px, nextU.py, nextU.pz);
+            } else {
+                // Lerp position between prev and next using SnapshotBuffer alpha
+                const x = prevU.px + (nextU.px - prevU.px) * alpha;
+                const y = prevU.py + (nextU.py - prevU.py) * alpha;
+                const z = prevU.pz + (nextU.pz - prevU.pz) * alpha;
+                if (unit.mesh) {
+                    unit.mesh.position.set(x, y, z);
+                }
+                unit.position.set(nextU.px, nextU.py, nextU.pz);
+            }
+
+            // Quaternion interpolation
+            if (nextU.qw !== undefined && unit.mesh) {
+                if (isTeleport || !prevU || prevU.qw === undefined) {
+                    unit.mesh.quaternion.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+                } else {
+                    // Slerp between prev and next quaternions
+                    unit.mesh.quaternion.set(prevU.qx, prevU.qy, prevU.qz, prevU.qw);
+                    _mirrorSlerpTarget.set(nextU.qx, nextU.qy, nextU.qz, nextU.qw);
+                    unit.mesh.quaternion.slerp(_mirrorSlerpTarget, Math.min(alpha, 1));
+                }
+
+                if (!unit.headingQuaternion) {
+                    unit.headingQuaternion = unit.mesh.quaternion.clone();
+                }
+                unit.headingQuaternion.copy(unit.mesh.quaternion);
+            } else if (!unit.headingQuaternion && unit.mesh) {
+                unit.headingQuaternion = unit.mesh.quaternion.clone();
+            }
+
+            unit._interpInitialized = true;
+        }
+
+        // Dev-mode diagnostics: log buffer health every 5 seconds
+        if (this._isDevMode) {
+            const now = performance.now();
+            if (now - this._lastMirrorDiagMs >= 5000) {
+                this._lastMirrorDiagMs = now;
+                const stats = this._snapshotBuffer.getArrivalStats();
+                console.log(
+                    `[Mirror] buf=${this._snapshotBuffer.size} uf=${this._snapshotBuffer.underflowCount}` +
+                    ` dt=${stats.mean.toFixed(1)}±[${stats.min},${stats.max}]ms α=${alpha.toFixed(3)}`
+                );
+            }
+        }
     }
 
     /**
