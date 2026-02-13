@@ -396,6 +396,12 @@ export class HeadlessUnit {
         this.rigidBody.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
         this.rigidBody.setGravityScale(0, true); // We use manual spherical gravity
 
+        // Disable sensor so terrain trimesh collider can physically support the unit
+        const numColliders = this.rigidBody.numColliders();
+        for (let i = 0; i < numColliders; i++) {
+            this.rigidBody.collider(i).setSensor(false);
+        }
+
         // Sync position TO body before physics takes over
         this.rigidBody.setTranslation(this.position, true);
         this.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
@@ -424,6 +430,12 @@ export class HeadlessUnit {
         const RAPIER = physicsWorld.RAPIER;
         this.rigidBody.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
         this.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+
+        // Re-enable sensor so terrain trimesh doesn't fight kinematic movement
+        const numColliders = this.rigidBody.numColliders();
+        for (let i = 0; i < numColliders; i++) {
+            this.rigidBody.collider(i).setSensor(true);
+        }
 
         this.physicsMode = 'KINEMATIC';
         this._settleCounter = 0;

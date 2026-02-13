@@ -227,6 +227,9 @@ export class PhysicsWorld {
         if (options.activeEvents) {
             desc.setActiveEvents(this._RAPIER.ActiveEvents.COLLISION_EVENTS);
         }
+        if (options.sensor) {
+            desc.setSensor(true);
+        }
         return this._world.createCollider(desc, body);
     }
 

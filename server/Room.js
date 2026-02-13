@@ -487,7 +487,9 @@ export class Room {
         if (!this.physics) return;
 
         const body = this.physics.createKinematicBody(unit.position);
-        this.physics.addBallCollider(body, 0.5, { activeEvents: true });
+        // Sensor: detects collisions for events but does NOT physically block movement.
+        // Without sensor, terrain trimesh collider fights with kinematic position sync.
+        this.physics.addBallCollider(body, 0.5, { activeEvents: true, sensor: true });
         unit.rigidBody = body;
         this._bodyToUnit.set(body.handle, unit);
     }
