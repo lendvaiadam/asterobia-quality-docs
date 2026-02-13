@@ -1,5 +1,4 @@
 @echo off
-setlocal EnableDelayedExpansion
 echo ===========================================
 echo   ASTEROBIA - FIZIKA TESZT INDITO
 echo ===========================================
@@ -10,6 +9,10 @@ cd /d "%~dp0"
 
 REM --- Port config ---
 if not defined PORT set PORT=8081
+
+REM --- Set env vars BEFORE start (inherited by child process) ---
+set PHASE2A=1
+set ENABLE_PHYSICS=1
 
 REM --- 1. Check if port is already in use ---
 powershell -Command "try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', %PORT%); $c.Close(); exit 1 } catch { exit 0 }" >nul 2>&1
@@ -23,9 +26,9 @@ if errorlevel 1 (
     goto :eof
 )
 
-REM --- 2. Start server with physics enabled ---
-echo 1. Szerver inditas (fizika BEKAPCSOLVA)...
-start "Asterobia Server (Physics)" cmd /k "cd /d "%~dp0" && set PHASE2A=1 && set ENABLE_PHYSICS=1 && set PORT=%PORT% && node server/index.js"
+REM --- 2. Start server (env vars inherited) ---
+echo 1. Szerver inditas (PHASE2A + PHYSICS)...
+start "Asterobia Server (Physics)" node server/index.js
 echo.
 
 REM --- 3. Wait for server ---
@@ -39,7 +42,7 @@ if errorlevel 1 (
 echo    Szerver KESZ.
 echo.
 
-REM --- 4. Open ONE browser tab (host only - single player test) ---
+REM --- 4. Open browser ---
 echo 3. Bongeszo megnyitas...
 start http://127.0.0.1:%PORT%/game.html?net=ws^&dev=1
 echo.
@@ -58,4 +61,3 @@ pause >nul
 REM --- Cleanup ---
 taskkill /FI "WINDOWTITLE eq Asterobia Server (Physics)" /F >nul 2>&1
 echo Szerver leallitva.
-endlocal
