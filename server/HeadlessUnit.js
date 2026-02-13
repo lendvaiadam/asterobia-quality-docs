@@ -218,8 +218,8 @@ export class HeadlessUnit {
     applyInput(command) {
         if (command.type !== 'MOVE_INPUT') return;
 
-        // DYNAMIC mode: ignore WASD input (Rapier drives position)
-        if (this.physicsMode === 'DYNAMIC') return;
+        // DYNAMIC/SETTLED: ignore WASD input (Rapier drives or unit is fallen)
+        if (this.physicsMode === 'DYNAMIC' || this.physicsMode === 'SETTLED') return;
 
         // Interrupt rule: direct WASD input cancels active path-follow
         const hasInput = command.forward || command.backward || command.left || command.right;
@@ -272,8 +272,8 @@ export class HeadlessUnit {
      * @param {number} dtSec - Timestep in seconds
      */
     updatePosition(dtSec) {
-        // DYNAMIC mode: Rapier drives position — skip kinematic movement
-        if (this.physicsMode === 'DYNAMIC') return;
+        // DYNAMIC: Rapier drives position. SETTLED: unit stays fallen, no movement.
+        if (this.physicsMode === 'DYNAMIC' || this.physicsMode === 'SETTLED') return;
 
         // Phase 2B: delegate to path-follow if active
         if (this.waypoints && this.waypoints.length > 0) {
@@ -455,6 +455,41 @@ export class HeadlessUnit {
     }
 
     /**
+     * Transition to SETTLED mode. Unit stays fallen (preserves Rapier quaternion).
+     * Rapier body switched to kinematic to stop simulation, but orientation is NOT
+     * reset to surface-normal. Unit does not move until explicitly reset.
+     *
+     * @param {import('./PhysicsWorld.js').PhysicsWorld} physicsWorld
+     */
+    settleDynamic(physicsWorld) {
+        if (this.physicsMode !== 'DYNAMIC') return;
+        if (!this.rigidBody) return;
+
+        // Read final position and rotation from Rapier
+        const pos = this.rigidBody.translation();
+        this.position = { x: pos.x, y: pos.y, z: pos.z };
+        const rot = this.rigidBody.rotation();
+        this.orientation = { x: rot.x, y: rot.y, z: rot.z, w: rot.w };
+
+        // Switch body back to kinematic (stop Rapier simulation)
+        const RAPIER = physicsWorld.RAPIER;
+        this.rigidBody.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
+        this.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+
+        // Re-enable sensor
+        const numColliders = this.rigidBody.numColliders();
+        for (let i = 0; i < numColliders; i++) {
+            this.rigidBody.collider(i).setSensor(true);
+        }
+
+        // SETTLED: stays fallen, no movement, no terrain re-alignment
+        this.physicsMode = 'SETTLED';
+        this._settleCounter = 0;
+        this.speed = 0;
+        this.velocity = { x: 0, y: 0, z: 0 };
+    }
+
+    /**
      * Check terrain slope at current position and update debounce counter.
      * Returns a down-slope impulse vector if the trigger threshold is met,
      * or null if slope is safe / on cooldown / already DYNAMIC.
@@ -462,7 +497,7 @@ export class HeadlessUnit {
      * @returns {{ x: number, y: number, z: number } | null} Impulse vector or null
      */
     checkSlopeTrigger() {
-        if (this.physicsMode === 'DYNAMIC') return null;
+        if (this.physicsMode === 'DYNAMIC' || this.physicsMode === 'SETTLED') return null;
         if (this._reentryCooldown > 0) {
             this._reentryCooldown--;
             return null;
@@ -518,8 +553,10 @@ export class HeadlessUnit {
         const pos = this.rigidBody.translation();
         this.position = { x: pos.x, y: pos.y, z: pos.z };
 
-        // Update orientation from new position
-        this._updateOrientation();
+        // DYNAMIC: read rotation directly from Rapier (tumble effect)
+        // Do NOT call _updateOrientation() — that derives from sphere surface and destroys tumble
+        const rot = this.rigidBody.rotation();
+        this.orientation = { x: rot.x, y: rot.y, z: rot.z, w: rot.w };
 
         // Settle detection: check linear velocity magnitude
         const vel = this.rigidBody.linvel();

@@ -420,10 +420,10 @@ describe('Room integration', () => {
         // Tick enough times for settle
         for (let i = 0; i < HeadlessUnit.SETTLE_TICK_COUNT + 5; i++) {
             room._onSimTick(0.05, i + 1);
-            if (unit.physicsMode === 'KINEMATIC') break;
+            if (unit.physicsMode === 'SETTLED') break;
         }
 
-        expect(unit.physicsMode).toBe('KINEMATIC');
+        expect(unit.physicsMode).toBe('SETTLED');
 
         room.stop();
     });

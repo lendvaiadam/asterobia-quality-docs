@@ -745,10 +745,10 @@ describe('Room integration', () => {
         const dtSec = 0.05;
         for (let i = 0; i < 200; i++) {
             room._onSimTick(dtSec, i + 1);
-            if (unit.physicsMode === 'KINEMATIC') break;
+            if (unit.physicsMode === 'SETTLED') break;
         }
 
-        expect(unit.physicsMode).toBe('KINEMATIC');
+        expect(unit.physicsMode).toBe('SETTLED');
     });
 
     it('room._devTriggerExplosion fires explosion at unit position', async () => {

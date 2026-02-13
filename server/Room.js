@@ -354,7 +354,7 @@ export class Room {
                 if (unit.physicsMode === 'DYNAMIC') {
                     const settled = unit.syncFromRigidBody();
                     if (settled) {
-                        unit.exitDynamic(this.physics);
+                        unit.settleDynamic(this.physics);
                     }
                 }
             }

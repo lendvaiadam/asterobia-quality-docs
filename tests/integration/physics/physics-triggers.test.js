@@ -441,11 +441,10 @@ describe('regression', () => {
         // Settle after enough ticks (no gravity, no impulse → zero velocity)
         for (let i = 0; i < HeadlessUnit.SETTLE_TICK_COUNT + 5; i++) {
             room._onSimTick(0.05, i + 1);
-            if (unit.physicsMode === 'KINEMATIC') break;
+            if (unit.physicsMode === 'SETTLED') break;
         }
 
-        expect(unit.physicsMode).toBe('KINEMATIC');
-        expect(unit._reentryCooldown).toBe(HeadlessUnit.REENTRY_COOLDOWN_TICKS);
+        expect(unit.physicsMode).toBe('SETTLED');
 
         room.stop();
     });
