@@ -4146,10 +4146,15 @@ export class Game {
         const baseSpeed = this._positionSyncLerpSpeed;
         const factor = 1 - Math.pow(1 - baseSpeed, dtNorm);
 
+        const mySlot = this.sessionManager?.state?.mySlot ?? -1;
+
         this.units.forEach(unit => {
             if (!unit) return;
 
-            if (unit._syncReceived && unit._syncTarget && unit.mesh && this._mirrorLerpEnabled) {
+            // Only sync-lerp REMOTE units — local player's units are driven by Unit.update()
+            const isRemote = mySlot < 0 || (unit.ownerSlot !== mySlot && unit.selectedBySlot !== mySlot);
+
+            if (isRemote && unit._syncReceived && unit._syncTarget && unit.mesh && this._mirrorLerpEnabled) {
                 const t = unit._syncTarget;
                 // Frame-rate independent exponential lerp toward target
                 unit.mesh.position.x += (t.px - unit.mesh.position.x) * factor;
