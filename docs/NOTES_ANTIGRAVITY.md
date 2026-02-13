@@ -299,6 +299,37 @@ Default output: MD files under /quality or /docs.
 - **Action**: Deleted temporary `docs/readable-export-ee26077` branch (readable export).
 - **Status**: Not merged to main.
 
+### 2026-02-12: Phase 2A Hardening & Docs Merged
+- **SHA**: `40ea6ec` (Fast-forward merge on Main)
+- **Tag**: `savepoint/r013-phase2a-hardening`
+- **Scope**:
+    - **Security**: `JOIN_ACK` gate, Manifest Caps, Rate Limit, Paylod Limit (`152d22a`).
+    - **Docs**: `HYBRID_PHYSICS_MASTER.md`, `CLAUDE_HANDOFF_PHASE2B.md` (`c4cffaa`).
+    - **Persistence**: Workflow Rule (`40ea6ec`).
+- **Tests**: 761 PASS (Clean). +20 New Security Tests.
+- **Status**: **READY FOR PHASE 2B**.
+
+### 2026-02-13: Phase 2B Path-Follow Merged
+- **SHA**: `86fb3fd` (Fast-forward Merge on Main)
+- **Tag**: `savepoint/r013-phase2b-path-follow`
+- **Scope**:
+    - **Server**: `PATH_DATA` handling, 32-waypoint cap, `HeadlessUnit` path-follow tick.
+    - **Client**: Shift+Click A* wiring, WASD interrupt logic.
+    - **Tests**: +28 new tests (Path Validation). Total 789 PASS.
+- **HU-PASS**: Confirmed by Human.
+    - Known Issue: "Commands" error in WS transport (Legacy/Phase 1) - Non-blocking.
+    - Mirror Mode: No client-side path markers (Expected/Spec-compliant).
+- **Status**: **READY FOR PHASE 3 (PHYSICS)**.
+
+### 2026-02-13: Phase 3 PREP Merged
+- **SHA**: `bb54e5b`
+- **Tag**: `savepoint/r013-phase3-rapier-tooling`
+- **Scope**:
+    - **Deps**: Added `@dimforge/rapier3d-compat@0.19.3`. Pinned `simplex-noise@4.0.3`.
+    - **Tests**: Added `rapier-smoke.test.js` (9 tests PASS).
+    - **Docs**: Added `RAPIER_BEST_PRACTICES.md`.
+- **Status**: **READY FOR IMPLEMENTATION**.
+
 ### BLOCKER: R013-NB1 Phase 1 (Minimal Viable Loop)
 - **Date**: 2026-02-10
 - **Branch**: `work/r013-nb1-phase1`

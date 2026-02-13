@@ -21,7 +21,8 @@ The technical core is a **Fixed-Timestep, Host-Authoritative, Deterministic SimC
 ### 🛠️ If you are IMPLEMENTING (Claude Code)
 1.  **Check Status**: `docs/STATUS_WALKTHROUGH.md` (What is Active?).
 2.  **Read The Bible**: `spec_sources/ASTEROBIA_CANONICAL_MASTER_BIBLE_2026-01-13.md`.
-3.  **Follow Workflow**: `docs/AI_WORKFLOW.md`.
+3.  **Read Your Operating Rules**: `docs/NOTES_CLAUDE.md`.
+4.  **Follow Workflow**: `docs/AI_WORKFLOW.md`.
 
 ### 🔍 If you are AUDITING (Antigravity)
 1.  **Check Quality Gates**: `docs/IMPLEMENTATION_GATES.md`.
