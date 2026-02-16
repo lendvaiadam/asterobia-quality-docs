@@ -59,17 +59,77 @@ export class PhysicsDebugOverlay {
         const content = document.createElement('div');
         content.style.cssText = 'padding: 6px 8px;';
 
+        // Altitude slider — sets selected unit height above terrain
+        const altRow = document.createElement('div');
+        altRow.style.cssText = 'display: flex; align-items: center; gap: 4px; margin-bottom: 6px;';
+        const altLabel = document.createElement('span');
+        altLabel.style.cssText = 'color: #0af; font-size: 10px; white-space: nowrap;';
+        altLabel.textContent = 'ALT:';
+        this._altSlider = document.createElement('input');
+        this._altSlider.type = 'range'; this._altSlider.min = '0'; this._altSlider.max = '30'; this._altSlider.value = '10';
+        this._altSlider.style.cssText = 'flex: 1; height: 14px; cursor: pointer; accent-color: #0af;';
+        this._altValue = document.createElement('span');
+        this._altValue.style.cssText = 'color: #0af; font-size: 10px; min-width: 28px; text-align: right;';
+        this._altValue.textContent = '10m';
+        this._altSlider.addEventListener('input', () => { this._altValue.textContent = this._altSlider.value + 'm'; });
+        this._altSlider.addEventListener('change', () => {
+            const unit = this.game.selectedUnit;
+            if (!unit) { this._showStatus('Select a unit first!', true); return; }
+            const p = unit.mesh ? unit.mesh.position : unit.position;
+            const q = unit.mesh ? unit.mesh.quaternion : null;
+            const payload = { unitId: unit.id, altitude: parseFloat(this._altSlider.value), px: p.x, py: p.y, pz: p.z };
+            if (q) { payload.qx = q.x; payload.qy = q.y; payload.qz = q.z; payload.qw = q.w; }
+            this._sendDevCommand('SET_ALTITUDE', payload);
+            this._showStatus(`ALT ${this._altSlider.value}m → U${unit.id}`);
+        });
+        altRow.appendChild(altLabel); altRow.appendChild(this._altSlider); altRow.appendChild(this._altValue);
+        content.appendChild(altRow);
+
+        // Rapier ON/OFF toggle + DROP
+        const rapierRow = document.createElement('div');
+        rapierRow.style.cssText = 'display: flex; gap: 4px; margin-bottom: 6px;';
+        this._rapierBtn = this._makeButton('RAPIER ON', '#0a0', () => this._toggleRapier(true));
+        this._rapierOffBtn = this._makeButton('RAPIER OFF', '#f44', () => this._toggleRapier(false));
+        const btnDrop = this._makeButton('DROP', '#0af', () => this._dropTest());
+        rapierRow.appendChild(this._rapierBtn); rapierRow.appendChild(this._rapierOffBtn); rapierRow.appendChild(btnDrop);
+        content.appendChild(rapierRow);
+
         // Buttons row
         const btnRow = document.createElement('div');
         btnRow.style.cssText = 'display: flex; gap: 4px; margin-bottom: 6px;';
 
         const btnExplode = this._makeButton('EXPLODE', '#f44', () => this._triggerExplosion());
-        const btnMine = this._makeButton('MINE', '#ff0', () => this._placeMine());
-        const btnRock = this._makeButton('ROCK', '#88f', () => this._spawnRock());
         btnRow.appendChild(btnExplode);
-        btnRow.appendChild(btnMine);
-        btnRow.appendChild(btnRock);
         content.appendChild(btnRow);
+
+        // Rollover threshold slider row
+        const threshRow = document.createElement('div');
+        threshRow.style.cssText = 'display: flex; align-items: center; gap: 4px; margin-bottom: 6px;';
+        const threshLabel = document.createElement('span');
+        threshLabel.style.cssText = 'color: #ff0; font-size: 10px; white-space: nowrap;';
+        threshLabel.textContent = 'ROLLOVER:';
+        const threshSlider = document.createElement('input');
+        threshSlider.type = 'range';
+        threshSlider.min = '5';
+        threshSlider.max = '90';
+        threshSlider.value = '25';
+        threshSlider.style.cssText = 'flex: 1; height: 14px; cursor: pointer; accent-color: #ff0;';
+        const threshValue = document.createElement('span');
+        threshValue.style.cssText = 'color: #ff0; font-size: 10px; min-width: 28px; text-align: right;';
+        threshValue.textContent = '25°';
+        threshSlider.addEventListener('input', () => {
+            const deg = parseInt(threshSlider.value, 10);
+            threshValue.textContent = `${deg}°`;
+        });
+        threshSlider.addEventListener('change', () => {
+            const deg = parseInt(threshSlider.value, 10);
+            this._sendDevCommand('SET_ROLLOVER_THRESHOLD', { degrees: deg });
+            this._showStatus(`Rollover threshold → ${deg}°`);
+        });
+        threshRow.appendChild(threshLabel);
+        threshRow.appendChild(threshSlider);
+        threshRow.appendChild(threshValue);
+        content.appendChild(threshRow);
 
         // Status area (persistent feedback for button clicks)
         this._statusEl = document.createElement('div');
@@ -154,7 +214,7 @@ export class PhysicsDebugOverlay {
             const isSettled = mode === 'SETTLED';
             const color = isDynamic ? '#f44' : isSettled ? '#ff0' : '#0f0';
             const stateLabel = u.mode || u.state || '?';
-            const serverTag = u._serverDynamic ? ' (srv)' : '';
+            const serverTag = u._serverDriven ? ' (srv)' : '';
             html += `<div style="color:${color}">` +
                 `U${u.id} [${mode}]${serverTag} ${stateLabel} ` +
                 `alt:${(u.altitude || 0).toFixed(1)} ` +
@@ -166,6 +226,46 @@ export class PhysicsDebugOverlay {
     }
 
     /** @private */
+    _toggleRapier(enable) {
+        const unit = this.game.selectedUnit;
+        if (!unit) { this._showStatus('Select a unit first!', true); return; }
+        const p = unit.mesh ? unit.mesh.position : unit.position;
+        const q = unit.mesh ? unit.mesh.quaternion : null;
+        const payload = { unitId: unit.id, enable, px: p.x, py: p.y, pz: p.z };
+        if (q) { payload.qx = q.x; payload.qy = q.y; payload.qz = q.z; payload.qw = q.w; }
+        this._sendDevCommand('TOGGLE_RAPIER', payload);
+        this._showStatus(`RAPIER ${enable ? 'ON' : 'OFF'} → U${unit.id}`);
+    }
+
+    /** @private */
+    _dropTest() {
+        const game = this.game;
+        const unit = game.selectedUnit;
+        if (!unit) {
+            this._showStatus('Select a unit first! (double-click)', true);
+            return;
+        }
+        const p = unit.mesh ? unit.mesh.position : unit.position;
+        const q = unit.mesh ? unit.mesh.quaternion : null;
+        const payload = { unitId: unit.id, px: p.x, py: p.y, pz: p.z };
+        if (q) { payload.qx = q.x; payload.qy = q.y; payload.qz = q.z; payload.qw = q.w; }
+        this._sendDevCommand('DROP_TEST', payload);
+        this._showStatus(`DROP sent → U${unit.id}`);
+    }
+
+    /** @private */
+    _toggleUnitPhysics() {
+        const game = this.game;
+        const unit = game.selectedUnit;
+        if (!unit) {
+            this._showStatus('Select a unit first! (double-click)', true);
+            return;
+        }
+        this._sendDevCommand('TOGGLE_UNIT_PHYSICS', { unitId: unit.id });
+        this._showStatus(`Physics toggle sent → U${unit.id}`);
+    }
+
+    /** @private */
     _triggerExplosion() {
         const game = this.game;
         const unit = game.selectedUnit;
@@ -173,32 +273,12 @@ export class PhysicsDebugOverlay {
             this._showStatus('Select a unit first! (double-click)', true);
             return;
         }
-        this._sendDevCommand('TRIGGER_EXPLOSION', { unitId: unit.id, radius: 8, strength: 6 });
+        const p = unit.mesh ? unit.mesh.position : unit.position;
+        const q = unit.mesh ? unit.mesh.quaternion : null;
+        const payload = { unitId: unit.id, radius: 8, strength: 80, px: p.x, py: p.y, pz: p.z };
+        if (q) { payload.qx = q.x; payload.qy = q.y; payload.qz = q.z; payload.qw = q.w; }
+        this._sendDevCommand('TRIGGER_EXPLOSION', payload);
         this._showStatus(`EXPLODE sent → U${unit.id}`);
-    }
-
-    /** @private */
-    _placeMine() {
-        const game = this.game;
-        const unit = game.selectedUnit;
-        if (!unit) {
-            this._showStatus('Select a unit first! (double-click)', true);
-            return;
-        }
-        this._sendDevCommand('PLACE_MINE', { unitId: unit.id });
-        this._showStatus(`MINE placed at U${unit.id}`);
-    }
-
-    /** @private */
-    _spawnRock() {
-        const game = this.game;
-        const unit = game.selectedUnit;
-        if (!unit) {
-            this._showStatus('Select a unit first! (double-click)', true);
-            return;
-        }
-        this._sendDevCommand('SPAWN_ROCK', { unitId: unit.id });
-        this._showStatus(`ROCK spawned near U${unit.id}`);
     }
 
     /**

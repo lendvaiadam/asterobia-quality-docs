@@ -1041,7 +1041,7 @@ export class Unit {
     update(input, dt, pathPlanner = null) {
         // Server-driven DYNAMIC/SETTLED: skip local simulation entirely
         // Position and rotation are set directly by Game.applyDynamicUnitsFromSnapshot()
-        if (this._serverDynamic) {
+        if (this._serverDriven) {
             this.updateDustParticles(dt, false);
             if (this.isSelected || this.selectionIntensity > 0.01) {
                 this.updateSelectionVisuals(dt);
@@ -2584,6 +2584,54 @@ export class Unit {
                   this.dustInstancedMesh.geometry.attributes.aBirthTime.needsUpdate = true;
              }
          }
+    }
+
+    /**
+     * Spawn a burst of dust particles around the unit's current position.
+     * Used for landing impact when returning from DYNAMIC physics mode.
+     * @param {number} [count=8] - Number of particles to spawn
+     */
+    spawnImpactDust(count = 8) {
+        if (!this.dustInstancedMesh || !this.mesh) return;
+        const pos = this.mesh.position;
+        const up = pos.clone().normalize();
+        const dummy = new THREE.Object3D();
+
+        for (let i = 0; i < count; i++) {
+            const angle = (i / count) * Math.PI * 2;
+            // Spread particles in a ring around impact point
+            const offset = new THREE.Vector3(
+                Math.cos(angle) * 0.4,
+                0,
+                Math.sin(angle) * 0.4
+            );
+            // Project offset onto tangent plane
+            offset.addScaledVector(up, -offset.dot(up));
+            const spawnPos = pos.clone().add(offset);
+
+            // Snap to terrain surface
+            if (this.planet?.terrain) {
+                const dir = spawnPos.clone().normalize();
+                const r = this.planet.terrain.getRadiusAt(dir);
+                spawnPos.copy(dir).multiplyScalar(r + 0.05);
+            }
+
+            dummy.position.copy(spawnPos);
+            dummy.quaternion.setFromUnitVectors(
+                new THREE.Vector3(0, 0, 1), up
+            );
+            // visual-only random rotation
+            dummy.rotateZ(Math.random() * Math.PI * 2);
+            dummy.updateMatrix();
+
+            const idx = this.dustCursor || 0;
+            this.dustInstancedMesh.setMatrixAt(idx, dummy.matrix);
+            this.dustInstancedMesh.geometry.attributes.aBirthTime.setX(idx, this.dustTime || 0);
+            this.dustCursor = ((this.dustCursor || 0) + 1) % (this.dustMaxParticles || 32);
+        }
+
+        this.dustInstancedMesh.instanceMatrix.needsUpdate = true;
+        this.dustInstancedMesh.geometry.attributes.aBirthTime.needsUpdate = true;
     }
 
     createDustTexture() {

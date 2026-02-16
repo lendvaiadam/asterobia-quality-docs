@@ -6,6 +6,7 @@ import { Unit } from '../Entities/Unit.js';
 import { DebugPanel } from '../UI/DebugPanel.js';
 import { Input } from './Input.js';
 import { FogOfWar } from '../World/FogOfWar.js';
+import { Atmosphere } from '../World/Atmosphere.js';
 import { TextureDebugger } from '../UI/TextureDebugger.js';
 
 import { CameraDebug } from '../UI/CameraDebug.js';
@@ -37,9 +38,15 @@ import { MultiplayerHUD } from '../UI/MultiplayerHUD.js';
 import { AdaptivePerformance } from './AdaptivePerformance.js';
 import { MirrorTunerOverlay } from '../UI/MirrorTunerOverlay.js';
 import { PhysicsDebugOverlay } from '../UI/PhysicsDebugOverlay.js';
+import { ExplosionEffect } from '../Effects/ExplosionEffect.js';
 
 /** Reusable quaternion for mirror mode slerp (avoids per-frame allocation) */
 const _mirrorSlerpTarget = new THREE.Quaternion();
+
+/** Reusable temps for debug normal lines */
+const _debugTerrainDir = new THREE.Vector3();
+const _debugRadial = new THREE.Vector3();
+// (removed _debugInvQuat — debug lines are now scene children with world-space vertices)
 
 export class Game {
     constructor() {
@@ -505,6 +512,10 @@ export class Game {
         this.scene.add(this.planet.mesh);
         this.scene.add(this.planet.waterMesh);
         this.scene.add(this.planet.starField);
+
+        // Atmosphere (Phase 1: sky dome with Rayleigh + Mie scattering)
+        this.atmosphere = new Atmosphere(this.planet.terrain.params.radius);
+        this.scene.add(this.atmosphere);
 
         // Camera Controls (System 4.0 - Clean Rebuild)
         this.cameraControls = new SphericalCameraController4(this.camera, this.renderer.domElement, this.planet);
@@ -1037,22 +1048,72 @@ export class Game {
         if (!msg.units) return;
         for (const snapUnit of msg.units) {
             const localUnit = this.units.find(u => u && u.id === snapUnit.id);
-            if (!localUnit) continue;
+            if (!localUnit || !localUnit.mesh) continue;
 
-            if (snapUnit.physicsMode === 'DYNAMIC' || snapUnit.physicsMode === 'SETTLED') {
-                // Server-driven: apply position + quaternion directly
-                localUnit._serverDynamic = true;
-                localUnit._serverPhysicsMode = snapUnit.physicsMode;
-                localUnit.position.set(snapUnit.px, snapUnit.py, snapUnit.pz);
-                localUnit.mesh.position.set(snapUnit.px, snapUnit.py, snapUnit.pz);
-                localUnit.mesh.quaternion.set(snapUnit.qx, snapUnit.qy, snapUnit.qz, snapUnit.qw);
-            } else if (localUnit._serverDynamic) {
-                // Unit returned to KINEMATIC on server — release back to local simulation
-                localUnit._serverDynamic = false;
-                localUnit._serverPhysicsMode = null;
-                localUnit.position.set(snapUnit.px, snapUnit.py, snapUnit.pz);
-                localUnit.snapToSurface();
+            const needsServer = snapUnit.physicsMode === 'DYNAMIC' ||
+                                snapUnit.physicsMode === 'SETTLED' ||
+                                (snapUnit.altitude != null && snapUnit.altitude > 0);
+
+            if (needsServer) {
+                // Store lerp target — render loop smoothly interpolates toward it
+                localUnit._serverDrivenTarget = {
+                    px: snapUnit.px, py: snapUnit.py, pz: snapUnit.pz,
+                    qx: snapUnit.qx, qy: snapUnit.qy, qz: snapUnit.qz, qw: snapUnit.qw
+                };
+
+                // Diagnostic: log first 20 server-driven frames for DYNAMIC units
+                if (this._isDevMode && snapUnit.physicsMode === 'DYNAMIC') {
+                    if (!localUnit._dynamicSnapCount) localUnit._dynamicSnapCount = 0;
+                    localUnit._dynamicSnapCount++;
+                    if (localUnit._dynamicSnapCount <= 20) {
+                        const r = Math.sqrt(snapUnit.px * snapUnit.px + snapUnit.py * snapUnit.py + snapUnit.pz * snapUnit.pz);
+                        console.log(`[Game] DYNAMIC snap U${snapUnit.id} #${localUnit._dynamicSnapCount}: r=${r.toFixed(3)} pos=(${snapUnit.px.toFixed(2)},${snapUnit.py.toFixed(2)},${snapUnit.pz.toFixed(2)}) serverDriven=${localUnit._serverDriven}`);
+                    }
+                }
+
+                if (!localUnit._serverDriven) {
+                    // First server-driven snapshot: snap mesh to avoid lerp from wrong position
+                    localUnit.mesh.position.set(snapUnit.px, snapUnit.py, snapUnit.pz);
+                    if (snapUnit.qx !== undefined) {
+                        localUnit.mesh.quaternion.set(snapUnit.qx, snapUnit.qy, snapUnit.qz, snapUnit.qw);
+                    }
+                    localUnit.position.set(snapUnit.px, snapUnit.py, snapUnit.pz);
+                    // Kill old dust particles (no dust during freefall)
+                    if (localUnit.dustInstancedMesh) {
+                        const attr = localUnit.dustInstancedMesh.geometry?.attributes?.aBirthTime;
+                        if (attr) { attr.array.fill(-9999); attr.needsUpdate = true; }
+                    }
+                    localUnit._dynamicSnapCount = 0; // Reset diagnostic counter
+                    // Explosion VFX: entering DYNAMIC from KINEMATIC
+                    if (snapUnit.physicsMode === 'DYNAMIC' && localUnit._serverPhysicsMode !== 'DYNAMIC') {
+                        ExplosionEffect.spawn(localUnit.mesh.position, this.scene);
+                        // Camera shake via existing system
+                        localUnit.cameraShakeIntensity = 2.0;
+                        setTimeout(() => { if (localUnit) localUnit.cameraShakeIntensity = 0; }, 500);
+                    }
+                }
+
+                localUnit._serverDriven = true;
+            } else if (localUnit._serverDriven) {
+                // Transition back to local sim — smooth handoff from current mesh position
+                localUnit._serverDriven = false;
+                localUnit._serverDrivenTarget = null;
+                // Landing detection: was DYNAMIC → now KINEMATIC = impact
+                if (localUnit._serverPhysicsMode === 'DYNAMIC') {
+                    localUnit._landingImpact = true;
+                }
+                // Continuity: set internal position + interp state to current mesh position
+                localUnit.position.copy(localUnit.mesh.position);
+                if (localUnit._interpPrevPos) {
+                    localUnit._interpPrevPos.copy(localUnit.mesh.position);
+                    localUnit._interpCurrPos.copy(localUnit.mesh.position);
+                }
+                if (localUnit._interpPrevQuat) {
+                    localUnit._interpPrevQuat.copy(localUnit.mesh.quaternion);
+                    localUnit._interpCurrQuat.copy(localUnit.mesh.quaternion);
+                }
             }
+            localUnit._serverPhysicsMode = snapUnit.physicsMode || null;
         }
     }
 
@@ -1180,6 +1241,50 @@ export class Game {
 
                 // Scale model if needed
                 unit.mesh.scale.set(0.5, 0.5, 0.5);
+
+                // DEBUG: Log GLB bounding box, show collider sphere + gravity arrow
+                if (this._isDevMode) {
+                    const box = new THREE.Box3().setFromObject(model);
+                    const size = new THREE.Vector3();
+                    box.getSize(size);
+                    console.log(`[GLB] ${modelName} raw size: (${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)}) → scaled: (${(size.x*0.5).toFixed(2)}, ${(size.y*0.5).toFixed(2)}, ${(size.z*0.5).toFixed(2)})`);
+
+                    // Wireframe cuboid showing physics collider (HX=0.3, HY=0.25, HZ=0.5 world)
+                    // Mesh scale is 0.5, so local size = world size / 0.5 = world size * 2
+                    const cuboidGeo = new THREE.BoxGeometry(0.3 * 2 * 2, 0.25 * 2 * 2, 0.5 * 2 * 2);
+                    const cuboidMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true, transparent: true, opacity: 0.3 });
+                    const debugCuboid = new THREE.Mesh(cuboidGeo, cuboidMat);
+                    debugCuboid.name = 'debug-collider-cuboid';
+                    unit.mesh.add(debugCuboid);
+
+                    // LINE 1 (red): Unit's own vertical axis — mesh child, tilts WITH unit
+                    // Length 6 local = 3 world (mesh scale 0.5)
+                    const L1 = new THREE.Line(
+                        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,6,0)]),
+                        new THREE.LineBasicMaterial({ color: 0xff0000 }));
+                    L1.name = 'debug-unit-up';
+                    unit.mesh.add(L1);
+
+                    // LINE 2 (cyan): Terrain surface normal at unit position.
+                    // Scene child — world-space vertices updated per frame.
+                    const L2 = new THREE.Line(
+                        new THREE.BufferGeometry().setAttribute('position',
+                            new THREE.Float32BufferAttribute([0,0,0, 0,3,0], 3)),
+                        new THREE.LineBasicMaterial({ color: 0x00ffff }));
+                    L2.frustumCulled = false;
+                    this.scene.add(L2);
+                    unit._debugTerrainLine = L2;
+
+                    // LINE 3 (yellow): Planet radius direction at unit position.
+                    // Scene child — world-space vertices updated per frame.
+                    const L3 = new THREE.Line(
+                        new THREE.BufferGeometry().setAttribute('position',
+                            new THREE.Float32BufferAttribute([0,0,0, 0,3,0], 3)),
+                        new THREE.LineBasicMaterial({ color: 0xffff00 }));
+                    L3.frustumCulled = false;
+                    this.scene.add(L3);
+                    unit._debugRadialLine = L3;
+                }
 
                 // Unit position: Unit 1 at camera-facing position (preloader center), others random
                 if (index === 0) {
@@ -4057,6 +4162,23 @@ export class Game {
             unit.groundOffset = this.unitParams.groundOffset;
             unit.smoothingRadius = this.unitParams.smoothingRadius;
 
+            // Skip local sim for server-driven units (altitude/DYNAMIC from server)
+            if (unit._serverDriven) {
+                // Still animate selection ring even when server drives position
+                unit.updateSelectionVisuals(fixedDt);
+                // No dust during freefall (isMoving=false keeps particles ticking but doesn't spawn new)
+                unit.updateDustParticles(fixedDt, false);
+                return;
+            }
+
+            // Landing impact: spawn burst of dust when returning from DYNAMIC
+            if (unit._landingImpact) {
+                unit._landingImpact = false;
+                if (typeof unit.spawnImpactDust === 'function') {
+                    unit.spawnImpactDust(10);
+                }
+            }
+
             if (unit === this.selectedUnit) {
                 // M07 GAP-0: Gate keyboard movement by seat authority
                 // If client doesn't have seat, don't pass keyboard input
@@ -4178,6 +4300,65 @@ export class Game {
      *
      * @param {number} alpha - Interpolation factor [0, 1] from SimLoop accumulator
      */
+    /**
+     * Write local-space vertex positions for a debug line (terrain normal).
+     * Line is a mesh child, so start = (0,0,0) local origin,
+     * end = terrain normal direction in local mesh space * 6 (= 3 world at scale 0.5).
+     * @private
+     */
+    /**
+     * Update ALL debug lines for ALL units. Called from animate() every frame.
+     * Reads unit.mesh.position (current visual world pos) and computes:
+     * - Cyan (L2): terrain surface normal at that position
+     * - Yellow (L3): planet radius direction at that position
+     * @private
+     */
+    _updateAllDebugLines() {
+        const terrain = this.planet?.terrain;
+        for (const unit of this.units) {
+            if (!unit || !unit.mesh) continue;
+            const wp = unit.mesh.position;
+            this._updateDebugLine(unit._debugTerrainLine, wp, terrain);
+            this._updateDebugRadialLine(unit._debugRadialLine, wp);
+        }
+    }
+
+    _updateDebugLine(line, wp, terrain) {
+        if (!line || !terrain) return;
+        const n = terrain.getNormalAt(wp);
+        if (!n) return;
+        _debugTerrainDir.set(n.x, n.y, n.z).normalize();
+        // Ensure outward (same hemisphere as radial)
+        if (_debugTerrainDir.dot(_debugRadial.set(wp.x, wp.y, wp.z).normalize()) < 0) _debugTerrainDir.negate();
+        // Move the line object to unit position; geometry stays local (0→dir*3)
+        line.position.set(wp.x, wp.y, wp.z);
+        const arr = line.geometry.attributes.position.array;
+        arr[0] = 0; arr[1] = 0; arr[2] = 0;
+        arr[3] = _debugTerrainDir.x * 3;
+        arr[4] = _debugTerrainDir.y * 3;
+        arr[5] = _debugTerrainDir.z * 3;
+        line.geometry.attributes.position.needsUpdate = true;
+    }
+
+    /**
+     * Write local-space vertex positions for a debug line (radial / planet radius).
+     * Line is a mesh child, so start = (0,0,0) local origin,
+     * end = radial up direction in local mesh space * 6 (= 3 world at scale 0.5).
+     * @private
+     */
+    _updateDebugRadialLine(line, wp) {
+        if (!line) return;
+        _debugRadial.set(wp.x, wp.y, wp.z).normalize();
+        // Move the line object to unit position; geometry stays local (0→dir*3)
+        line.position.set(wp.x, wp.y, wp.z);
+        const arr = line.geometry.attributes.position.array;
+        arr[0] = 0; arr[1] = 0; arr[2] = 0;
+        arr[3] = _debugRadial.x * 3;
+        arr[4] = _debugRadial.y * 3;
+        arr[5] = _debugRadial.z * 3;
+        line.geometry.attributes.position.needsUpdate = true;
+    }
+
     _applyInterpolatedRender(alpha) {
         // Mirror mode: interpolate directly from SnapshotBuffer per render frame.
         // This decouples visual smoothing from the 20Hz sim tick boundary,
@@ -4219,8 +4400,27 @@ export class Game {
                         unit.headingQuaternion.copy(unit.mesh.quaternion);
                     }
                 }
-            } else {
+            } else if (unit._serverDriven && unit._serverDrivenTarget && unit.mesh) {
+                // Smooth lerp toward server physics target (DYNAMIC/SETTLED/altitude)
+                // Higher base speed (0.35) for responsive tracking of physics motion
+                const serverFactor = 1 - Math.pow(1 - 0.35, dtNorm);
+                const t = unit._serverDrivenTarget;
+                unit.mesh.position.x += (t.px - unit.mesh.position.x) * serverFactor;
+                unit.mesh.position.y += (t.py - unit.mesh.position.y) * serverFactor;
+                unit.mesh.position.z += (t.pz - unit.mesh.position.z) * serverFactor;
+                if (t.qw !== undefined) {
+                    _mirrorSlerpTarget.set(t.qx, t.qy, t.qz, t.qw);
+                    unit.mesh.quaternion.slerp(_mirrorSlerpTarget, serverFactor);
+                }
+            } else if (!unit._serverDriven) {
                 unit.applyInterpolatedRender(alpha);
+            }
+
+            // DEBUG: Update local-space vertices for lines 2 (terrain normal) and 3 (radial)
+            if (this._isDevMode && unit.mesh) {
+                const wp = unit.mesh.position;
+                this._updateDebugLine(unit._debugTerrainLine, wp, this.planet?.terrain);
+                this._updateDebugRadialLine(unit._debugRadialLine, wp);
             }
         });
     }
@@ -4293,6 +4493,13 @@ export class Game {
             }
 
             unit._interpInitialized = true;
+
+            // DEBUG: Update local-space vertices for lines 2 and 3
+            if (this._isDevMode && unit.mesh) {
+                const wp = unit.mesh.position;
+                this._updateDebugLine(unit._debugTerrainLine, wp, this.planet?.terrain);
+                this._updateDebugRadialLine(unit._debugRadialLine, wp);
+            }
         }
 
         // Dev-mode diagnostics: log buffer health every 5 seconds
@@ -4724,7 +4931,6 @@ export class Game {
 
         this.cameraControls.update(0.016); // Update State
 
-
         const keys = this.input.getKeys();
 
         // M07: Gate keyboard-triggered camera transitions by seat authority
@@ -4805,6 +5011,11 @@ export class Game {
             this.planet.updateWater(dt, this.units, this.fogOfWar);
         }
 
+        // Update Atmosphere
+        if (this.atmosphere) {
+            this.atmosphere.update(this.camera, this.sunLight.position);
+        }
+
         // Update Planet Uniforms
         if (this.planet.mesh.material.materialShader) {
             this.planet.mesh.material.materialShader.uniforms.uFogTexture.value = this.fogOfWar.exploredTarget.texture;
@@ -4846,6 +5057,13 @@ export class Game {
             // R001: Run fixed-timestep sim ticks, then render
             this.simLoop.step(performance.now());
             this.renderUpdate();
+
+
+            // DEBUG: update cyan/yellow lines at unit positions EVERY frame (guaranteed)
+            if (this._isDevMode) {
+                this._updateAllDebugLines();
+            }
+
             this.renderer.render(this.scene, this.camera);
             this.adaptivePerf.update(performance.now());
         } catch (err) {

@@ -38,10 +38,14 @@ A hálózati csomagoknak támogatniuk kell a hibrid működést. A szerver snaps
 • Position (px, py, pz): Hol van.
 • Orientation (qx, qy, qz, qw): Quaternion formában (így a borulás is átmegy).
 • Mode / State: Jelzőbit: GROUNDED (tapad a talajhoz) vagy AIRBORNE (repül/zuhan/borul). Ez mondja meg a kliensnek, hogy kell-e interpolálnia a terephez, vagy szabadon hagyja a levegőben.
-3.4. Lifecycle (Életciklus)
-A "Double Spawn" hiba elkerülése végett:
+3.4. Lifecycle (Életciklus) és "Lift Before Solid"
+A "Space Launch" (azonnali kirepülés) hiba elkerülése végett, amikor a Collider a terep belsejéből indulna:
 • A kliens soha nem hoz létre (spawn) egységet saját hatáskörben.
-• A szerver a SPAWN_MANIFEST alapján hozza létre az egységeket, és a kliens csak a szerverről érkező SERVER_SNAPSHOT alapján hoz létre vizuális proxy-kat,.
+• **Lift Before Solid:** Amikor egy egység Kinematic (Sensor) módból Dynamic (Solid) módba vált:
+    ◦ A rendszer kiszámolja a biztonságos, ütközésmentes pozíciót (Terrain Radius + Collider Radius + Epsilon).
+    ◦ A testet **még a Solid mód bekapcsolása előtt** erre a pozícióra (kifelé, a sugár mentén) mozgatja.
+    ◦ Csak a pozíció korrekció után vált át DYNAMIC típusra és kapcsolja be a Solid Collidert.
+• Ez biztosítja, hogy a fizika aktiválásakor a test már "tiszta" helyzetben legyen, így nem keletkezik hatalmas "kiszabadító erő" (penetration resolution force).
 4. Események Kezelése (Use Cases)
 Az alábbi esetekben aktiválódik a Rapier fizika:
 1. Ütközés (Collision): Ha két unit vagy egy unit és egy tereptárgy (szikla) ütközik.

@@ -168,13 +168,23 @@ export class Room {
             // If manifest includes a position, use it as spawn direction
             if (mu.px != null && mu.py != null && mu.pz != null) {
                 const dir = { x: mu.px, y: mu.py, z: mu.pz };
+                const ndir = Vec3.normalize(dir);
                 unit.spawnOnSurface(dir, this.terrain);
+                const up = Vec3.normalize(unit.position);
+                console.log(`[Room] U${mu.id} spawn: dir=(${ndir.x.toFixed(3)},${ndir.y.toFixed(3)},${ndir.z.toFixed(3)}) up=(${up.x.toFixed(3)},${up.y.toFixed(3)},${up.z.toFixed(3)}) q=(${unit.orientation.x.toFixed(3)},${unit.orientation.y.toFixed(3)},${unit.orientation.z.toFixed(3)},${unit.orientation.w.toFixed(3)})`);
             } else {
                 // Fallback: equatorial distribution
                 const idx = this.units.length;
                 const angle = idx * (Math.PI * 2 / this.maxPlayers);
                 const dir = { x: Math.sin(angle), y: 0, z: Math.cos(angle) };
                 unit.spawnOnSurface(dir, this.terrain);
+            }
+
+            // LAZY_PHYSICS_GATING: float 10m above terrain to avoid spawn-inside-terrain ejection.
+            // Units float via altitude math; DROP test triggers DYNAMIC fall.
+            if (this._enablePhysics) {
+                unit.altitude = 10.0;
+                unit._reprojectToTerrain();
             }
 
             this.units.push(unit);
@@ -214,12 +224,7 @@ export class Room {
             this.physicsEvents = new PhysicsEventService(this._physicsOptions.events);
             this.collisions = new CollisionService(this._physicsOptions.collisions);
 
-            // Attach rigid bodies to units created before physics init (SPAWN_MANIFEST flow)
-            for (const unit of this.units) {
-                if (!unit.rigidBody) {
-                    this._attachRigidBody(unit);
-                }
-            }
+            // LAZY: no rigid bodies at spawn. Rapier is per-unit, toggled from debug panel.
         }
 
         this.state = 'RUNNING';
@@ -325,16 +330,11 @@ export class Room {
                 }
             }
 
-            // Pre-step: check slope triggers (may transition units to DYNAMIC)
-            // DISABLED for HU-test: auto-triggers cause chaos at spawn.
-            // TODO: Re-enable when spawn spacing and slope debounce are tuned.
-            // this._checkSlopeTriggers();
+            this._checkRolloverTriggers();
 
             // Pre-step: kinematic proximity collisions (unit↔unit, unit↔obstacle)
-            // Only check obstacle and mine contacts (CMD_ADMIN spawned).
-            // Unit↔unit auto-collision disabled for same reason as slope triggers.
             if (this.collisions) {
-                // this.collisions.checkKinematicCollisions(this.units, this.physics);
+                this.collisions.checkKinematicCollisions(this.units, this.physics);
                 this.collisions.checkObstacleCollisions(this.units, this._obstacles, this.physics);
                 this.collisions.checkMineContacts(this.units, this.physics, this.physicsEvents);
             }
@@ -349,13 +349,61 @@ export class Room {
             // Post-step: handle collision events (may transition units to DYNAMIC)
             this._handleCollisionEvents();
 
-            // Post-step: sync DYNAMIC unit positions FROM their rigid bodies + settle check
+            // Post-step: sync DYNAMIC positions FROM Rapier, update takeover gate + blend.
             for (const unit of this.units) {
-                if (unit.physicsMode === 'DYNAMIC') {
-                    const settled = unit.syncFromRigidBody();
-                    if (settled) {
-                        unit.settleDynamic(this.physics);
+                if (unit.physicsMode !== 'DYNAMIC') continue;
+
+                // If blending down, user is taking over — skip Rapier sync, update blend
+                if (unit._blendDirection === 'BLEND_DOWN') {
+                    unit.updateBlend(dtSec, this.physics);
+                    continue;
+                }
+
+                const velocitySettled = unit.syncFromRigidBody();
+
+                // Diagnostic: log DYNAMIC unit position for first 20 ticks
+                if (unit._dynamicTickCounter == null) unit._dynamicTickCounter = 0;
+                unit._dynamicTickCounter++;
+                if (unit._dynamicTickCounter <= 20) {
+                    const vel = unit.rigidBody ? unit.rigidBody.linvel() : { x: 0, y: 0, z: 0 };
+                    const r = Vec3.length(unit.position);
+                    const dir = Vec3.normalize(unit.position);
+                    const terrainR = this.terrain ? this.terrain.getRadiusAt(dir) : 0;
+                    console.log(`[Room] DYNAMIC U${unit.id} tick#${unit._dynamicTickCounter}: r=${r.toFixed(3)} terrainR=${terrainR.toFixed(3)} alt=${(r - terrainR).toFixed(3)} vel=(${vel.x.toFixed(2)},${vel.y.toFixed(2)},${vel.z.toFixed(2)}) settled=${velocitySettled}`);
+                }
+
+                unit.isTakeoverReady(); // updates _takeoverReadyCounter each tick
+
+                // Natural settle: upright + slow → exit immediately
+                if (unit.isUprightAndSlow()) {
+                    unit.exitDynamic(this.physics);
+                    continue;
+                }
+
+                // Fallback settle: velocity below threshold for SETTLE_TICK_COUNT OR Rapier sleep
+                if (velocitySettled) {
+                    unit.exitDynamic(this.physics);
+                }
+            }
+        }
+
+        // 3c. SAFETY: detect units clipped inside planet and teleport back
+        if (this.terrain) {
+            for (const unit of this.units) {
+                if (unit.physicsMode !== 'DYNAMIC') continue;
+                const r = Vec3.length(unit.position);
+                const dir = Vec3.normalize(unit.position);
+                const terrainR = this.terrain.getRadiusAt(dir);
+                if (r < terrainR) {
+                    // Unit is INSIDE the planet — emergency teleport above terrain
+                    const safeR = terrainR + HeadlessUnit.CUBOID_HY + 0.5;
+                    unit.position = Vec3.scale(dir, safeR);
+                    if (unit.rigidBody) {
+                        unit.rigidBody.setTranslation(unit.position, true);
+                        unit.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+                        unit.rigidBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
                     }
+                    console.log(`[Room] SAFETY U${unit.id}: inside planet r=${r.toFixed(1)} < terrainR=${terrainR.toFixed(1)}, teleported to ${safeR.toFixed(1)}`);
                 }
             }
         }
@@ -450,19 +498,121 @@ export class Room {
      * @param {number} [strength=6] - Impulse strength
      * @returns {import('./PhysicsEventService.js').ImpulseResult[]|null} Results, or null if unit not found
      */
-    _devTriggerExplosion(unitId, radius = 8, strength = 6) {
+    /**
+     * Toggle physics on a unit (KINEMATIC → DYNAMIC or DYNAMIC → KINEMATIC).
+     * Used by PHY ON/OFF button in PhysicsDebugOverlay.
+     * @param {number} unitId
+     */
+    toggleUnitPhysics(unitId) {
         const unit = this.units.find(u => u && u.id === unitId);
-        if (!unit) return null;
-        if (!this.physics) return null;
+        if (!unit) return;
+        if (!this.physics) {
+            console.log(`[Room] toggleUnitPhysics: physics not initialized`);
+            return;
+        }
+        if (unit.physicsMode === 'DYNAMIC') {
+            unit.exitDynamic(this.physics);
+            console.log(`[Room] U${unitId}: DYNAMIC → KINEMATIC`);
+        } else {
+            // Reset altitude so unit falls to ground (not back to spawn height)
+            unit.altitude = 0;
+            unit.enterDynamic(this.physics);
+            console.log(`[Room] U${unitId}: KINEMATIC → DYNAMIC (drop)`);
+        }
+    }
 
-        // Direct upward impulse on target unit (radial blast skips zero-distance)
+    /**
+     * DROP TEST: lift unit 10m above terrain, then let kinematic gravity bring it back.
+     * No Rapier — uses existing AIRBORNE mode (altitude + verticalVelocity).
+     * @param {number} unitId
+     */
+    _devDropTest(unitId, clientPos) {
+        const unit = this.units.find(u => u && u.id === unitId);
+        if (!unit) { console.log(`[Room] DROP_TEST: unit ${unitId} not found`); return; }
+        if (!this.terrain) { console.log(`[Room] DROP_TEST: no terrain`); return; }
+        // Sync server unit to HOST client's current position
+        this._syncClientPos(unit, clientPos);
+
+        // Set altitude and let kinematic gravity handle the fall
+        unit.altitude = 10.0;
+        unit.verticalVelocity = 0;
+        unit.mode = 'AIRBORNE';
+        unit.speed = 0;
+        unit.velocity = { x: 0, y: 0, z: 0 };
+        unit._reprojectToTerrain();
+        unit._updateOrientation();
+        console.log(`[Room] DROP_TEST U${unitId}: altitude=${unit.altitude}m, mode=AIRBORNE (kinematic gravity)`);
+    }
+
+    /** Set unit altitude above terrain (debug slider). Accepts client pos to sync. */
+    _devSetAltitude(unitId, altitude, clientPos) {
+        const unit = this.units.find(u => u && u.id === unitId);
+        if (!unit) return;
+        // Sync server position to client's current position (HOST doesn't send MOVE_INPUT)
+        if (clientPos && isFinite(clientPos.px) && isFinite(clientPos.py) && isFinite(clientPos.pz)) {
+            unit.position = { x: clientPos.px, y: clientPos.py, z: clientPos.pz };
+        }
+        unit.altitude = Math.max(0, Math.min(50, altitude));
+        unit._reprojectToTerrain();
+        unit._updateOrientation();
+    }
+
+    /** Toggle Rapier on/off for a single unit. */
+    _devToggleRapier(unitId, enable, clientPos) {
+        const unit = this.units.find(u => u && u.id === unitId);
+        if (!unit || !this.physics) return;
+
+        if (enable && !unit.rigidBody) {
+            // Sync server unit to HOST client's current position/orientation
+            this._syncClientPos(unit, clientPos);
+            // ON: create body at current position, enter DYNAMIC (gravity drop)
+            this._attachRigidBody(unit);
+            unit.enterDynamic(this.physics);
+            console.log(`[Room] RAPIER ON U${unitId} pos=(${unit.position.x.toFixed(2)},${unit.position.y.toFixed(2)},${unit.position.z.toFixed(2)})`);
+        } else if (!enable && unit.rigidBody) {
+            // OFF: exit dynamic, remove body completely
+            if (unit.physicsMode === 'DYNAMIC' || unit.physicsMode === 'SETTLED') {
+                unit.exitDynamic(this.physics);
+            }
+            this._bodyToUnit.delete(unit.rigidBody.handle);
+            this.physics.removeBody(unit.rigidBody);
+            unit.rigidBody = null;
+            console.log(`[Room] RAPIER OFF U${unitId}`);
+        }
+    }
+
+    _devTriggerExplosion(unitId, radius = 8, strength = 80, clientPos) {
+        const unit = this.units.find(u => u && u.id === unitId);
+        if (!unit) {
+            console.log(`[Room] EXPLODE: unit ${unitId} not found. Available: [${this.units.map(u => u?.id).join(',')}]`);
+            return null;
+        }
+        if (!this.physics) {
+            console.log(`[Room] EXPLODE: physics not initialized`);
+            return null;
+        }
+        // Sync server unit to HOST client's current position
+        this._syncClientPos(unit, clientPos);
+
+        // Explosion direction: radial "up" (away from planet center).
         const up = Vec3.normalize(unit.position);
         const impulse = Vec3.scale(up, strength);
+
+        console.log(`[Room] EXPLODE U${unitId}: up=(${up.x.toFixed(3)},${up.y.toFixed(3)},${up.z.toFixed(3)}) strength=${strength}`);
+
         unit.enterDynamic(this.physics, impulse);
 
-        // Also blast nearby units (other units within radius)
-        const results = this.triggerExplosion(unit.position, radius, strength);
-        return results;
+        // Apply random torque impulse for spin effect
+        if (unit.rigidBody) {
+            const torqueMag = 3.0;
+            unit.rigidBody.applyTorqueImpulse({
+                x: (Math.random() - 0.5) * torqueMag,
+                y: (Math.random() - 0.5) * torqueMag,
+                z: (Math.random() - 0.5) * torqueMag
+            }, true);
+        }
+
+        return { unitId, impulse };
     }
 
     /**
@@ -489,9 +639,32 @@ export class Room {
     }
 
     /**
+     * Sync a HeadlessUnit to the HOST client's current world position (and optionally orientation).
+     * HOST drives units locally without MOVE_INPUT, so the server unit stays at spawn.
+     * Dev commands must call this before acting on unit position.
+     *
+     * @param {HeadlessUnit} unit
+     * @param {Object} [clientPos] - { px, py, pz, qx?, qy?, qz?, qw? }
+     * @private
+     */
+    _syncClientPos(unit, clientPos) {
+        if (!clientPos) return;
+        if (isFinite(clientPos.px) && isFinite(clientPos.py) && isFinite(clientPos.pz)) {
+            unit.position = { x: clientPos.px, y: clientPos.py, z: clientPos.pz };
+        }
+        if (isFinite(clientPos.qx) && isFinite(clientPos.qy) && isFinite(clientPos.qz) && isFinite(clientPos.qw)) {
+            unit.orientation = { x: clientPos.qx, y: clientPos.qy, z: clientPos.qz, w: clientPos.qw };
+        }
+        // Ensure terrain colliders exist around the synced position
+        if (this.terrainColliders) {
+            this.terrainColliders.ensurePatchesAround(unit.position);
+        }
+    }
+
+    /**
      * Attach a Rapier rigid body to a unit (kinematic by default).
      * No-op if physics is not enabled. Body starts at unit's current position.
-     * Ball collider added for collision detection with terrain and other units.
+     * Cuboid collider sized to HeadlessUnit half-extents for stable terrain contact.
      *
      * @param {HeadlessUnit} unit
      * @private
@@ -500,9 +673,21 @@ export class Room {
         if (!this.physics) return;
 
         const body = this.physics.createKinematicBody(unit.position);
-        // Sensor: detects collisions for events but does NOT physically block movement.
-        // Without sensor, terrain trimesh collider fights with kinematic position sync.
-        this.physics.addBallCollider(body, 0.5, { activeEvents: true, sensor: true });
+        // Cuboid collider: stable flat contact with terrain trimesh (unlike ball).
+        // Sensor in KINEMATIC mode: no physical blocking, only event detection.
+        // enterDynamic() switches to non-sensor for Rapier physics.
+        this.physics.addCuboidCollider(body,
+            HeadlessUnit.CUBOID_HX,
+            HeadlessUnit.CUBOID_HY,
+            HeadlessUnit.CUBOID_HZ,
+            {
+                activeEvents: true,
+                sensor: true,
+                density: 5.0,        // ~10kg for a small vehicle
+                friction: 0.6,       // moderate grip on terrain
+                restitution: 0.15    // low bounce — doesn't ping-pong
+            }
+        );
         unit.rigidBody = body;
         this._bodyToUnit.set(body.handle, unit);
     }
@@ -538,16 +723,30 @@ export class Room {
     }
 
     /**
+     * Set rollover threshold (degrees) for all units in this room.
+     * @param {number} degrees - Angle in degrees (5-90)
+     */
+    setRolloverThreshold(degrees) {
+        HeadlessUnit.ROLLOVER_THRESHOLD_RAD = (degrees * Math.PI) / 180;
+    }
+
+    /**
      * Check slope triggers for all KINEMATIC units. If slope exceeds threshold
      * for enough consecutive ticks, transition to DYNAMIC with down-slope impulse.
      *
      * @private
      */
-    _checkSlopeTriggers() {
+    /**
+     * Check rollover for each KINEMATIC unit. If the unit's vertical axis
+     * deviates too far from the planet's radial "up", switch to DYNAMIC
+     * with no impulse — gravity naturally topples the unit.
+     * @private
+     */
+    _checkRolloverTriggers() {
         for (const unit of this.units) {
-            const impulse = unit.checkSlopeTrigger();
-            if (impulse) {
-                unit.enterDynamic(this.physics, impulse);
+            if (unit.checkRolloverTrigger()) {
+                console.log(`[Room] ROLLOVER U${unit.id}: entering DYNAMIC (slope trigger)`);
+                unit.enterDynamic(this.physics);
             }
         }
     }

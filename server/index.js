@@ -106,7 +106,11 @@ httpServer.listen(PORT, () => {
 
 // ── Phase 2A: wire authoritative GameServer ────────────────────
 if (PHASE2A) {
-    const gameServer = new GameServer({ tickRate: 20, enablePhysics: ENABLE_PHYSICS });
+    const gameServer = new GameServer({
+        tickRate: 20,
+        enablePhysics: ENABLE_PHYSICS,
+        physicsOptions: ENABLE_PHYSICS ? {} : {}  // gravity defaults to 9.81 in PhysicsWorld
+    });
     gameServer.wireToRelay(relay);
     gameServer.start();
     if (ENABLE_PHYSICS) {

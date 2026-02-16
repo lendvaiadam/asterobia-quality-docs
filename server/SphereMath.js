@@ -212,5 +212,38 @@ export const Quat = {
         }
 
         return Quat.normalize({ x: qx, y: qy, z: qz, w: qw });
+    },
+
+    /**
+     * Spherical linear interpolation between two quaternions.
+     * @param {{ x:number, y:number, z:number, w:number }} a
+     * @param {{ x:number, y:number, z:number, w:number }} b
+     * @param {number} t - Interpolation factor [0, 1]
+     * @returns {{ x:number, y:number, z:number, w:number }}
+     */
+    slerp(a, b, t) {
+        let dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+        // Ensure shortest path
+        let bx = b.x, by = b.y, bz = b.z, bw = b.w;
+        if (dot < 0) { dot = -dot; bx = -bx; by = -by; bz = -bz; bw = -bw; }
+        if (dot > 0.9995) {
+            // Very close — linear interpolation to avoid div by zero
+            return Quat.normalize({
+                x: a.x + (bx - a.x) * t,
+                y: a.y + (by - a.y) * t,
+                z: a.z + (bz - a.z) * t,
+                w: a.w + (bw - a.w) * t
+            });
+        }
+        const theta = Math.acos(dot);
+        const sinTheta = Math.sin(theta);
+        const wa = Math.sin((1 - t) * theta) / sinTheta;
+        const wb = Math.sin(t * theta) / sinTheta;
+        return {
+            x: a.x * wa + bx * wb,
+            y: a.y * wa + by * wb,
+            z: a.z * wa + bz * wb,
+            w: a.w * wa + bw * wb
+        };
     }
 };

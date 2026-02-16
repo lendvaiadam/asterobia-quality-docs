@@ -26,7 +26,7 @@ const DEFAULT_PATCH_SIZE = 20;
 const DEFAULT_GRID_STEP = 1.0;
 
 /** @type {number} Maximum number of active patches (hard cap) */
-const DEFAULT_MAX_PATCHES = 16;
+const DEFAULT_MAX_PATCHES = 64;
 
 export class TerrainColliderManager {
     /**
@@ -266,15 +266,15 @@ export class TerrainColliderManager {
                 const i01 = i00 + gridW;
                 const i11 = i01 + 1;
 
-                // Triangle 1: i00, i01, i10
+                // Triangle 1: i00, i10, i01 — outward normals (away from planet center)
                 indices[triIdx++] = i00;
-                indices[triIdx++] = i01;
                 indices[triIdx++] = i10;
+                indices[triIdx++] = i01;
 
-                // Triangle 2: i10, i01, i11
+                // Triangle 2: i10, i11, i01 — outward normals (away from planet center)
                 indices[triIdx++] = i10;
-                indices[triIdx++] = i01;
                 indices[triIdx++] = i11;
+                indices[triIdx++] = i01;
             }
         }
 

@@ -63,6 +63,9 @@ export class GameServer {
 
         /** @type {boolean} Pass enablePhysics to new rooms */
         this._enablePhysics = !!options.enablePhysics;
+
+        /** @type {Object} Physics options (gravity, subSteps, etc.) passed to rooms */
+        this._physicsOptions = options.physicsOptions || {};
     }
 
     /**
@@ -79,7 +82,7 @@ export class GameServer {
         }
 
         const tickMs = Math.round(1000 / this.tickRate);
-        const room = new Room(roomId, { tickMs, enablePhysics: this._enablePhysics, ...options });
+        const room = new Room(roomId, { tickMs, enablePhysics: this._enablePhysics, physicsOptions: this._physicsOptions, ...options });
         this.rooms.set(roomId, room);
         return room;
     }
@@ -483,9 +486,16 @@ export class GameServer {
      * @returns {boolean}
      */
     _assertDevAllowed(client) {
-        if (!this._enablePhysics) return false;
+        if (!this._enablePhysics) {
+            console.log(`[GameServer] CMD_ADMIN rejected: enablePhysics=${this._enablePhysics}`);
+            return false;
+        }
         const auth = this._clientSlots.get(client.id);
-        return auth && auth.slot === 0;
+        if (!auth || auth.slot !== 0) {
+            console.log(`[GameServer] CMD_ADMIN rejected: client=${client.id} auth=${!!auth} slot=${auth?.slot}`);
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -494,20 +504,22 @@ export class GameServer {
      * @private
      */
     _onAdminCommand(channelName, payload, client) {
+        console.log(`[GameServer] CMD_ADMIN received: action=${payload.action} unitId=${payload.unitId} client=${client.id} channel=${channelName}`);
         if (!this._assertDevAllowed(client)) return;
         const roomId = this._extractRoomId(channelName);
-        if (!roomId) return;
+        if (!roomId) { console.log(`[GameServer] CMD_ADMIN: no roomId from channel "${channelName}"`); return; }
         const room = this.rooms.get(roomId);
-        if (!room || room.state !== 'RUNNING') return;
+        if (!room) { console.log(`[GameServer] CMD_ADMIN: room "${roomId}" not found. rooms: [${[...this.rooms.keys()]}]`); return; }
+        if (room.state !== 'RUNNING') { console.log(`[GameServer] CMD_ADMIN: room "${roomId}" state=${room.state}`); return; }
 
         try {
             switch (payload.action) {
                 case 'TRIGGER_EXPLOSION': {
-                    const unitId = payload.unitId;
-                    if (typeof unitId !== 'number') return;
+                    const unitId = typeof payload.unitId === 'string' ? parseInt(payload.unitId, 10) : payload.unitId;
+                    if (typeof unitId !== 'number' || isNaN(unitId)) { console.log(`[GameServer] TRIGGER_EXPLOSION: invalid unitId=${payload.unitId} (${typeof payload.unitId})`); return; }
                     const radius = typeof payload.radius === 'number' && isFinite(payload.radius) ? payload.radius : 8;
                     const strength = typeof payload.strength === 'number' && isFinite(payload.strength) ? payload.strength : 6;
-                    room._devTriggerExplosion(unitId, radius, strength);
+                    room._devTriggerExplosion(unitId, radius, strength, payload);
                     break;
                 }
                 case 'PLACE_MINE': {
@@ -515,6 +527,7 @@ export class GameServer {
                     if (typeof unitId !== 'number') return;
                     const unit = room.units.find(u => u && u.id === unitId);
                     if (!unit) return;
+                    room._syncClientPos(unit, payload);
                     room.addMine({ x: unit.position.x, y: unit.position.y, z: unit.position.z });
                     break;
                 }
@@ -523,6 +536,7 @@ export class GameServer {
                     if (typeof unitId !== 'number') return;
                     const unit = room.units.find(u => u && u.id === unitId);
                     if (!unit) return;
+                    room._syncClientPos(unit, payload);
                     const heading = unit.heading || 0;
                     const offset = 2.0;
                     const pos = {
@@ -531,6 +545,39 @@ export class GameServer {
                         z: unit.position.z + Math.cos(heading) * offset
                     };
                     room.addObstacle(pos, 0.8);
+                    break;
+                }
+                case 'TOGGLE_UNIT_PHYSICS': {
+                    const unitId = payload.unitId;
+                    if (typeof unitId !== 'number') return;
+                    room.toggleUnitPhysics(unitId);
+                    break;
+                }
+                case 'DROP_TEST': {
+                    const unitId = payload.unitId;
+                    if (typeof unitId !== 'number') return;
+                    room._devDropTest(unitId, payload);
+                    break;
+                }
+                case 'SET_ALTITUDE': {
+                    const unitId = payload.unitId;
+                    if (typeof unitId !== 'number') return;
+                    const alt = typeof payload.altitude === 'number' ? payload.altitude : 0;
+                    room._devSetAltitude(unitId, alt, payload);
+                    break;
+                }
+                case 'TOGGLE_RAPIER': {
+                    const unitId = payload.unitId;
+                    if (typeof unitId !== 'number') return;
+                    room._devToggleRapier(unitId, !!payload.enable, payload);
+                    break;
+                }
+                case 'SET_ROLLOVER_THRESHOLD': {
+                    const degrees = payload.degrees;
+                    if (typeof degrees !== 'number' || !isFinite(degrees)) return;
+                    const clamped = Math.max(5, Math.min(90, degrees));
+                    room.setRolloverThreshold(clamped);
+                    console.log(`[GameServer] Rollover threshold set to ${clamped}°`);
                     break;
                 }
                 default:

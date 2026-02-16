@@ -15,6 +15,14 @@
  * @module server/PhysicsWorld
  */
 
+/**
+ * Time-scale factor for DYNAMIC physics.
+ * 0.25 = 4× slow-motion (cinematic drop/explode).
+ * Applied only when step() receives a real dtSec from the server tick.
+ * @type {number}
+ */
+export const PHYSICS_TIME_SCALE = 0.125;
+
 /** @type {import('@dimforge/rapier3d-compat') | null} Cached RAPIER module */
 let _RAPIER = null;
 
@@ -63,9 +71,10 @@ export class PhysicsWorld {
      * Async factory — creates and initializes a PhysicsWorld.
      *
      * @param {Object} [options]
-     * @param {number} [options.subSteps=3] - Physics sub-steps per step() call
+     * @param {number} [options.subSteps=8] - Physics sub-steps per step() call
      * @param {number} [options.physicsHz=60] - Internal physics rate in Hz
      * @param {number} [options.gravity=9.81] - Spherical gravity magnitude (m/s²)
+     * @param {number} [options.timeScale=PHYSICS_TIME_SCALE] - Time-scale for dynamic physics
      * @returns {Promise<PhysicsWorld>}
      */
     static async create(options = {}) {
@@ -76,19 +85,23 @@ export class PhysicsWorld {
     /**
      * @param {import('@dimforge/rapier3d-compat')} RAPIER - Initialized module
      * @param {Object} [options]
-     * @param {number} [options.subSteps=3]
+     * @param {number} [options.subSteps=8]
      * @param {number} [options.physicsHz=60]
      * @param {number} [options.gravity=9.81]
+     * @param {number} [options.timeScale=PHYSICS_TIME_SCALE]
      */
     constructor(RAPIER, options = {}) {
         /** @type {import('@dimforge/rapier3d-compat')} */
         this._RAPIER = RAPIER;
 
         /** @type {number} Sub-steps per step() */
-        this.subSteps = options.subSteps ?? 3;
+        this.subSteps = options.subSteps ?? 8;
 
         /** @type {number} Internal physics rate */
         this.physicsHz = options.physicsHz ?? 60;
+
+        /** @type {number} Time-scale factor (0.25 = 4× slow-motion) */
+        this.timeScale = options.timeScale ?? PHYSICS_TIME_SCALE;
 
         /** @type {number} Spherical gravity acceleration (m/s²) */
         this.gravityMagnitude = options.gravity ?? 9.81;
@@ -140,17 +153,28 @@ export class PhysicsWorld {
     /**
      * Step the physics world with sub-stepping and spherical gravity.
      *
-     * Sub-stepping divides each server tick into multiple physics steps
-     * for better stability (e.g., 20Hz server → 3 sub-steps → 60Hz physics).
+     * When dtSec is provided (server tick path), each sub-step uses:
+     *   dtPerSubstep = (dtSec * timeScale) / subSteps
+     * This gives time-scaled, smooth physics (e.g., 0.25 = 4× slow-motion).
+     *
+     * When dtSec is omitted (test path), falls back to the fixed timestep
+     * (1/physicsHz) with NO time-scaling, preserving backward compatibility.
      *
      * Spherical gravity is applied per dynamic body per sub-step:
      * force = -normalize(position) * gravity * mass
      *
-     * @param {number} [_dtSec] - Ignored (fixed timestep is authoritative).
-     *   Accepted for API compatibility with Room tick signature.
+     * @param {number} [dtSec] - Server tick delta in seconds.
+     *   When provided, time-scale is applied. When omitted, uses fixed 1/physicsHz.
      */
-    step(_dtSec) {
+    step(dtSec) {
         this._assertAlive();
+
+        // Server path: scale real dt. Test path: use fixed timestep unchanged.
+        if (typeof dtSec === 'number') {
+            this._world.timestep = (dtSec * this.timeScale) / this.subSteps;
+        } else {
+            this._world.timestep = 1 / this.physicsHz;
+        }
 
         for (let i = 0; i < this.subSteps; i++) {
             this._applySphericalGravity();
@@ -229,6 +253,42 @@ export class PhysicsWorld {
         }
         if (options.sensor) {
             desc.setSensor(true);
+        }
+        return this._world.createCollider(desc, body);
+    }
+
+    /**
+     * Add a cuboid (box) collider to a rigid body.
+     *
+     * @param {import('@dimforge/rapier3d-compat').RigidBody} body
+     * @param {number} hx - Half-extent X
+     * @param {number} hy - Half-extent Y (vertical)
+     * @param {number} hz - Half-extent Z
+     * @param {Object} [options]
+     * @param {boolean} [options.activeEvents=false] - Enable collision events
+     * @param {boolean} [options.sensor=false] - Sensor mode (no physical response)
+     * @param {number} [options.density] - Density (overrides default mass calculation)
+     * @param {number} [options.friction] - Friction coefficient
+     * @param {number} [options.restitution] - Bounciness (0=no bounce, 1=full bounce)
+     * @returns {import('@dimforge/rapier3d-compat').Collider}
+     */
+    addCuboidCollider(body, hx, hy, hz, options = {}) {
+        this._assertAlive();
+        const desc = this._RAPIER.ColliderDesc.cuboid(hx, hy, hz);
+        if (options.activeEvents) {
+            desc.setActiveEvents(this._RAPIER.ActiveEvents.COLLISION_EVENTS);
+        }
+        if (options.sensor) {
+            desc.setSensor(true);
+        }
+        if (typeof options.density === 'number') {
+            desc.setDensity(options.density);
+        }
+        if (typeof options.friction === 'number') {
+            desc.setFriction(options.friction);
+        }
+        if (typeof options.restitution === 'number') {
+            desc.setRestitution(options.restitution);
         }
         return this._world.createCollider(desc, body);
     }

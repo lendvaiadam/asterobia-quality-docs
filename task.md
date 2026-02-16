@@ -26,38 +26,25 @@
 
 ---
 
-## Phase 3: Slice 2 (Execution & Hardening) (IN PROGRESS)
-**Goal**: Deterministic execution, strict networking, FOW.
+## Phase 3: Physics & Deformation (IN PROGRESS)
+**Goal**: Hybrid kinematic/dynamic movement, spherical gravity, destruction.
 
-### 3.1 Network Hardening
-- [ ] **Strict Gap Policy**:
-    - [ ] Detect missing `batchSeq`
-    - [ ] Stall simulation
-    - [ ] Send `RESEND_REQ`
-    - [ ] Resume on fill
-- [ ] **Active StateHash**:
-    - [ ] Host sends hash in `CMD_BATCH`
-    - [ ] Guest compares -> Trigger RESYNC on mismatch
+### 3.1 Physics Foundation (COMPLETE)
+- [x] **Rapier Integration**: `PhysicsWorld.js` (WASM, Fixed Timestep)
+- [x] **Gravity Audit**: Confirmed custom spherical force method (Zero Global Gravity)
+- [x] **Terrain Colliders**: `TerrainColliderManager.js` (Dynamic patching)
+- [x] **Hybrid Unit**: `HeadlessUnit.js` (Kinematic <-> Dynamic transitions)
+- [x] **Tooling**: `CMD_ADMIN` debug commands (Explosion, Mine, Rock)
+- [ ] **Lift Before Solid Fix**: Implement "Option 1" (lift unit before enabling physics) to prevent spawn ejection
 
-### 3.2 Feature Updates
-- [ ] **FOW Per-User**:
-    - [ ] Refactor `FogOfWar.js` for per-slot tracking
-    - [ ] Update shader to mix distinct vision sources
-- [ ] **Movement Interpolation**:
-    - [ ] Smooth visual updates for remote units (between ticks)
+### 3.2 Physics Visualization (IN PROGRESS)
+- [x] **Visual Sync (Core)**: `HeadlessUnit.js` rotation sync + `Game.js` dynamic application
+- [ ] **Visual Sync (Debris)**: Client-side visual debris for explosions
+- [ ] **Host Loop**: Enable physics interpolation on Host client
+- [ ] **Debris**: Client-side visual debris for explosions
+- [ ] **Atmosphere**: Physically based scattering (Hillaire/O'Neil) for ground/space transitions
 
-### 3.3 Bug Fixes (From Briefing)
-- [ ] **A1**: `startDiscovery()` UI missing
-- [ ] **A3**: Join timeout race condition
-- [ ] **C1**: Relative waypoints (verify fix)
-- [ ] **C2**: Unit visual distinction (Owner Tinting/Glow)
-- [ ] **D3**: Pathfinding through unknown obstacles
-- [ ] **D4**: Waypoint dots visibility
-- [ ] **G1**: Dust particle memory leak
-
----
-
-## Phase 4: Verification & Testing
+## Phase 4: Slice 2 (Execution & Hardening) (PENDING)
 - [ ] **Dual-Client Test**: Manual verification of movement/state sync
 - [ ] **Latency Test**: Verify stall/predition under lag
 - [ ] **Stress Test**: 4 players (simulated if needed)

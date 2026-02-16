@@ -33,10 +33,11 @@ export class AdaptivePerformance {
 
         // Quality presets (each parameter has 4 levels: min/low/med/high)
         this._presets = {
-            resolutionScale:   [0.4,  0.5,  0.7,  Math.min(window.devicePixelRatio, 2.0)],
-            dustMaxParticles:  [5,    15,   25,   50],
-            shadowMapSize:     [512,  1024, 2048, 4096],
-            fowRes:            [128,  256,  512,  2048],
+            resolutionScale:    [0.4,  0.5,  0.7,  Math.min(window.devicePixelRatio, 2.0)],
+            dustMaxParticles:   [5,    15,   25,   50],
+            shadowMapSize:      [512,  1024, 2048, 4096],
+            fowRes:             [128,  256,  512,  2048],
+            atmosphereEnabled:  [false, true, true, true],
         };
     }
 
@@ -172,6 +173,11 @@ export class AdaptivePerformance {
         // 4. FOW resolution (expensive to change - only on emergency)
         if (level <= 1 && game.fogOfWar && game.fogOfWar.setResolution) {
             game.fogOfWar.setResolution(this._presets.fowRes[level]);
+        }
+
+        // 5. Atmosphere visibility
+        if (game.atmosphere) {
+            game.atmosphere.visible = this._presets.atmosphereEnabled[level];
         }
     }
 
